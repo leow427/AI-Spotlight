@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct AppShellView: View {
+  @ObservedObject var glassAppearance: GlassAppearanceSettings
   @State private var draft = ""
 
   private let recentChats = [
@@ -13,9 +14,17 @@ struct AppShellView: View {
 
   var body: some View {
     NavigationSplitView {
-      List(recentChats, id: \.self) { title in
-        Label(title, systemImage: "message")
-          .lineLimit(1)
+      VStack(spacing: 0) {
+        List(recentChats, id: \.self) { title in
+          Label(title, systemImage: "message")
+            .lineLimit(1)
+        }
+        .scrollContentBackground(.hidden)
+
+        Divider()
+
+        DeveloperToolsView(glassAppearance: glassAppearance)
+          .padding(12)
       }
       .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
       .navigationTitle("Recent")
@@ -39,7 +48,16 @@ struct AppShellView: View {
         composer
           .padding(20)
       }
-      .background(.ultraThinMaterial)
+      .background {
+        if glassAppearance.isEnabled {
+          Rectangle()
+            .fill(.ultraThinMaterial)
+            .opacity(glassAppearance.opacity)
+        } else {
+          Rectangle()
+            .fill(.background)
+        }
+      }
     }
     .frame(minWidth: 640, minHeight: 420)
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
@@ -69,10 +87,55 @@ struct AppShellView: View {
     }
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
-    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+    .background {
+      RoundedRectangle(cornerRadius: 18)
+        .fill(.regularMaterial)
+        .opacity(glassAppearance.isEnabled ? glassAppearance.opacity : 1)
+    }
     .overlay {
       RoundedRectangle(cornerRadius: 18)
         .stroke(.white.opacity(0.16), lineWidth: 0.5)
+    }
+  }
+}
+
+private struct DeveloperToolsView: View {
+  @ObservedObject var glassAppearance: GlassAppearanceSettings
+  @State private var isExpanded = false
+
+  var body: some View {
+    DisclosureGroup(isExpanded: $isExpanded) {
+      VStack(alignment: .leading, spacing: 10) {
+        Toggle("Liquid Glass", isOn: $glassAppearance.isEnabled)
+
+        if glassAppearance.isEnabled {
+          HStack {
+            Text("Glass opacity")
+            Spacer()
+            Text(glassAppearance.opacity, format: .percent.precision(.fractionLength(0)))
+              .foregroundStyle(.secondary)
+          }
+          .font(.caption)
+
+          Slider(value: $glassAppearance.opacity, in: 0.15...1, step: 0.01)
+            .accessibilityLabel("Glass opacity")
+
+          Text("Lower values are more transparent.")
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+        }
+
+        Button("Save") {
+          glassAppearance.save()
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.small)
+        .disabled(!glassAppearance.hasUnsavedChanges)
+      }
+      .padding(.top, 8)
+    } label: {
+      Label("Developer Tools", systemImage: "wrench.and.screwdriver")
+        .font(.callout.weight(.medium))
     }
   }
 }

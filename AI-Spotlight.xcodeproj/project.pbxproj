@@ -13,6 +13,7 @@
 		A10000000000000000000004 /* MenuBarController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000004 /* MenuBarController.swift */; };
 		A10000000000000000000005 /* AppShellView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000005 /* AppShellView.swift */; };
 		A10000000000000000000006 /* AppCommandTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000007 /* AppCommandTests.swift */; };
+		A10000000000000000000007 /* GlassAppearanceSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000010 /* GlassAppearanceSettings.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -33,6 +34,7 @@
 		A20000000000000000000005 /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
 		A20000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000007 /* AppCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommandTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000010 /* GlassAppearanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassAppearanceSettings.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* PrimaryAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimaryAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000009 /* PrimaryAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimaryAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -81,6 +83,7 @@
 				A20000000000000000000003 /* AppCommand.swift */,
 				A20000000000000000000004 /* MenuBarController.swift */,
 				A20000000000000000000005 /* AppShellView.swift */,
+				A20000000000000000000010 /* GlassAppearanceSettings.swift */,
 			);
 			path = App;
 			sourceTree = "<group>";
@@ -205,6 +208,7 @@
 				A10000000000000000000003 /* AppCommand.swift in Sources */,
 				A10000000000000000000004 /* MenuBarController.swift in Sources */,
 				A10000000000000000000005 /* AppShellView.swift in Sources */,
+				A10000000000000000000007 /* GlassAppearanceSettings.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
