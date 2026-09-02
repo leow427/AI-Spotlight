@@ -13,61 +13,68 @@ struct AppShellView: View {
   ]
 
   var body: some View {
-    NavigationSplitView {
-      ScrollView {
-        LazyVStack(alignment: .leading, spacing: 0) {
-          ForEach(recentChats, id: \.self) { title in
-            Label(title, systemImage: "message")
-              .lineLimit(1)
-              .padding(.horizontal, 12)
-              .padding(.vertical, 8)
-              .frame(maxWidth: .infinity, alignment: .leading)
+    ZStack {
+      welcomeBackground
+        .ignoresSafeArea()
+
+      NavigationSplitView {
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 0) {
+            ForEach(recentChats, id: \.self) { title in
+              Label(title, systemImage: "message")
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+
+            Divider()
+              .padding(.top, 4)
+
+            DeveloperToolsView(glassAppearance: glassAppearance)
+              .padding(12)
+          }
+          .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
+        .navigationTitle("Recent")
+      } detail: {
+        VStack(spacing: 0) {
+          Spacer()
+
+          VStack(spacing: 10) {
+            Image(systemName: "sparkles")
+              .font(.system(size: 30, weight: .light))
+              .foregroundStyle(.secondary)
+            Text("How can I help?")
+              .font(.title2.weight(.medium))
+            Text("Local-first assistance, ready when you are.")
+              .font(.callout)
+              .foregroundStyle(.secondary)
           }
 
-          Divider()
-            .padding(.top, 4)
+          Spacer()
 
-          DeveloperToolsView(glassAppearance: glassAppearance)
-            .padding(12)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-      }
-      .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
-      .navigationTitle("Recent")
-    } detail: {
-      VStack(spacing: 0) {
-        Spacer()
-
-        VStack(spacing: 10) {
-          Image(systemName: "sparkles")
-            .font(.system(size: 30, weight: .light))
-            .foregroundStyle(.secondary)
-          Text("How can I help?")
-            .font(.title2.weight(.medium))
-          Text("Local-first assistance, ready when you are.")
-            .font(.callout)
-            .foregroundStyle(.secondary)
-        }
-
-        Spacer()
-
-        composer
-          .padding(20)
-      }
-      .background {
-        if glassAppearance.isEnabled {
-          Rectangle()
-            .fill(.ultraThinMaterial)
-            .opacity(1 - glassAppearance.clarity)
-        } else {
-          Rectangle()
-            .fill(.background)
+          composer
+            .padding(20)
         }
       }
     }
     .frame(minWidth: 640, minHeight: 420)
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       draft = ""
+    }
+  }
+
+  @ViewBuilder
+  private var welcomeBackground: some View {
+    if glassAppearance.isEnabled {
+      Rectangle()
+        .fill(.ultraThinMaterial)
+        .opacity(1 - glassAppearance.clarity)
+    } else {
+      Rectangle()
+        .fill(.background)
     }
   }
 
