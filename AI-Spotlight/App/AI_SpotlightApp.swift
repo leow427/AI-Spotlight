@@ -9,10 +9,11 @@ struct AISpotlightApp: App {
     Window("AI Spotlight", id: "main") {
       AppShellView(glassAppearance: glassAppearance)
         .containerBackground(.clear, for: .window)
-    }
-    .defaultSize(width: 760, height: 520)
+      }
+      .defaultSize(width: 760, height: 520)
+      .windowStyle(.hiddenTitleBar)
 
-    Settings {
+      Settings {
       SettingsView()
     }
   }
