@@ -16,12 +16,18 @@ directories. Document any intentional deviation in `Plan.md` or `docs/`.
 
 ## Build, Test, and Development Commands
 
-No language runtime, package manager, or build tooling is configured yet. Add
-the canonical commands to this guide or `Plan.md` when the project is
-initialized, and keep them scriptable and non-interactive. For example, a JavaScript project should
-provide `npm run dev`, `npm test`, and `npm run lint`; a Python project should
-document the equivalent `pytest` and formatter commands. Run the available
-formatter, linter, and test suite before requesting review.
+Use the shared `AI-Spotlight` scheme so local verification matches CI:
+
+```sh
+xcodebuild build -project AI-Spotlight.xcodeproj -scheme AI-Spotlight \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+xcodebuild test -project AI-Spotlight.xcodeproj -scheme AI-Spotlight \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+xcodebuild analyze -project AI-Spotlight.xcodeproj -scheme AI-Spotlight \
+  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+```
+
+Run the build, test suite, and static analyzer before requesting review.
 
 ## Definition of Done
 

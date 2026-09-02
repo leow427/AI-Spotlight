@@ -1,0 +1,90 @@
+import SwiftUI
+
+struct AppShellView: View {
+  @State private var draft = ""
+
+  private let recentChats = [
+    "Welcome to AI Spotlight",
+    "Local models",
+    "Writing notes",
+    "Project ideas",
+    "Quick questions",
+  ]
+
+  var body: some View {
+    NavigationSplitView {
+      List(recentChats, id: \.self) { title in
+        Label(title, systemImage: "message")
+          .lineLimit(1)
+      }
+      .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
+      .navigationTitle("Recent")
+    } detail: {
+      VStack(spacing: 0) {
+        Spacer()
+
+        VStack(spacing: 10) {
+          Image(systemName: "sparkles")
+            .font(.system(size: 30, weight: .light))
+            .foregroundStyle(.secondary)
+          Text("How can I help?")
+            .font(.title2.weight(.medium))
+          Text("Local-first assistance, ready when you are.")
+            .font(.callout)
+            .foregroundStyle(.secondary)
+        }
+
+        Spacer()
+
+        composer
+          .padding(20)
+      }
+      .background(.ultraThinMaterial)
+    }
+    .frame(minWidth: 640, minHeight: 420)
+    .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
+      draft = ""
+    }
+  }
+
+  private var composer: some View {
+    HStack(spacing: 10) {
+      Button {
+      } label: {
+        Image(systemName: "plus")
+      }
+      .buttonStyle(.plain)
+      .accessibilityLabel("Add attachment")
+      .disabled(true)
+
+      TextField("Ask anything", text: $draft, axis: .vertical)
+        .textFieldStyle(.plain)
+        .lineLimit(1...5)
+
+      Picker("Model", selection: .constant("Local")) {
+        Text("Local").tag("Local")
+      }
+      .labelsHidden()
+      .fixedSize()
+    }
+    .padding(.horizontal, 14)
+    .padding(.vertical, 12)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+    .overlay {
+      RoundedRectangle(cornerRadius: 18)
+        .stroke(.white.opacity(0.16), lineWidth: 0.5)
+    }
+  }
+}
+
+struct SettingsView: View {
+  var body: some View {
+    Form {
+      Text("Settings will be added in a later checkpoint.")
+        .foregroundStyle(.secondary)
+    }
+    .formStyle(.grouped)
+    .frame(width: 420, height: 220)
+    .navigationTitle("AI Spotlight Settings")
+  }
+}

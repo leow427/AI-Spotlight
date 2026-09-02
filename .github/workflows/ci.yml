@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-test:
+    runs-on: macos-26
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+      - name: Build and test
+        run: >-
+          xcodebuild test
+          -project AI-Spotlight.xcodeproj
+          -scheme AI-Spotlight
+          -destination 'platform=macOS'
+          CODE_SIGNING_ALLOWED=NO
