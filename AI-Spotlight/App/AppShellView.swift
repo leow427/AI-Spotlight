@@ -20,12 +20,15 @@ struct AppShellView: View {
             .lineLimit(1)
         }
         .scrollContentBackground(.hidden)
+        .frame(maxHeight: .infinity)
 
         Divider()
 
         DeveloperToolsView(glassAppearance: glassAppearance)
           .padding(12)
+          .fixedSize(horizontal: false, vertical: true)
       }
+      .frame(maxHeight: .infinity, alignment: .bottom)
       .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
       .navigationTitle("Recent")
     } detail: {
