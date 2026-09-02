@@ -16,11 +16,11 @@ final class AppCommandTests: XCTestCase {
 
     let settings = GlassAppearanceSettings(defaults: defaults)
     settings.isEnabled = false
-    settings.opacity = 0.42
+    settings.clarity = 0.42
     settings.save()
 
     let restoredSettings = GlassAppearanceSettings(defaults: defaults)
     XCTAssertFalse(restoredSettings.isEnabled)
-    XCTAssertEqual(restoredSettings.opacity, 0.42, accuracy: 0.001)
+    XCTAssertEqual(restoredSettings.clarity, 0.42, accuracy: 0.001)
   }
 }

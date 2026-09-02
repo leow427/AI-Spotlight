@@ -58,7 +58,7 @@ struct AppShellView: View {
         if glassAppearance.isEnabled {
           Rectangle()
             .fill(.ultraThinMaterial)
-            .opacity(glassAppearance.opacity)
+            .opacity(1 - glassAppearance.clarity)
         } else {
           Rectangle()
             .fill(.background)
@@ -96,7 +96,7 @@ struct AppShellView: View {
     .background {
       RoundedRectangle(cornerRadius: 18)
         .fill(.regularMaterial)
-        .opacity(glassAppearance.isEnabled ? glassAppearance.opacity : 1)
+        .opacity(glassAppearance.isEnabled ? 1 - glassAppearance.clarity : 1)
     }
     .overlay {
       RoundedRectangle(cornerRadius: 18)
@@ -116,17 +116,17 @@ private struct DeveloperToolsView: View {
 
         if glassAppearance.isEnabled {
           HStack {
-            Text("Glass opacity")
+            Text("Glass clarity")
             Spacer()
-            Text(glassAppearance.opacity, format: .percent.precision(.fractionLength(0)))
+            Text(glassAppearance.clarity, format: .percent.precision(.fractionLength(0)))
               .foregroundStyle(.secondary)
           }
           .font(.caption)
 
-          Slider(value: $glassAppearance.opacity, in: 0.15...1, step: 0.01)
-            .accessibilityLabel("Glass opacity")
+          Slider(value: $glassAppearance.clarity, in: 0...1, step: 0.01)
+            .accessibilityLabel("Glass clarity")
 
-          Text("Lower values are more transparent.")
+          Text("100% is completely clear.")
             .font(.caption2)
             .foregroundStyle(.secondary)
         }
