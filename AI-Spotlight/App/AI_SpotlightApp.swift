@@ -11,7 +11,7 @@ struct AISpotlightApp: App {
         .containerBackground(.clear, for: .window)
       }
       .defaultSize(width: 760, height: 520)
-      .windowStyle(.hiddenTitleBar)
+      .windowStyle(.plain)
 
       Settings {
       SettingsView()
