@@ -14,21 +14,24 @@ struct AppShellView: View {
 
   var body: some View {
     NavigationSplitView {
-      VStack(spacing: 0) {
-        List(recentChats, id: \.self) { title in
-          Label(title, systemImage: "message")
-            .lineLimit(1)
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 0) {
+          ForEach(recentChats, id: \.self) { title in
+            Label(title, systemImage: "message")
+              .lineLimit(1)
+              .padding(.horizontal, 12)
+              .padding(.vertical, 8)
+              .frame(maxWidth: .infinity, alignment: .leading)
+          }
+
+          Divider()
+            .padding(.top, 4)
+
+          DeveloperToolsView(glassAppearance: glassAppearance)
+            .padding(12)
         }
-        .scrollContentBackground(.hidden)
-        .frame(maxHeight: .infinity)
-
-        Divider()
-
-        DeveloperToolsView(glassAppearance: glassAppearance)
-          .padding(12)
-          .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
       }
-      .frame(maxHeight: .infinity, alignment: .bottom)
       .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
       .navigationTitle("Recent")
     } detail: {
