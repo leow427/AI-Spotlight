@@ -33,6 +33,7 @@ struct AppShellView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
       }
       .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
+      .navigationTitle("Recent")
     } detail: {
       VStack(spacing: 0) {
         Spacer()
