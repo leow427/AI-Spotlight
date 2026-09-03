@@ -1,3 +1,4 @@
+import AppKit
 import XCTest
 @testable import PrimaryAgent
 
@@ -41,6 +42,11 @@ final class AppCommandTests: XCTestCase {
       PanelShortcut.resolve(characters: "\t", modifiers: .control),
       .cycleRecentChat
     )
+    XCTAssertEqual(
+      PanelShortcut.resolve(characters: ",", modifiers: .command),
+      .settings
+    )
+    XCTAssertNil(PanelShortcut.resolve(characters: ",", modifiers: [.command, .shift]))
     XCTAssertNil(
       PanelShortcut.resolve(characters: "n", modifiers: [.command, .shift])
     )
@@ -68,6 +74,59 @@ final class AppCommandTests: XCTestCase {
       persistedKeys,
       ["aiSpotlight.panel.width", "aiSpotlight.panel.height"]
     )
+  }
+
+  @MainActor
+  func testSettingsWindowOpensAndReopensWithoutASwiftUIScene() throws {
+    let controller = SettingsWindowController(contentView: NSView())
+    let window = try XCTUnwrap(controller.window)
+    defer { window.close() }
+
+    controller.showSettings()
+    XCTAssertTrue(window.isVisible)
+    XCTAssertTrue(window.isKeyWindow)
+    window.performClose(nil)
+    XCTAssertFalse(window.isVisible)
+
+    controller.showSettings()
+    XCTAssertTrue(controller.window === window)
+    XCTAssertTrue(window.isVisible)
+    XCTAssertTrue(window.isKeyWindow)
+  }
+
+  @MainActor
+  func testOpeningAdvancedSettingsPreservesChatVisibilityAndDraft() throws {
+    let draft = NSTextField(string: "Keep this unsent message")
+    let panel = SpotlightPanelController(
+      glassAppearance: GlassAppearanceSettings(),
+      contentView: draft
+    )
+    let settings = SettingsWindowController(contentView: NSView())
+    let window = try XCTUnwrap(settings.window)
+    let delegate = ApplicationDelegate(panelController: panel, settingsWindowController: settings)
+    defer {
+      window.close()
+      panel.hide()
+    }
+
+    panel.show()
+    delegate.openSettings()
+    XCTAssertTrue(panel.isVisible)
+    XCTAssertTrue(window.isVisible)
+    XCTAssertTrue(window.isKeyWindow)
+    XCTAssertEqual(window.level, .floating)
+    XCTAssertEqual(draft.stringValue, "Keep this unsent message")
+
+    window.performClose(nil)
+    XCTAssertTrue(panel.isVisible)
+    delegate.openSettings()
+    XCTAssertTrue(panel.isVisible)
+    XCTAssertTrue(window.isVisible)
+    XCTAssertEqual(draft.stringValue, "Keep this unsent message")
+
+    panel.hide()
+    delegate.openSettings()
+    XCTAssertFalse(panel.isVisible, "Opening Settings must also respect an already hidden chat.")
   }
 
   func testPanelFrameIsCenteredAndConstrainedToDisplay() {

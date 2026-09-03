@@ -1,5 +1,31 @@
 import Foundation
 
+enum CodexThinkingCapacity: String, CaseIterable, Identifiable, Sendable {
+  case none
+  case minimal
+  case low
+  case medium
+  case high
+  case xhigh
+  case max
+  case ultra
+
+  var id: Self { self }
+
+  var displayName: String {
+    switch self {
+    case .none: "None"
+    case .minimal: "Minimal"
+    case .low: "Low"
+    case .medium: "Medium"
+    case .high: "High"
+    case .xhigh: "Extra High"
+    case .max: "Max"
+    case .ultra: "Ultra"
+    }
+  }
+}
+
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
   case chatGPT = "chatgpt-codex"
   case openAI = "openai"

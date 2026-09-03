@@ -54,9 +54,7 @@ final class MenuBarController: NSObject {
   }
 
   @objc private func openSettings() {
-    NSApp.unhide(nil)
-    NSApp.activate(ignoringOtherApps: true)
-    NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+    NotificationCenter.default.post(name: .settingsRequested, object: nil)
   }
 
   @objc private func quitApp() {

@@ -9,7 +9,9 @@ struct AppShellView: View {
   @State private var draft = ""
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
+  @State private var isHelpPresented = false
   @State private var selectedMode = ChatMode.auto
+  @State private var autoRouteDecision: AutoRouter.Decision?
   @FocusState private var isComposerFocused: Bool
 
   init(
@@ -60,6 +62,18 @@ struct AppShellView: View {
             Divider()
               .padding(.top, 4)
 
+            Button {
+              isHelpPresented = true
+            } label: {
+              Label("Help", systemImage: "questionmark.circle")
+                .font(.callout.weight(.medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 12)
+            .padding(.top, 12)
+
             DeveloperToolsView(glassAppearance: glassAppearance)
               .padding(12)
           }
@@ -99,6 +113,9 @@ struct AppShellView: View {
     .onReceive(NotificationCenter.default.publisher(for: .modePaletteRequested)) { _ in
       isModePalettePresented.toggle()
     }
+    .onReceive(NotificationCenter.default.publisher(for: .settingsRequested)) { _ in
+      isModePalettePresented = false
+    }
     .onReceive(NotificationCenter.default.publisher(for: .panelPresented)) { _ in
       localChat.applicationBecameActive()
       isComposerFocused = true
@@ -118,6 +135,9 @@ struct AppShellView: View {
     .onReceive(NotificationCenter.default.publisher(for: .recentChatCycleRequested)) { _ in
       localChat.cycleRecentChat()
     }
+    .sheet(isPresented: $isHelpPresented) {
+      KeyboardShortcutsHelpView()
+    }
     .fileImporter(
       isPresented: $isModelImporterPresented,
       allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data],
@@ -132,7 +152,8 @@ struct AppShellView: View {
       await localChat.refreshInstalledModel()
     }
     .onChange(of: selectedMode) { _, mode in
-      guard mode == .cloud else { return }
+      autoRouteDecision = nil
+      guard mode == .cloud || mode == .auto else { return }
       Task {
         if cloudSettings.preferredProvider == .chatGPT {
           await cloudSettings.refreshChatGPTAccount()
@@ -297,10 +318,10 @@ struct AppShellView: View {
           Text(cloudSettings.preferredProvider == .chatGPT
             ? "Sign in with ChatGPT to use your Codex allowance."
             : "Add a \(cloudSettings.preferredProvider.displayName) API key.")
-          SettingsLink { Text("Advanced Settings") }
+          Button("Advanced Settings", action: openSettings)
         } else if cloudSettings.preferredModelID.isEmpty {
           Text("Choose a cloud model in Advanced Settings.")
-          SettingsLink { Text("Advanced Settings") }
+          Button("Advanced Settings", action: openSettings)
         } else {
           switch localChat.state {
           case .preparing:
@@ -330,10 +351,49 @@ struct AppShellView: View {
       .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, alignment: .trailing)
     case .auto:
-      Text("Auto routing arrives in checkpoint 6.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      autoRouteStatus
     }
+  }
+
+  @ViewBuilder
+  private var autoRouteStatus: some View {
+    HStack(spacing: 8) {
+      if case .failed(let message) = localChat.state {
+        Image(systemName: "exclamationmark.triangle")
+        Text(message)
+          .lineLimit(2)
+      } else if let decision = autoRouteDecision {
+        if let route = decision.route {
+          Image(systemName: route.mode == .local ? "laptopcomputer" : "cloud")
+          Text("Auto · \(route.mode.displayName) · \(decision.modelDisplayName ?? route.modelID)")
+            .lineLimit(1)
+          if localChat.state == .preparing || localChat.state == .streaming {
+            ProgressView()
+              .controlSize(.small)
+          }
+          if localChat.state == .streaming {
+            Button("Stop") { localChat.stopStreaming() }
+              .buttonStyle(.plain)
+          }
+        } else if let limitation = decision.limitation {
+          Image(systemName: "exclamationmark.triangle")
+          Text(limitation.message)
+            .lineLimit(2)
+        }
+      } else if let model = localChat.installedModel, autoCloudConfiguration == nil {
+        Image(systemName: "laptopcomputer")
+        Text("Cloud isn’t connected; Auto stays local · \(model.displayName)")
+          .lineLimit(1)
+      } else if localChat.installedModel != nil || autoCloudConfiguration != nil {
+        Image(systemName: "sparkles")
+        Text("Auto chooses the lowest-latency capable model.")
+      } else {
+        Text("Choose a local model or connect Cloud to use Auto.")
+      }
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
+    .frame(maxWidth: .infinity, alignment: .trailing)
   }
 
   private var compactModeControls: some View {
@@ -393,7 +453,7 @@ struct AppShellView: View {
           case .cloud:
             cloudModelMenu
           case .auto:
-            Text("Auto chooses a route in checkpoint 6.")
+            Text("Auto keeps routine tasks local and uses Cloud only when needed.")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -419,7 +479,7 @@ struct AppShellView: View {
     case .cloud:
       cloudSettings.isConfigured && !localChat.isBusy
     case .auto:
-      false
+      (localChat.installedModel != nil || autoCloudConfiguration != nil) && !localChat.isBusy
     }
   }
 
@@ -439,7 +499,10 @@ struct AppShellView: View {
         ? "Uses \(cloudSettings.preferredProvider.displayName) with a stateless request."
         : "Add a provider key and model in Advanced Settings."
     }
-    return "Local-first assistance, ready when you are."
+    if localChat.installedModel != nil, autoCloudConfiguration == nil {
+      return "Cloud is not connected, so Auto stays on this Mac."
+    }
+    return "Local-first assistance that uses Cloud only when it is needed."
   }
 
   private var modelMenu: some View {
@@ -507,7 +570,7 @@ struct AppShellView: View {
       }
 
       Divider()
-      SettingsLink {
+      Button(action: openSettings) {
         Label("Advanced Settings…", systemImage: "gearshape")
       }
     } label: {
@@ -534,8 +597,49 @@ struct AppShellView: View {
         modelID: cloudSettings.preferredModelID
       )
     case .auto:
-      break
+      let request = AutoRouter.Request(
+        selectedMode: .auto,
+        prompt: prompt,
+        contextMessages: localChat.messages,
+        localModel: localChat.installedModel,
+        cloud: autoCloudConfiguration
+      )
+      let decision: AutoRouter.Decision
+      if AutoRouter.shouldRun(for: .auto, cloud: autoCloudConfiguration) {
+        decision = AutoRouter.decide(request)
+      } else {
+        decision = AutoRouter.localFallback(localModel: localChat.installedModel)
+      }
+      autoRouteDecision = decision
+
+      guard let route = decision.route else { return }
+      switch route.mode {
+      case .local:
+        localChat.submit(prompt)
+      case .cloud:
+        guard let cloud = autoCloudConfiguration else { return }
+        localChat.submitCloud(prompt, provider: cloud.provider, modelID: cloud.modelID)
+      case .auto:
+        break
+      }
     }
+  }
+
+  private var autoCloudConfiguration: AutoRouter.CloudConfiguration? {
+    guard cloudSettings.isConfigured else { return nil }
+    let modelID = cloudSettings.preferredModelID
+    let displayName = cloudSettings.models.first(where: { $0.id == modelID })?.displayName ?? modelID
+    return AutoRouter.CloudConfiguration(
+      provider: cloudSettings.preferredProvider,
+      modelID: modelID,
+      modelDisplayName: displayName
+    )
+  }
+
+  private func openSettings() {
+    isModePalettePresented = false
+    isComposerFocused = false
+    NotificationCenter.default.post(name: .settingsRequested, object: nil)
   }
 }
 
@@ -573,6 +677,75 @@ private extension ChatMode {
     case .auto: "sparkles"
     case .local: "laptopcomputer"
     case .cloud: "cloud"
+    }
+  }
+}
+
+private struct KeyboardShortcutsHelpView: View {
+  @Environment(\.dismiss) private var dismiss
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 20) {
+      Label("Keyboard Shortcuts", systemImage: "keyboard")
+        .font(.title2.weight(.medium))
+
+      ScrollView {
+        VStack(alignment: .leading, spacing: 16) {
+          Text("Anywhere on your Mac")
+            .font(.headline)
+          shortcut("Show or hide AI Spotlight", keys: "⌥ Space")
+
+          Divider()
+
+          Text("In the chat panel")
+            .font(.headline)
+          shortcut("Hide the panel", keys: "Esc")
+          shortcut("New chat", keys: "⌘ N")
+          shortcut("Open or close Mode & Model", keys: "⌘ K")
+          shortcut("Stop the response", keys: "⌘ .")
+          shortcut("Next recent chat", keys: "⌃ Tab")
+          shortcut("Open Settings", keys: "⌘ ,")
+          shortcut("Send from the message field", keys: "Return")
+
+          Divider()
+
+          Text("Editing text")
+            .font(.headline)
+          shortcut("Select all", keys: "⌘ A")
+          shortcut("Copy", keys: "⌘ C")
+          shortcut("Cut", keys: "⌘ X")
+          shortcut("Paste", keys: "⌘ V")
+          shortcut("Undo", keys: "⌘ Z")
+          shortcut("Redo", keys: "⇧ ⌘ Z")
+
+          Text("⌘ Command · ⌥ Option · ⌃ Control · ⇧ Shift")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+        .padding(.trailing, 4)
+      }
+
+      HStack {
+        Spacer()
+        Button("Done") {
+          dismiss()
+        }
+        .keyboardShortcut(.defaultAction)
+      }
+    }
+    .padding(24)
+    .frame(width: 460, height: 400)
+    .background(.regularMaterial)
+    .onExitCommand { dismiss() }
+  }
+
+  private func shortcut(_ title: String, keys: String) -> some View {
+    HStack {
+      Text(title)
+      Spacer(minLength: 16)
+      Text(keys)
+        .font(.body.monospaced())
+        .foregroundStyle(.secondary)
     }
   }
 }
@@ -709,11 +882,12 @@ struct SettingsView: View {
         TextField("Manual model ID", text: $settings.preferredModelID)
           .textFieldStyle(.roundedBorder)
 
-        if settings.preferredProvider == .chatGPT,
-           settings.preferredModelID == CodexSubscriptionClient.defaultModelID {
-          Text("Reasoning: High")
-            .font(.caption)
-            .foregroundStyle(.secondary)
+        if settings.preferredProvider == .chatGPT {
+          Picker("Thinking capacity", selection: $settings.codexThinkingCapacity) {
+            ForEach(CodexThinkingCapacity.allCases) { capacity in
+              Text(capacity.displayName).tag(capacity)
+            }
+          }
         }
 
         HStack {

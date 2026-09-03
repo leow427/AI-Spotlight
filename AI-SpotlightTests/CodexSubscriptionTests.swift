@@ -155,9 +155,12 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertEqual(preferences.preferredModel(for: .chatGPT), "gpt-5.6-luna")
     XCTAssertEqual(preferences.preferredModel(for: .openAI), "")
     XCTAssertEqual(preferences.preferredModel(for: .anthropic), "")
+    XCTAssertEqual(preferences.preferredCodexThinkingCapacity(), .high)
 
     preferences.setPreferredModel(" \n", for: .chatGPT)
     XCTAssertEqual(CloudPreferencesStore(defaults: defaults).preferredModel(for: .chatGPT), "gpt-5.6-luna")
+    preferences.setPreferredCodexThinkingCapacity(.ultra)
+    XCTAssertEqual(CloudPreferencesStore(defaults: defaults).preferredCodexThinkingCapacity(), .ultra)
   }
 
   func testPreviousSolDefaultMigratesOnlyOnceAndPreservesAPISettings() {
@@ -187,16 +190,17 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertEqual(CloudPreferencesStore(defaults: defaults).preferredModel(for: .chatGPT), "custom-model")
   }
 
-  func testLunaStreamExplicitlyRequestsHighReasoning() async throws {
+  func testCodexStreamSendsTheSelectedThinkingCapacity() async throws {
     let transport = MockCodexTransport(turnNotifications: [delta("Hello"), completion("completed")])
-    let events = try await collect(CodexSubscriptionClient(transport: transport).stream(request(modelID: "gpt-5.6-luna")))
+    let client = CodexSubscriptionClient(transport: transport, thinkingCapacity: { .ultra })
+    let events = try await collect(client.stream(request(modelID: "gpt-5.6-luna")))
     XCTAssertEqual(events, [.token("Hello"), .completed])
     let requests = await transport.recordedRequests
     let thread = try XCTUnwrap(requests.first { $0.method == "thread/start" })
     XCTAssertEqual(thread.params["model"].string, "gpt-5.6-luna")
     let turn = try XCTUnwrap(requests.first { $0.method == "turn/start" })
     XCTAssertEqual(turn.params["threadId"].string, "thread-one")
-    XCTAssertEqual(turn.params["effort"].string, "high")
+    XCTAssertEqual(turn.params["effort"].string, "ultra")
   }
 
   func testSubscriptionStreamIsEphemeralAndPreservesConversationContext() async throws {
@@ -216,7 +220,7 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertEqual(thread.params["approvalPolicy"].string, "never")
     XCTAssertEqual(thread.params["modelProvider"].string, "openai")
     let turn = try XCTUnwrap(requests.first { $0.method == "turn/start" })
-    XCTAssertEqual(turn.params["effort"], .null, "Other models must retain their runtime reasoning default")
+    XCTAssertEqual(turn.params["effort"].string, "high")
     let text = try XCTUnwrap(turn.params["input"].array?.first?["text"].string)
     XCTAssertTrue(text.contains("Previous answer"))
     XCTAssertTrue(text.contains("Latest question"))

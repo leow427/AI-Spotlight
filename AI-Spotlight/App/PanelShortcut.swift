@@ -5,6 +5,7 @@ enum PanelShortcut: Equatable {
   case modePalette
   case stopStreaming
   case cycleRecentChat
+  case settings
 
   static func resolve(
     characters: String?,
@@ -24,6 +25,8 @@ enum PanelShortcut: Equatable {
       return .modePalette
     case ".":
       return .stopStreaming
+    case ",":
+      return .settings
     default:
       return nil
     }

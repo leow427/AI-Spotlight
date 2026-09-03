@@ -45,6 +45,8 @@ The first prototype includes Local, Cloud, and Auto modes only. Web search, Brav
 
    - Create a custom floating, nonactivating `NSPanel` that hosts SwiftUI.
    - Open or hide it with `⌥Space`; use `Escape` to hide, `⌘N` for a new chat, `⌘K` for the mode/model palette, and `⌘.` to stop streaming.
+   - Use `⌘,` to open Settings. Provide a Help page above Developer Tools listing app shortcuts and standard text-editing shortcuts. Present Settings through an owned AppKit window so it also opens from the floating panel's menus.
+   - Opening Settings preserves the chat panel's visibility and current session. Keep Settings at the panel's floating window level so both windows remain accessible.
    - Center the panel on the active display at 760×520 points; remember only its size.
    - Use a restrained Liquid Glass treatment: one outer glass container, glass composer, and compact mode controls.
 

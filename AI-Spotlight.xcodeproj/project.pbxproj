@@ -28,6 +28,8 @@
 		E10000000000000000000002 /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* ChatSessionStore.swift */; };
 		E10000000000000000000003 /* LocalModelManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* LocalModelManifest.swift */; };
 		E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* ChatPersistenceTests.swift */; };
+		E10000000000000000000005 /* AutoRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000005 /* AutoRouter.swift */; };
+		E10000000000000000000006 /* AutoRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000006 /* AutoRouterTests.swift */; };
 		F10000000000000000000001 /* CloudDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* CloudDomain.swift */; };
 		F10000000000000000000002 /* KeychainCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* KeychainCredentialStore.swift */; };
 		F10000000000000000000003 /* CloudNetworking.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* CloudNetworking.swift */; };
@@ -73,6 +75,8 @@
 		E20000000000000000000002 /* ChatSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionStore.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* LocalModelManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManifest.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* ChatPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPersistenceTests.swift; sourceTree = "<group>"; };
+		E20000000000000000000005 /* AutoRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoRouter.swift; sourceTree = "<group>"; };
+		E20000000000000000000006 /* AutoRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoRouterTests.swift; sourceTree = "<group>"; };
 		F20000000000000000000001 /* CloudDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudDomain.swift; sourceTree = "<group>"; };
 		F20000000000000000000002 /* KeychainCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStore.swift; sourceTree = "<group>"; };
 		F20000000000000000000003 /* CloudNetworking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudNetworking.swift; sourceTree = "<group>"; };
@@ -159,6 +163,7 @@
 				A20000000000000000000007 /* AppCommandTests.swift */,
 				D20000000000000000000005 /* LocalInferenceTests.swift */,
 				E20000000000000000000004 /* ChatPersistenceTests.swift */,
+				E20000000000000000000006 /* AutoRouterTests.swift */,
 				F20000000000000000000008 /* CloudModeTests.swift */,
 				F2000000000000000000000B /* CodexSubscriptionTests.swift */,
 			);
@@ -191,6 +196,7 @@
 			children = (
 				E20000000000000000000001 /* ChatDomain.swift */,
 				E20000000000000000000002 /* ChatSessionStore.swift */,
+				E20000000000000000000005 /* AutoRouter.swift */,
 			);
 			path = Chat;
 			sourceTree = "<group>";
@@ -324,6 +330,7 @@
 				E10000000000000000000001 /* ChatDomain.swift in Sources */,
 				E10000000000000000000002 /* ChatSessionStore.swift in Sources */,
 				E10000000000000000000003 /* LocalModelManifest.swift in Sources */,
+				E10000000000000000000005 /* AutoRouter.swift in Sources */,
 				F10000000000000000000001 /* CloudDomain.swift in Sources */,
 				F10000000000000000000002 /* KeychainCredentialStore.swift in Sources */,
 				F10000000000000000000003 /* CloudNetworking.swift in Sources */,
@@ -343,6 +350,7 @@
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
 				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
 				E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */,
+				E10000000000000000000006 /* AutoRouterTests.swift in Sources */,
 				F10000000000000000000008 /* CloudModeTests.swift in Sources */,
 				F1000000000000000000000B /* CodexSubscriptionTests.swift in Sources */,
 			);

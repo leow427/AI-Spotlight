@@ -5,6 +5,7 @@ struct CloudPreferencesStore: @unchecked Sendable {
   private enum Key {
     static let preferredProvider = "aiSpotlight.cloud.preferredProvider"
     static let didAdoptLunaDefault = "aiSpotlight.cloud.didAdoptLunaDefault"
+    static let preferredCodexThinkingCapacity = "aiSpotlight.cloud.preferredCodexThinkingCapacity"
     static func preferredModel(_ provider: CloudProviderID) -> String {
       "aiSpotlight.cloud.preferredModel.\(provider.rawValue)"
     }
@@ -45,6 +46,15 @@ struct CloudPreferencesStore: @unchecked Sendable {
 
   func setPreferredModel(_ modelID: String, for provider: CloudProviderID) {
     defaults.set(modelID, forKey: Key.preferredModel(provider))
+  }
+
+  func preferredCodexThinkingCapacity() -> CodexThinkingCapacity {
+    defaults.string(forKey: Key.preferredCodexThinkingCapacity)
+      .flatMap(CodexThinkingCapacity.init(rawValue:)) ?? .high
+  }
+
+  func setPreferredCodexThinkingCapacity(_ capacity: CodexThinkingCapacity) {
+    defaults.set(capacity.rawValue, forKey: Key.preferredCodexThinkingCapacity)
   }
 }
 
@@ -88,6 +98,10 @@ final class CloudSettingsModel: ObservableObject {
     }
   }
 
+  @Published var codexThinkingCapacity: CodexThinkingCapacity {
+    didSet { preferences.setPreferredCodexThinkingCapacity(codexThinkingCapacity) }
+  }
+
   @Published private(set) var models: [CloudModel] = []
   @Published private(set) var discoveryError: String?
   @Published private(set) var isDiscovering = false
@@ -122,6 +136,7 @@ final class CloudSettingsModel: ObservableObject {
     let provider = preferences.preferredProvider()
     preferredProvider = provider
     preferredModelID = preferences.preferredModel(for: provider)
+    codexThinkingCapacity = preferences.preferredCodexThinkingCapacity()
   }
 
   var isConfigured: Bool {

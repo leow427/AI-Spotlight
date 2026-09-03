@@ -7,10 +7,22 @@ struct CodexAccount: Equatable, Sendable {
 
 struct CodexSubscriptionClient: ChatProvider {
   static let defaultModelID = "gpt-5.6-luna"
-  static let defaultReasoningEffort = "high"
-  static let live = CodexSubscriptionClient(transport: CodexAppServer.shared)
+  static let defaultThinkingCapacity: CodexThinkingCapacity = .high
+  static let live = CodexSubscriptionClient(
+    transport: CodexAppServer.shared,
+    thinkingCapacity: { CloudPreferencesStore().preferredCodexThinkingCapacity() }
+  )
 
   let transport: any CodexRPCTransport
+  let thinkingCapacity: @Sendable () -> CodexThinkingCapacity
+
+  init(
+    transport: any CodexRPCTransport,
+    thinkingCapacity: @escaping @Sendable () -> CodexThinkingCapacity = { defaultThinkingCapacity }
+  ) {
+    self.transport = transport
+    self.thinkingCapacity = thinkingCapacity
+  }
 
   func account() async throws -> CodexAccount? {
     let result = try await transport.request("account/read", params: .object(["refreshToken": .bool(false)]))
@@ -95,7 +107,14 @@ struct CodexSubscriptionClient: ChatProvider {
           threadID = id
           try Task.checkCancellation()
           let turn = try await Task {
-            try await transport.request("turn/start", params: Self.turnParameters(threadID: id, request: request))
+            try await transport.request(
+              "turn/start",
+              params: Self.turnParameters(
+                threadID: id,
+                request: request,
+                thinkingCapacity: thinkingCapacity()
+              )
+            )
           }.value
           guard let activeTurnID = turn["turn"]["id"].string else { throw CodexError.invalidResponse }
           turnID = activeTurnID
@@ -159,14 +178,16 @@ struct CodexSubscriptionClient: ChatProvider {
     ])
   }
 
-  static func turnParameters(threadID: String, request: ChatRequest) throws -> CodexValue {
+  static func turnParameters(
+    threadID: String,
+    request: ChatRequest,
+    thinkingCapacity: CodexThinkingCapacity = defaultThinkingCapacity
+  ) throws -> CodexValue {
     var params: [String: CodexValue] = [
       "threadId": .string(threadID),
       "input": .array([.object(["type": .string("text"), "text": .string(try prompt(for: request))])]),
     ]
-    if request.route.modelID == defaultModelID {
-      params["effort"] = .string(defaultReasoningEffort)
-    }
+    params["effort"] = .string(thinkingCapacity.rawValue)
     return .object(params)
   }
 

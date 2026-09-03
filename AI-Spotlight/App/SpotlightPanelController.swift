@@ -53,9 +53,12 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   private let panel: SpotlightPanel
   private let sizeStore: PanelSizeStore
 
+  var isVisible: Bool { panel.isVisible }
+
   init(
     glassAppearance: GlassAppearanceSettings,
-    sizeStore: PanelSizeStore = PanelSizeStore()
+    sizeStore: PanelSizeStore = PanelSizeStore(),
+    contentView: NSView? = nil
   ) {
     self.sizeStore = sizeStore
     panel = SpotlightPanel(
@@ -78,7 +81,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     panel.hidesOnDeactivate = false
     panel.isMovableByWindowBackground = true
     panel.minSize = PanelSizeStore.minimumSize
-    panel.contentView = NSHostingView(
+    panel.contentView = contentView ?? NSHostingView(
       rootView: AppShellView(glassAppearance: glassAppearance)
     )
 
@@ -134,6 +137,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       NotificationCenter.default.post(name: .stopStreamingRequested, object: nil)
     case .cycleRecentChat:
       NotificationCenter.default.post(name: .recentChatCycleRequested, object: nil)
+    case .settings:
+      NotificationCenter.default.post(name: .settingsRequested, object: nil)
     }
   }
 }
