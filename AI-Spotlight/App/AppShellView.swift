@@ -151,7 +151,7 @@ struct AppShellView: View {
     .task {
       await localChat.refreshInstalledModel()
     }
-    .onChange(of: selectedMode) { _, mode in
+    .onChange(of: selectedMode, initial: true) { _, mode in
       autoRouteDecision = nil
       guard mode == .cloud || mode == .auto else { return }
       Task {

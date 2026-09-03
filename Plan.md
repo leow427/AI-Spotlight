@@ -82,6 +82,8 @@ The first prototype includes Local, Cloud, and Auto modes only. Web search, Brav
 
    - Route ordinary writing, summaries, and conversation locally.
    - Route coding, complex reasoning, or prompts beyond local context to the preferred cloud model.
+   - Detect reasoning using whole-word actions and combined depth, constraint, and prompt-length signals; favor Cloud for demanding requests without another model call. Length alone does not escalate ordinary summaries.
+   - Restore the saved Cloud connection when Auto first appears, as well as when switching modes.
    - Display the selected route and model before streaming begins.
    - If Cloud is not configured, remain Local and show a concise limitation notice. Explicit Local mode never makes a network request.
 

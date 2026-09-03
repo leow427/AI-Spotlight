@@ -319,10 +319,58 @@ struct AutoRouter: Sendable {
   }
 
   private static func requiresAdvancedReasoning(_ prompt: String) -> Bool {
-    containsAny(prompt, [
-      "prove ", "derive ", "root cause analysis", "analyze the tradeoffs",
-      "step-by-step reasoning", "optimization problem", "formalize ",
+    // Whole words avoid matches such as "design" in "designer". Splitting also
+    // makes punctuation, repeated whitespace, and hyphen variants equivalent.
+    let tokens = prompt.split { !$0.isLetter && !$0.isNumber }.map(String.init)
+    let words = Set(tokens)
+    let normalized = " " + tokens.joined(separator: " ") + " "
+
+    // Strong reasoning requests should not depend on one exact stock phrase.
+    if !words.isDisjoint(with: [
+      "analyze", "analyse", "evaluate", "design", "solve", "calculate", "compute",
+      "prove", "derive", "diagnose", "troubleshoot", "optimize", "optimise",
+      "synthesize", "synthesise", "formalize", "formalise",
+    ]) || containsAny(normalized, [
+      " root cause ", " tradeoffs ", " trade offs ", " step by step reasoning ",
+      " think deeply ", " optimization problem ", " optimisation problem ",
+    ]) {
+      return true
+    }
+
+    // Three points deliberately favor Cloud: two analytical actions, or one
+    // action plus depth/constraints, outweigh the latency advantage of local.
+    // Count distinct actions so repeating a word does not inflate complexity.
+    let analyticalActions = words.intersection([
+      "compare", "contrast", "assess", "justify", "recommend", "recommendation",
+      "plan", "develop", "investigate", "choose", "infer",
     ])
+    var score = min(analyticalActions.count, 2) * 2
+    if !words.isDisjoint(with: ["explain", "explanation", "reason"]) {
+      score += 1
+    }
+    if !words.isDisjoint(with: [
+      "complex", "complicated", "advanced", "difficult", "rigorous", "thorough",
+      "comprehensive", "detailed", "deep", "depth", "nuanced",
+    ]) {
+      score += 2
+    }
+    if !words.isDisjoint(with: [
+      "probability", "proof", "hypothesis", "hypotheses", "causality",
+      "counterfactual", "optimization", "optimisation",
+    ]) {
+      score += 2
+    }
+    if !words.isDisjoint(with: [
+      "constraints", "dependencies", "assumptions", "risks", "alternatives",
+      "criteria", "uncertainty", "limitations",
+    ]) {
+      score += 1
+    }
+    // Longer instructions strengthen other evidence, but length alone never
+    // qualifies: a long passage to summarize can still use local context.
+    if tokens.count >= 100 { score += 1 }
+    if tokens.count >= 200 { score += 1 }
+    return score >= 3
   }
 
   private static func containsAny(_ prompt: String, _ phrases: [String]) -> Bool {
