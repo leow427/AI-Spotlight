@@ -10,6 +10,7 @@ struct AppShellView: View {
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var selectedMode = ChatMode.auto
+  @State private var autoRouteDecision: AutoRouter.Decision?
   @FocusState private var isComposerFocused: Bool
 
   init(
@@ -132,7 +133,8 @@ struct AppShellView: View {
       await localChat.refreshInstalledModel()
     }
     .onChange(of: selectedMode) { _, mode in
-      guard mode == .cloud else { return }
+      autoRouteDecision = nil
+      guard mode == .cloud || mode == .auto else { return }
       Task {
         if cloudSettings.preferredProvider == .chatGPT {
           await cloudSettings.refreshChatGPTAccount()
@@ -330,10 +332,49 @@ struct AppShellView: View {
       .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, alignment: .trailing)
     case .auto:
-      Text("Auto routing arrives in checkpoint 6.")
-        .font(.caption)
-        .foregroundStyle(.secondary)
+      autoRouteStatus
     }
+  }
+
+  @ViewBuilder
+  private var autoRouteStatus: some View {
+    HStack(spacing: 8) {
+      if case .failed(let message) = localChat.state {
+        Image(systemName: "exclamationmark.triangle")
+        Text(message)
+          .lineLimit(2)
+      } else if let decision = autoRouteDecision {
+        if let route = decision.route {
+          Image(systemName: route.mode == .local ? "laptopcomputer" : "cloud")
+          Text("Auto · \(route.mode.displayName) · \(decision.modelDisplayName ?? route.modelID)")
+            .lineLimit(1)
+          if localChat.state == .preparing || localChat.state == .streaming {
+            ProgressView()
+              .controlSize(.small)
+          }
+          if localChat.state == .streaming {
+            Button("Stop") { localChat.stopStreaming() }
+              .buttonStyle(.plain)
+          }
+        } else if let limitation = decision.limitation {
+          Image(systemName: "exclamationmark.triangle")
+          Text(limitation.message)
+            .lineLimit(2)
+        }
+      } else if let model = localChat.installedModel, autoCloudConfiguration == nil {
+        Image(systemName: "laptopcomputer")
+        Text("Cloud isn’t connected; Auto stays local · \(model.displayName)")
+          .lineLimit(1)
+      } else if localChat.installedModel != nil || autoCloudConfiguration != nil {
+        Image(systemName: "sparkles")
+        Text("Auto chooses the lowest-latency capable model.")
+      } else {
+        Text("Choose a local model or connect Cloud to use Auto.")
+      }
+    }
+    .font(.caption)
+    .foregroundStyle(.secondary)
+    .frame(maxWidth: .infinity, alignment: .trailing)
   }
 
   private var compactModeControls: some View {
@@ -393,7 +434,7 @@ struct AppShellView: View {
           case .cloud:
             cloudModelMenu
           case .auto:
-            Text("Auto chooses a route in checkpoint 6.")
+            Text("Auto keeps routine tasks local and uses Cloud only when needed.")
               .font(.caption)
               .foregroundStyle(.secondary)
           }
@@ -419,7 +460,7 @@ struct AppShellView: View {
     case .cloud:
       cloudSettings.isConfigured && !localChat.isBusy
     case .auto:
-      false
+      (localChat.installedModel != nil || autoCloudConfiguration != nil) && !localChat.isBusy
     }
   }
 
@@ -439,7 +480,10 @@ struct AppShellView: View {
         ? "Uses \(cloudSettings.preferredProvider.displayName) with a stateless request."
         : "Add a provider key and model in Advanced Settings."
     }
-    return "Local-first assistance, ready when you are."
+    if localChat.installedModel != nil, autoCloudConfiguration == nil {
+      return "Cloud is not connected, so Auto stays on this Mac."
+    }
+    return "Local-first assistance that uses Cloud only when it is needed."
   }
 
   private var modelMenu: some View {
@@ -534,8 +578,43 @@ struct AppShellView: View {
         modelID: cloudSettings.preferredModelID
       )
     case .auto:
-      break
+      let request = AutoRouter.Request(
+        selectedMode: .auto,
+        prompt: prompt,
+        contextMessages: localChat.messages,
+        localModel: localChat.installedModel,
+        cloud: autoCloudConfiguration
+      )
+      let decision: AutoRouter.Decision
+      if AutoRouter.shouldRun(for: .auto, cloud: autoCloudConfiguration) {
+        decision = AutoRouter.decide(request)
+      } else {
+        decision = AutoRouter.localFallback(localModel: localChat.installedModel)
+      }
+      autoRouteDecision = decision
+
+      guard let route = decision.route else { return }
+      switch route.mode {
+      case .local:
+        localChat.submit(prompt)
+      case .cloud:
+        guard let cloud = autoCloudConfiguration else { return }
+        localChat.submitCloud(prompt, provider: cloud.provider, modelID: cloud.modelID)
+      case .auto:
+        break
+      }
     }
+  }
+
+  private var autoCloudConfiguration: AutoRouter.CloudConfiguration? {
+    guard cloudSettings.isConfigured else { return nil }
+    let modelID = cloudSettings.preferredModelID
+    let displayName = cloudSettings.models.first(where: { $0.id == modelID })?.displayName ?? modelID
+    return AutoRouter.CloudConfiguration(
+      provider: cloudSettings.preferredProvider,
+      modelID: modelID,
+      modelDisplayName: displayName
+    )
   }
 }
 
