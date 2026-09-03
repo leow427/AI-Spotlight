@@ -34,6 +34,8 @@ final class SettingsWindowController: NSWindowController {
       defer: false
     )
     window.title = "AI Spotlight Settings"
+    // Apply the same best-effort capture exclusion as the chat panel.
+    window.sharingType = .none
     // Match the chat panel's level so Settings can appear in front without hiding it.
     window.level = .floating
     window.isReleasedWhenClosed = false

@@ -77,11 +77,37 @@ final class AppCommandTests: XCTestCase {
   }
 
   @MainActor
+  func testPanelRequestsCaptureExclusionWhileRemainingVisibleAndEditable() throws {
+    let draft = NSTextField(string: "Visible only where capture exclusion is supported")
+    let controller = SpotlightPanelController(
+      glassAppearance: GlassAppearanceSettings(),
+      contentView: draft
+    )
+    let window = try XCTUnwrap(draft.window)
+    defer { controller.hide() }
+
+    // Verify the flag is configured before the window's first presentation.
+    XCTAssertEqual(window.sharingType, .none)
+    controller.show()
+    XCTAssertTrue(controller.isVisible)
+    XCTAssertTrue(window.makeFirstResponder(draft))
+    draft.stringValue = "The local panel remains usable"
+    XCTAssertEqual(window.sharingType, .none)
+
+    controller.hide()
+    controller.show()
+    XCTAssertTrue(controller.isVisible)
+    XCTAssertEqual(window.sharingType, .none)
+    XCTAssertEqual(draft.stringValue, "The local panel remains usable")
+  }
+
+  @MainActor
   func testSettingsWindowOpensAndReopensWithoutASwiftUIScene() throws {
     let controller = SettingsWindowController(contentView: NSView())
     let window = try XCTUnwrap(controller.window)
     defer { window.close() }
 
+    XCTAssertEqual(window.sharingType, .none)
     controller.showSettings()
     XCTAssertTrue(window.isVisible)
     XCTAssertTrue(window.isKeyWindow)
@@ -90,6 +116,7 @@ final class AppCommandTests: XCTestCase {
 
     controller.showSettings()
     XCTAssertTrue(controller.window === window)
+    XCTAssertEqual(window.sharingType, .none)
     XCTAssertTrue(window.isVisible)
     XCTAssertTrue(window.isKeyWindow)
   }

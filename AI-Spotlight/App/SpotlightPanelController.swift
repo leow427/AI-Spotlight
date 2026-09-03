@@ -71,6 +71,9 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
     panel.delegate = self
     panel.title = "AI Spotlight"
+    // Best-effort exclusion for capture clients that honor the legacy window flag.
+    // ScreenCaptureKit may still include this window; keep it visible locally.
+    panel.sharingType = .none
     panel.isFloatingPanel = true
     panel.level = .floating
     panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
