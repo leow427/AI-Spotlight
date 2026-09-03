@@ -72,7 +72,8 @@ The first prototype includes Local, Cloud, and Auto modes only. Web search, Brav
    - Fetch and cache available models from each configured provider for 24 hours; allow a manual model ID if discovery fails.
    - Add Advanced Settings for API keys, connection tests, preferred cloud provider, and preferred cloud model.
    - Send cloud requests statelessly and disable OpenAI response storage with `store: false`.
-   - For distributed builds, support Sign in with Apple through an AI Spotlight backend that owns provider credentials, enforces a daily request allowance, and streams stateless provider responses. Keep Keychain-backed API keys as a developer fallback.
+   - Offer “Sign in with ChatGPT” through the locally installed Codex App Server, using the user's ChatGPT plan's Codex allowance. Keep this route separate from API billing and retain Keychain-backed API keys as an explicitly selected fallback.
+   - Keep Codex authentication in an isolated Application Support home with macOS Keychain credential storage. Use ephemeral, read-only, text-only requests; do not inherit the user's Codex plugins, hooks, or API credentials. No Apple development team or custom backend is required. See `docs/ChatGPT-Setup.md`.
 
 6. **Add predictable Auto mode**
 

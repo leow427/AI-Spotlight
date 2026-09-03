@@ -1,6 +1,7 @@
 import Foundation
 
 enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
+  case chatGPT = "chatgpt-codex"
   case openAI = "openai"
   case anthropic
 
@@ -8,6 +9,7 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
 
   var displayName: String {
     switch self {
+    case .chatGPT: "ChatGPT via Codex"
     case .openAI: "OpenAI"
     case .anthropic: "Anthropic"
     }
@@ -29,14 +31,11 @@ enum CloudProviderError: LocalizedError, Equatable, Sendable {
   case requestFailed(statusCode: Int, message: String?)
   case streamEndedUnexpectedly
   case providerMessage(String)
-  case backendNotConfigured
-  case invalidAppleCredential
-  case accountAuthenticationFailed
 
   var errorDescription: String? {
     switch self {
     case .missingAPIKey(let provider):
-      "Sign in with Apple or add an API key for \(provider.displayName) in Advanced Settings."
+      "Add an API key for \(provider.displayName) in Advanced Settings."
     case .offline:
       "The cloud provider could not be reached. Check your internet connection."
     case .authenticationFailed(let provider):
@@ -52,12 +51,6 @@ enum CloudProviderError: LocalizedError, Equatable, Sendable {
       "The cloud response ended before it completed."
     case .providerMessage(let message):
       message
-    case .backendNotConfigured:
-      "AI Spotlight account sign-in is not configured in this build."
-    case .invalidAppleCredential:
-      "Sign in with Apple did not return a valid identity credential."
-    case .accountAuthenticationFailed:
-      "Your AI Spotlight account session is invalid or expired. Sign in again."
     }
   }
 }
@@ -102,23 +95,22 @@ func normalizedCloudError(_ error: Error) -> Error {
 func cloudHTTPError(
   provider: CloudProviderID,
   statusCode: Int,
-  data: Data,
-  usesBackend: Bool = false
+  data: Data
 ) -> CloudProviderError {
   switch statusCode {
   case 401, 403:
-    return usesBackend ? .accountAuthenticationFailed : .authenticationFailed(provider)
+    return .authenticationFailed(provider)
   case 429:
     return .rateLimited(provider)
   default:
     return .requestFailed(
       statusCode: statusCode,
-      message: cloudServiceErrorMessage(in: data)
+      message: providerErrorMessage(in: data)
     )
   }
 }
 
-func cloudServiceErrorMessage(in data: Data) -> String? {
+private func providerErrorMessage(in data: Data) -> String? {
   guard !data.isEmpty,
         let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
     return nil

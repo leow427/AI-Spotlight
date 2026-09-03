@@ -14,8 +14,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - name: Test backend
-        run: npm test --prefix backend
       - name: Build and test
         run: >-
           xcodebuild test

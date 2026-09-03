@@ -12,37 +12,23 @@ actor CloudModelCatalog {
     var providers: [String: CacheEntry] = [:]
   }
 
-  private let accessResolver: any CloudAccessResolving
+  private let credentialStore: any CloudCredentialStore
   private let transport: any CloudNetworkTransport
   private let cacheURL: URL
   private let openAIModelsURL: URL
   private let anthropicModelsURL: URL
+  private let codex: CodexSubscriptionClient
 
   init(
     credentialStore: any CloudCredentialStore,
     transport: any CloudNetworkTransport,
     cacheDirectory: URL? = nil,
     openAIModelsURL: URL = URL(string: "https://api.openai.com/v1/models")!,
-    anthropicModelsURL: URL = URL(string: "https://api.anthropic.com/v1/models?limit=1000")!
+    anthropicModelsURL: URL = URL(string: "https://api.anthropic.com/v1/models?limit=1000")!,
+    codex: CodexSubscriptionClient = .live
   ) {
-    self.accessResolver = DirectCloudAccessResolver(credentialStore: credentialStore)
-    self.transport = transport
-    let directory = cacheDirectory ?? FileManager.default
-      .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
-      .appending(path: "AI Spotlight", directoryHint: .isDirectory)
-    cacheURL = directory.appending(path: "cloud-models.json")
-    self.openAIModelsURL = openAIModelsURL
-    self.anthropicModelsURL = anthropicModelsURL
-  }
-
-  init(
-    accessResolver: any CloudAccessResolving,
-    transport: any CloudNetworkTransport,
-    cacheDirectory: URL? = nil,
-    openAIModelsURL: URL = URL(string: "https://api.openai.com/v1/models")!,
-    anthropicModelsURL: URL = URL(string: "https://api.anthropic.com/v1/models?limit=1000")!
-  ) {
-    self.accessResolver = accessResolver
+    self.codex = codex
+    self.credentialStore = credentialStore
     self.transport = transport
     let directory = cacheDirectory ?? FileManager.default
       .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -56,8 +42,7 @@ actor CloudModelCatalog {
     for provider: CloudProviderID,
     now: Date = .now
   ) -> [CloudModel]? {
-    guard let access = try? accessResolver.access(for: provider),
-          let entry = loadArchive().providers[access.cacheKey(for: provider)],
+    guard let entry = loadArchive().providers[provider.rawValue],
           now.timeIntervalSince(entry.fetchedAt) < Self.cacheLifetime else {
       return nil
     }
@@ -69,18 +54,24 @@ actor CloudModelCatalog {
     forceRefresh: Bool = false,
     now: Date = .now
   ) async throws -> [CloudModel] {
-    guard let access = try accessResolver.access(for: provider) else {
-      throw CloudProviderError.missingAPIKey(provider)
-    }
-    let cacheKey = access.cacheKey(for: provider)
     var archive = loadArchive()
     if !forceRefresh,
-       let entry = archive.providers[cacheKey],
+       let entry = archive.providers[provider.rawValue],
        now.timeIntervalSince(entry.fetchedAt) < Self.cacheLifetime {
       return entry.models
     }
 
-    let request = makeRequest(provider: provider, access: access)
+    if provider == .chatGPT {
+      let discovered = try await codex.models()
+      archive.providers[provider.rawValue] = CacheEntry(fetchedAt: now, models: discovered)
+      try saveArchive(archive)
+      return discovered
+    }
+
+    guard let apiKey = try credentialStore.apiKey(for: provider), !apiKey.isEmpty else {
+      throw CloudProviderError.missingAPIKey(provider)
+    }
+    let request = try makeRequest(provider: provider, apiKey: apiKey)
     let response: CloudDataResponse
     do {
       response = try await transport.data(for: request)
@@ -91,8 +82,7 @@ actor CloudModelCatalog {
       throw cloudHTTPError(
         provider: provider,
         statusCode: response.statusCode,
-        data: response.data,
-        usesBackend: access.usesBackend
+        data: response.data
       )
     }
 
@@ -100,7 +90,7 @@ actor CloudModelCatalog {
     guard !discoveredModels.isEmpty else {
       throw CloudProviderError.invalidResponse
     }
-    archive.providers[cacheKey] = CacheEntry(
+    archive.providers[provider.rawValue] = CacheEntry(
       fetchedAt: now,
       models: discoveredModels
     )
@@ -108,20 +98,23 @@ actor CloudModelCatalog {
     return discoveredModels
   }
 
-  private func makeRequest(provider: CloudProviderID, access: CloudAccess) -> URLRequest {
-    let directURL = provider == .openAI ? openAIModelsURL : anthropicModelsURL
-    let url = access.endpoint(provider: provider, operation: "models", directURL: directURL)
+  func clearCache(for provider: CloudProviderID) throws {
+    var archive = loadArchive()
+    archive.providers.removeValue(forKey: provider.rawValue)
+    try saveArchive(archive)
+  }
+
+  private func makeRequest(provider: CloudProviderID, apiKey: String) throws -> URLRequest {
+    let url = provider == .openAI ? openAIModelsURL : anthropicModelsURL
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
-    if access.usesBackend {
-      request.setValue("Bearer \(access.credential)", forHTTPHeaderField: "Authorization")
-      return request
-    }
     switch provider {
+    case .chatGPT:
+      throw CodexError.invalidResponse
     case .openAI:
-      request.setValue("Bearer \(access.credential)", forHTTPHeaderField: "Authorization")
+      request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     case .anthropic:
-      request.setValue(access.credential, forHTTPHeaderField: "x-api-key")
+      request.setValue(apiKey, forHTTPHeaderField: "x-api-key")
       request.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
     }
     return request
@@ -132,6 +125,8 @@ actor CloudModelCatalog {
     provider: CloudProviderID
   ) throws -> [CloudModel] {
     switch provider {
+    case .chatGPT:
+      throw CodexError.invalidResponse
     case .openAI:
       struct Response: Decodable {
         struct Model: Decodable { let id: String }

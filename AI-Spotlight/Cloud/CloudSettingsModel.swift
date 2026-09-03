@@ -17,7 +17,7 @@ struct CloudPreferencesStore: @unchecked Sendable {
 
   func preferredProvider() -> CloudProviderID {
     defaults.string(forKey: Key.preferredProvider)
-      .flatMap(CloudProviderID.init(rawValue:)) ?? .openAI
+      .flatMap(CloudProviderID.init(rawValue:)) ?? .chatGPT
   }
 
   func setPreferredProvider(_ provider: CloudProviderID) {
@@ -44,27 +44,12 @@ final class CloudSettingsModel: ObservableObject {
 
   static let shared: CloudSettingsModel = {
     let credentialStore = KeychainCredentialStore()
-    let sessionStore = KeychainCloudAccountSessionStore()
-    let backend = CloudBackendConfiguration.live
-    let transport = URLSessionCloudTransport.shared
-    let accessResolver = PreferredCloudAccessResolver(
-      credentialStore: credentialStore,
-      sessionStore: sessionStore,
-      backend: backend
-    )
     return CloudSettingsModel(
       credentialStore: credentialStore,
       catalog: CloudModelCatalog(
-        accessResolver: accessResolver,
-        transport: transport
-      ),
-      accessResolver: accessResolver,
-      sessionStore: sessionStore,
-      accountAuthenticator: URLSessionCloudAccountClient(
-        backend: backend,
-        transport: transport
-      ),
-      backend: backend
+        credentialStore: credentialStore,
+        transport: URLSessionCloudTransport.shared
+      )
     )
   }()
 
@@ -93,38 +78,35 @@ final class CloudSettingsModel: ObservableObject {
   @Published private(set) var isDiscovering = false
   @Published private(set) var credentialRevision = 0
   @Published private(set) var connectionStates: [CloudProviderID: ConnectionState] = [:]
-  @Published private(set) var isSignedIn = false
+  @Published private(set) var chatGPTAccount: CodexAccount?
   @Published private(set) var isSigningIn = false
   @Published private(set) var accountError: String?
+  @Published private(set) var isCodexAvailable: Bool
 
   private let credentialStore: any CloudCredentialStore
   private let catalog: CloudModelCatalog
   private let preferences: CloudPreferencesStore
-  private let accessResolver: any CloudAccessResolving
-  private let sessionStore: any CloudAccountSessionStoring
-  private let accountAuthenticator: any CloudAccountAuthenticating
-  private let backend: CloudBackendConfiguration
+  private let codex: CodexSubscriptionClient
+  private let codexAvailable: @Sendable () -> Bool
+  private var loginTask: Task<Void, Never>?
+  private var discoveryID = UUID()
 
   init(
     credentialStore: any CloudCredentialStore,
     catalog: CloudModelCatalog,
-    accessResolver: any CloudAccessResolving,
-    sessionStore: any CloudAccountSessionStoring,
-    accountAuthenticator: any CloudAccountAuthenticating,
-    backend: CloudBackendConfiguration,
-    preferences: CloudPreferencesStore = CloudPreferencesStore()
+    preferences: CloudPreferencesStore = CloudPreferencesStore(),
+    codex: CodexSubscriptionClient = .live,
+    codexAvailable: @escaping @Sendable () -> Bool = { CodexRuntimeConfiguration.executableURL() != nil }
   ) {
+    self.codex = codex
+    self.codexAvailable = codexAvailable
+    isCodexAvailable = codexAvailable()
     self.credentialStore = credentialStore
     self.catalog = catalog
-    self.accessResolver = accessResolver
-    self.sessionStore = sessionStore
-    self.accountAuthenticator = accountAuthenticator
-    self.backend = backend
     self.preferences = preferences
     let provider = preferences.preferredProvider()
     preferredProvider = provider
     preferredModelID = preferences.preferredModel(for: provider)
-    isSignedIn = (try? sessionStore.session()) != nil
   }
 
   var isConfigured: Bool {
@@ -132,18 +114,65 @@ final class CloudSettingsModel: ObservableObject {
       && !preferredModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
   }
 
-  var isAccountSignInAvailable: Bool { backend.isConfigured }
-
   func hasCloudAccess(for provider: CloudProviderID) -> Bool {
-    (try? accessResolver.access(for: provider)) != nil
+    provider == .chatGPT ? chatGPTAccount != nil : hasAPIKey(for: provider)
+  }
+
+  func refreshChatGPTAccount() async {
+    guard !isSigningIn else { return }
+    isCodexAvailable = codexAvailable()
+    guard isCodexAvailable else { chatGPTAccount = nil; return }
+    do {
+      chatGPTAccount = try await codex.account()
+      accountError = nil
+    } catch {
+      chatGPTAccount = nil
+      accountError = error.localizedDescription
+    }
+  }
+
+  func signInWithChatGPT(openURL: @escaping @Sendable (URL) async -> Bool) {
+    guard !isSigningIn else { return }
+    isSigningIn = true
+    accountError = nil
+    loginTask = Task {
+      defer { isSigningIn = false; loginTask = nil }
+      do {
+        chatGPTAccount = try await codex.signIn(openURL: openURL)
+        try await catalog.clearCache(for: .chatGPT)
+        preferredProvider = .chatGPT
+        await discoverModels(forceRefresh: true)
+      } catch is CancellationError {
+        // Cancelling the browser flow is not a connection error.
+      } catch {
+        accountError = error.localizedDescription
+      }
+    }
+  }
+
+  func cancelSignIn() { loginTask?.cancel() }
+
+  func signOutOfChatGPT() async {
+    guard !isSigningIn else { return }
+    do {
+      try await codex.signOut()
+      chatGPTAccount = nil
+      accountError = nil
+      if preferredProvider == .chatGPT { models = [] }
+      try await catalog.clearCache(for: .chatGPT)
+    } catch {
+      accountError = error.localizedDescription
+    }
   }
 
   func hasAPIKey(for provider: CloudProviderID) -> Bool {
+    guard provider != .chatGPT else { return false }
     guard let apiKey = try? credentialStore.apiKey(for: provider) else { return false }
     return !apiKey.isEmpty
   }
 
   func saveAPIKey(_ apiKey: String, for provider: CloudProviderID) throws {
+    guard provider != .chatGPT else { throw CodexError.notSignedIn }
     let trimmedAPIKey = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedAPIKey.isEmpty else { return }
     try credentialStore.setAPIKey(trimmedAPIKey, for: provider)
@@ -157,58 +186,31 @@ final class CloudSettingsModel: ObservableObject {
     connectionStates[provider] = .idle
   }
 
-  func signInWithApple(identityToken: Data, nonce: String) async {
-    guard !isSigningIn else { return }
-    isSigningIn = true
-    accountError = nil
-    defer { isSigningIn = false }
-    do {
-      let session = try await accountAuthenticator.signIn(
-        identityToken: identityToken,
-        nonce: nonce
-      )
-      try sessionStore.setSession(session)
-      isSignedIn = true
-      credentialRevision += 1
-      models = []
-      await discoverModels(forceRefresh: true)
-    } catch {
-      accountError = error.localizedDescription
-      isSignedIn = false
-    }
-  }
-
-  func signOut() {
-    do {
-      try sessionStore.removeSession()
-      isSignedIn = false
-      accountError = nil
-      credentialRevision += 1
-      models = []
-      Task { await loadCachedModels() }
-    } catch {
-      accountError = error.localizedDescription
-    }
-  }
-
   func loadCachedModels() async {
-    if let cached = await catalog.cachedModels(for: preferredProvider) {
+    let provider = preferredProvider
+    if let cached = await catalog.cachedModels(for: provider), provider == preferredProvider {
       models = cached
       selectFirstModelIfNeeded()
     }
   }
 
   func discoverModels(forceRefresh: Bool = false) async {
+    let provider = preferredProvider
+    let id = UUID()
+    discoveryID = id
     isDiscovering = true
     discoveryError = nil
-    defer { isDiscovering = false }
+    defer { if discoveryID == id { isDiscovering = false } }
     do {
-      models = try await catalog.models(
-        for: preferredProvider,
+      let discovered = try await catalog.models(
+        for: provider,
         forceRefresh: forceRefresh
       )
+      guard preferredProvider == provider, discoveryID == id else { return }
+      models = discovered
       selectFirstModelIfNeeded()
     } catch {
+      guard preferredProvider == provider, discoveryID == id else { return }
       models = []
       discoveryError = error.localizedDescription
     }
