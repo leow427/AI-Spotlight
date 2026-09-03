@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 struct AppShellView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
+  @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
   @State private var draft = ""
   @State private var isModelImporterPresented = false
@@ -13,11 +14,17 @@ struct AppShellView: View {
 
   init(
     glassAppearance: GlassAppearanceSettings,
-    localEngine: any LocalModelEngine = LlamaCPPModelEngine()
+    localEngine: any LocalModelEngine = LlamaCPPModelEngine(),
+    cloudSettings: CloudSettingsModel = .shared,
+    cloudProviders: CloudProviderRegistry = .live
   ) {
     self.glassAppearance = glassAppearance
+    self.cloudSettings = cloudSettings
     _localChat = StateObject(
-      wrappedValue: LocalChatViewModel(engine: localEngine)
+      wrappedValue: LocalChatViewModel(
+        engine: localEngine,
+        cloudProviders: cloudProviders
+      )
     )
   }
 
@@ -65,7 +72,7 @@ struct AppShellView: View {
           conversation
 
           VStack(alignment: .trailing, spacing: 8) {
-            localModelStatus
+            routeStatus
             compactModeControls
             composer
           }
@@ -152,7 +159,7 @@ struct AppShellView: View {
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($isComposerFocused)
-        .disabled(!canSubmitLocally)
+        .disabled(!canSubmit)
         .onSubmit(submitDraft)
 
       Menu {
@@ -229,8 +236,9 @@ struct AppShellView: View {
   }
 
   @ViewBuilder
-  private var localModelStatus: some View {
-    if selectedMode == .local {
+  private var routeStatus: some View {
+    switch selectedMode {
+    case .local:
       HStack(spacing: 8) {
         switch localChat.state {
         case .installing:
@@ -272,8 +280,44 @@ struct AppShellView: View {
       .font(.caption)
       .foregroundStyle(.secondary)
       .frame(maxWidth: .infinity, alignment: .trailing)
-    } else {
-      Text(selectedMode == .auto ? "Auto routing arrives in checkpoint 6." : "Cloud mode arrives in checkpoint 5.")
+    case .cloud:
+      HStack(spacing: 8) {
+        if !cloudSettings.hasAPIKey(for: cloudSettings.preferredProvider) {
+          Text("Add a \(cloudSettings.preferredProvider.displayName) API key.")
+          SettingsLink { Text("Advanced Settings") }
+        } else if cloudSettings.preferredModelID.isEmpty {
+          Text("Choose a cloud model in Advanced Settings.")
+          SettingsLink { Text("Advanced Settings") }
+        } else {
+          switch localChat.state {
+          case .preparing:
+            ProgressView()
+              .controlSize(.small)
+            Text("Connecting to \(cloudSettings.preferredProvider.displayName)…")
+          case .streaming:
+            ProgressView()
+              .controlSize(.small)
+            Text("Streaming from \(cloudSettings.preferredProvider.displayName)")
+            Button("Stop") { localChat.stopStreaming() }
+              .buttonStyle(.plain)
+          case .failed(let message):
+            Image(systemName: "exclamationmark.triangle")
+            Text(message)
+              .lineLimit(2)
+          case .idle:
+            Image(systemName: "cloud")
+            Text("\(cloudSettings.preferredProvider.displayName) · \(cloudSettings.preferredModelID)")
+              .lineLimit(1)
+          case .installing, .downloading:
+            Text("Finish the local model task before using Cloud mode.")
+          }
+        }
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .trailing)
+    case .auto:
+      Text("Auto routing arrives in checkpoint 6.")
         .font(.caption)
         .foregroundStyle(.secondary)
     }
@@ -329,9 +373,20 @@ struct AppShellView: View {
 
         Divider()
 
-        modelMenu
-          .padding(.horizontal, 10)
-          .padding(.top, 2)
+        Group {
+          switch selectedMode {
+          case .local:
+            modelMenu
+          case .cloud:
+            cloudModelMenu
+          case .auto:
+            Text("Auto chooses a route in checkpoint 6.")
+              .font(.caption)
+              .foregroundStyle(.secondary)
+          }
+        }
+        .padding(.horizontal, 10)
+        .padding(.top, 2)
       }
       .padding(14)
       .frame(width: 300)
@@ -344,8 +399,15 @@ struct AppShellView: View {
     }
   }
 
-  private var canSubmitLocally: Bool {
-    selectedMode == .local && localChat.installedModel != nil && !localChat.isBusy
+  private var canSubmit: Bool {
+    switch selectedMode {
+    case .local:
+      localChat.installedModel != nil && !localChat.isBusy
+    case .cloud:
+      cloudSettings.isConfigured && !localChat.isBusy
+    case .auto:
+      false
+    }
   }
 
   private var welcomeSubtitle: String {
@@ -354,9 +416,12 @@ struct AppShellView: View {
         ? "Choose a GGUF model once, then chat completely offline."
         : "Runs on this Mac with no network requests."
     }
-    return selectedMode == .auto
-      ? "Local-first assistance, ready when you are."
-      : "Cloud providers are not configured yet."
+    if selectedMode == .cloud {
+      return cloudSettings.isConfigured
+        ? "Uses \(cloudSettings.preferredProvider.displayName) with a stateless request."
+        : "Add a provider key and model in Advanced Settings."
+    }
+    return "Local-first assistance, ready when you are."
   }
 
   private var modelMenu: some View {
@@ -404,11 +469,55 @@ struct AppShellView: View {
     .disabled(localChat.isBusy)
   }
 
+  private var cloudModelMenu: some View {
+    Menu {
+      if cloudSettings.models.isEmpty {
+        Text("No discovered models")
+      } else {
+        Section(cloudSettings.preferredProvider.displayName) {
+          ForEach(cloudSettings.models) { model in
+            Button {
+              cloudSettings.preferredModelID = model.id
+            } label: {
+              Label(
+                model.displayName,
+                systemImage: cloudSettings.preferredModelID == model.id ? "checkmark" : "cloud"
+              )
+            }
+          }
+        }
+      }
+
+      Divider()
+      SettingsLink {
+        Label("Advanced Settings…", systemImage: "gearshape")
+      }
+    } label: {
+      Label(
+        cloudSettings.preferredModelID.isEmpty ? "Choose Cloud Model" : cloudSettings.preferredModelID,
+        systemImage: "cloud"
+      )
+    }
+    .menuStyle(.borderlessButton)
+    .disabled(localChat.isBusy)
+  }
+
   private func submitDraft() {
-    guard canSubmitLocally else { return }
+    guard canSubmit else { return }
     let prompt = draft
     draft = ""
-    localChat.submit(prompt)
+    switch selectedMode {
+    case .local:
+      localChat.submit(prompt)
+    case .cloud:
+      localChat.submitCloud(
+        prompt,
+        provider: cloudSettings.preferredProvider,
+        modelID: cloudSettings.preferredModelID
+      )
+    case .auto:
+      break
+    }
   }
 }
 
@@ -492,13 +601,170 @@ private struct DeveloperToolsView: View {
 }
 
 struct SettingsView: View {
+  @ObservedObject private var settings: CloudSettingsModel
+  @State private var openAIAPIKey = ""
+  @State private var anthropicAPIKey = ""
+  @State private var formError: String?
+
+  init(settings: CloudSettingsModel = .shared) {
+    self.settings = settings
+  }
+
   var body: some View {
     Form {
-      Text("Settings will be added in a later checkpoint.")
-        .foregroundStyle(.secondary)
+      Section("Advanced Cloud Settings") {
+        Picker("Preferred provider", selection: $settings.preferredProvider) {
+          ForEach(CloudProviderID.allCases) { provider in
+            Text(provider.displayName).tag(provider)
+          }
+        }
+
+        if settings.models.isEmpty {
+          Text("Model discovery has not returned any models. Enter a model ID manually below.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          Picker("Preferred model", selection: $settings.preferredModelID) {
+            ForEach(settings.models) { model in
+              Text(model.displayName).tag(model.id)
+            }
+            if !settings.preferredModelID.isEmpty,
+               !settings.models.contains(where: { $0.id == settings.preferredModelID }) {
+              Text("Manual · \(settings.preferredModelID)").tag(settings.preferredModelID)
+            }
+          }
+        }
+
+        TextField("Manual model ID", text: $settings.preferredModelID)
+          .textFieldStyle(.roundedBorder)
+
+        HStack {
+          Button(settings.isDiscovering ? "Refreshing…" : "Refresh Models") {
+            Task { await settings.discoverModels(forceRefresh: true) }
+          }
+          .disabled(
+            settings.isDiscovering
+              || !settings.hasAPIKey(for: settings.preferredProvider)
+          )
+          if settings.isDiscovering {
+            ProgressView()
+              .controlSize(.small)
+          }
+        }
+
+        if let discoveryError = settings.discoveryError {
+          Text(discoveryError)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+      }
+
+      Section("OpenAI") {
+        SecureField(
+          settings.hasAPIKey(for: .openAI) ? "Replace stored API key" : "API key",
+          text: $openAIAPIKey
+        )
+        .textFieldStyle(.roundedBorder)
+
+        credentialButtons(provider: .openAI, apiKey: $openAIAPIKey)
+        connectionStatus(for: .openAI)
+
+        Text("OpenAI API usage requires separate API billing; a ChatGPT subscription does not include API access.")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+      }
+
+      Section("Anthropic") {
+        SecureField(
+          settings.hasAPIKey(for: .anthropic) ? "Replace stored API key" : "API key",
+          text: $anthropicAPIKey
+        )
+        .textFieldStyle(.roundedBorder)
+
+        credentialButtons(provider: .anthropic, apiKey: $anthropicAPIKey)
+        connectionStatus(for: .anthropic)
+      }
+
+      if let formError {
+        Text(formError)
+          .font(.caption)
+          .foregroundStyle(.red)
+      }
     }
     .formStyle(.grouped)
-    .frame(width: 420, height: 220)
+    .frame(width: 560, height: 600)
     .navigationTitle("AI Spotlight Settings")
+    .task {
+      await settings.loadCachedModels()
+      if settings.hasAPIKey(for: settings.preferredProvider), settings.models.isEmpty {
+        await settings.discoverModels()
+      }
+    }
+    .onChange(of: settings.preferredProvider) { _, provider in
+      guard settings.hasAPIKey(for: provider) else { return }
+      Task { await settings.discoverModels() }
+    }
+  }
+
+  private func credentialButtons(
+    provider: CloudProviderID,
+    apiKey: Binding<String>
+  ) -> some View {
+    HStack {
+      Button("Save to Keychain") {
+        do {
+          try settings.saveAPIKey(apiKey.wrappedValue, for: provider)
+          apiKey.wrappedValue = ""
+          formError = nil
+        } catch {
+          formError = error.localizedDescription
+        }
+      }
+      .disabled(apiKey.wrappedValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+      Button("Remove") {
+        do {
+          try settings.removeAPIKey(for: provider)
+          formError = nil
+        } catch {
+          formError = error.localizedDescription
+        }
+      }
+      .disabled(!settings.hasAPIKey(for: provider))
+
+      Spacer()
+
+      Button("Test Connection") {
+        Task { await settings.testConnection(to: provider) }
+      }
+      .disabled(
+        !settings.hasAPIKey(for: provider)
+          || settings.connectionState(for: provider) == .testing
+      )
+    }
+  }
+
+  @ViewBuilder
+  private func connectionStatus(for provider: CloudProviderID) -> some View {
+    switch settings.connectionState(for: provider) {
+    case .idle:
+      if settings.hasAPIKey(for: provider) {
+        Label("API key stored in Keychain", systemImage: "key.fill")
+          .foregroundStyle(.secondary)
+      }
+    case .testing:
+      HStack {
+        ProgressView()
+          .controlSize(.small)
+        Text("Testing connection…")
+      }
+      .foregroundStyle(.secondary)
+    case .connected(let modelCount):
+      Label("Connected · \(modelCount) models available", systemImage: "checkmark.circle.fill")
+        .foregroundStyle(.green)
+    case .failed(let message):
+      Label(message, systemImage: "exclamationmark.triangle.fill")
+        .foregroundStyle(.red)
+    }
   }
 }

@@ -35,6 +35,7 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   private let engine: any LocalModelEngine
+  private let cloudProviders: CloudProviderRegistry
   private let sessionStore: ChatSessionStore
   private let idleUnloadDelay: Duration
   private let sleep: Sleep
@@ -44,11 +45,13 @@ final class LocalChatViewModel: ObservableObject {
 
   init(
     engine: any LocalModelEngine,
+    cloudProviders: CloudProviderRegistry = .live,
     sessionStore: ChatSessionStore = ChatSessionStore(),
     idleUnloadDelay: Duration = .seconds(300),
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
   ) {
     self.engine = engine
+    self.cloudProviders = cloudProviders
     self.sessionStore = sessionStore
     self.idleUnloadDelay = idleUnloadDelay
     self.sleep = sleep
@@ -140,6 +143,63 @@ final class LocalChatViewModel: ObservableObject {
           guard let self else { return }
           self.state = .streaming
           self.append(fragment, to: responseID, in: sessionID)
+        }
+        guard !Task.isCancelled, let self else { return }
+        self.state = .idle
+        self.generationTask = nil
+      } catch is CancellationError {
+        self?.finishGeneration()
+      } catch {
+        guard let self else { return }
+        self.state = .failed(error.localizedDescription)
+        self.generationTask = nil
+      }
+    }
+  }
+
+  func submitCloud(
+    _ prompt: String,
+    provider providerID: CloudProviderID,
+    modelID: String
+  ) {
+    let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedPrompt.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
+    idleUnloadTask?.cancel()
+    let responseID = UUID()
+    let sessionID = ensureSelectedSession()
+    append(ChatMessage(role: .user, content: trimmedPrompt), to: sessionID)
+    guard let requestMessages = sessions.first(where: { $0.id == sessionID })?.messages else {
+      state = .failed("Unable to prepare this chat for the cloud provider.")
+      return
+    }
+    append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
+    state = .preparing
+
+    let route = Route(
+      mode: .cloud,
+      providerID: providerID.rawValue,
+      modelID: trimmedModelID,
+      usesNetwork: true
+    )
+    let provider = cloudProviders.provider(for: providerID)
+    let request = ChatRequest(
+      sessionID: sessionID,
+      messages: requestMessages,
+      route: route
+    )
+    generationTask = Task { [weak self] in
+      do {
+        for try await event in provider.stream(request) {
+          try Task.checkCancellation()
+          guard let self else { return }
+          switch event {
+          case .token(let fragment):
+            self.state = .streaming
+            self.append(fragment, to: responseID, in: sessionID)
+          case .completed:
+            break
+          }
         }
         guard !Task.isCancelled, let self else { return }
         self.state = .idle

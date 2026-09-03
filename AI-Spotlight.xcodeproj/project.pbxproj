@@ -28,6 +28,14 @@
 		E10000000000000000000002 /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* ChatSessionStore.swift */; };
 		E10000000000000000000003 /* LocalModelManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* LocalModelManifest.swift */; };
 		E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* ChatPersistenceTests.swift */; };
+		F10000000000000000000001 /* CloudDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* CloudDomain.swift */; };
+		F10000000000000000000002 /* KeychainCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* KeychainCredentialStore.swift */; };
+		F10000000000000000000003 /* CloudNetworking.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* CloudNetworking.swift */; };
+		F10000000000000000000004 /* ServerSentEvents.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000004 /* ServerSentEvents.swift */; };
+		F10000000000000000000005 /* CloudProviderClients.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000005 /* CloudProviderClients.swift */; };
+		F10000000000000000000006 /* CloudModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000006 /* CloudModelCatalog.swift */; };
+		F10000000000000000000007 /* CloudSettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* CloudSettingsModel.swift */; };
+		F10000000000000000000008 /* CloudModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000008 /* CloudModeTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -62,6 +70,14 @@
 		E20000000000000000000002 /* ChatSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionStore.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* LocalModelManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManifest.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* ChatPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPersistenceTests.swift; sourceTree = "<group>"; };
+		F20000000000000000000001 /* CloudDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudDomain.swift; sourceTree = "<group>"; };
+		F20000000000000000000002 /* KeychainCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStore.swift; sourceTree = "<group>"; };
+		F20000000000000000000003 /* CloudNetworking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudNetworking.swift; sourceTree = "<group>"; };
+		F20000000000000000000004 /* ServerSentEvents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerSentEvents.swift; sourceTree = "<group>"; };
+		F20000000000000000000005 /* CloudProviderClients.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudProviderClients.swift; sourceTree = "<group>"; };
+		F20000000000000000000006 /* CloudModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelCatalog.swift; sourceTree = "<group>"; };
+		F20000000000000000000007 /* CloudSettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSettingsModel.swift; sourceTree = "<group>"; };
+		F20000000000000000000008 /* CloudModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModeTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* PrimaryAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimaryAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000009 /* PrimaryAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimaryAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -99,6 +115,7 @@
 			children = (
 				A70000000000000000000003 /* App */,
 				E70000000000000000000001 /* Chat */,
+				F70000000000000000000001 /* Cloud */,
 				D70000000000000000000001 /* LocalInference */,
 				A70000000000000000000004 /* Resources */,
 			);
@@ -136,6 +153,7 @@
 				A20000000000000000000007 /* AppCommandTests.swift */,
 				D20000000000000000000005 /* LocalInferenceTests.swift */,
 				E20000000000000000000004 /* ChatPersistenceTests.swift */,
+				F20000000000000000000008 /* CloudModeTests.swift */,
 			);
 			path = "AI-SpotlightTests";
 			sourceTree = "<group>";
@@ -168,6 +186,20 @@
 				E20000000000000000000002 /* ChatSessionStore.swift */,
 			);
 			path = Chat;
+			sourceTree = "<group>";
+		};
+		F70000000000000000000001 /* Cloud */ = {
+			isa = PBXGroup;
+			children = (
+				F20000000000000000000001 /* CloudDomain.swift */,
+				F20000000000000000000002 /* KeychainCredentialStore.swift */,
+				F20000000000000000000003 /* CloudNetworking.swift */,
+				F20000000000000000000004 /* ServerSentEvents.swift */,
+				F20000000000000000000005 /* CloudProviderClients.swift */,
+				F20000000000000000000006 /* CloudModelCatalog.swift */,
+				F20000000000000000000007 /* CloudSettingsModel.swift */,
+			);
+			path = Cloud;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -283,6 +315,13 @@
 				E10000000000000000000001 /* ChatDomain.swift in Sources */,
 				E10000000000000000000002 /* ChatSessionStore.swift in Sources */,
 				E10000000000000000000003 /* LocalModelManifest.swift in Sources */,
+				F10000000000000000000001 /* CloudDomain.swift in Sources */,
+				F10000000000000000000002 /* KeychainCredentialStore.swift in Sources */,
+				F10000000000000000000003 /* CloudNetworking.swift in Sources */,
+				F10000000000000000000004 /* ServerSentEvents.swift in Sources */,
+				F10000000000000000000005 /* CloudProviderClients.swift in Sources */,
+				F10000000000000000000006 /* CloudModelCatalog.swift in Sources */,
+				F10000000000000000000007 /* CloudSettingsModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -293,6 +332,7 @@
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
 				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
 				E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */,
+				F10000000000000000000008 /* CloudModeTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
