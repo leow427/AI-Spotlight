@@ -3,6 +3,9 @@ import SwiftUI
 struct AppShellView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @State private var draft = ""
+  @State private var isModePalettePresented = false
+  @State private var selectedMode = ChatModeOption.auto
+  @FocusState private var isComposerFocused: Bool
 
   private let recentChats = [
     "Welcome to AI Spotlight",
@@ -55,14 +58,37 @@ struct AppShellView: View {
 
           Spacer()
 
-          composer
-            .padding(20)
+          VStack(alignment: .trailing, spacing: 8) {
+            compactModeControls
+            composer
+          }
+          .padding(20)
         }
+      }
+
+      if isModePalettePresented {
+        modePalette
       }
     }
     .frame(minWidth: 640, minHeight: 420)
+    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 24, style: .continuous)
+        .stroke(.white.opacity(0.14), lineWidth: 0.5)
+    }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       draft = ""
+      isModePalettePresented = false
+      isComposerFocused = true
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .modePaletteRequested)) { _ in
+      isModePalettePresented.toggle()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .panelPresented)) { _ in
+      isComposerFocused = true
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .stopStreamingRequested)) { _ in
+      // Streaming is introduced in checkpoint 3; this notification is its cancellation hook.
     }
   }
 
@@ -91,11 +117,20 @@ struct AppShellView: View {
       TextField("Ask anything", text: $draft, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
+        .focused($isComposerFocused)
 
-      Picker("Model", selection: .constant("Local")) {
-        Text("Local").tag("Local")
+      Menu {
+        ForEach(ChatModeOption.allCases) { mode in
+          Button {
+            selectedMode = mode
+          } label: {
+            Label(mode.rawValue, systemImage: mode.systemImage)
+          }
+        }
+      } label: {
+        Label(selectedMode.rawValue, systemImage: selectedMode.systemImage)
       }
-      .labelsHidden()
+      .menuStyle(.borderlessButton)
       .fixedSize()
     }
     .padding(.horizontal, 14)
@@ -108,6 +143,89 @@ struct AppShellView: View {
     .overlay {
       RoundedRectangle(cornerRadius: 18)
         .stroke(.white.opacity(0.16), lineWidth: 0.5)
+    }
+  }
+
+  private var compactModeControls: some View {
+    Picker("Mode", selection: $selectedMode) {
+      ForEach(ChatModeOption.allCases) { mode in
+        Text(mode.rawValue).tag(mode)
+      }
+    }
+    .pickerStyle(.segmented)
+    .labelsHidden()
+    .controlSize(.small)
+    .frame(width: 190)
+  }
+
+  private var modePalette: some View {
+    ZStack {
+      Color.black.opacity(0.12)
+        .ignoresSafeArea()
+        .onTapGesture {
+          isModePalettePresented = false
+          isComposerFocused = true
+        }
+
+      VStack(alignment: .leading, spacing: 8) {
+        Text("Mode & Model")
+          .font(.headline)
+          .padding(.bottom, 2)
+
+        ForEach(ChatModeOption.allCases) { mode in
+          Button {
+            selectedMode = mode
+            isModePalettePresented = false
+            isComposerFocused = true
+          } label: {
+            HStack(spacing: 10) {
+              Image(systemName: mode.systemImage)
+                .frame(width: 18)
+              Text(mode.rawValue)
+              Spacer()
+              if selectedMode == mode {
+                Image(systemName: "checkmark")
+              }
+            }
+            .contentShape(Rectangle())
+          }
+          .buttonStyle(.plain)
+          .padding(.horizontal, 10)
+          .padding(.vertical, 8)
+        }
+
+        Divider()
+
+        Label("Local model setup arrives in checkpoint 3", systemImage: "cpu")
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .padding(.horizontal, 10)
+          .padding(.top, 2)
+      }
+      .padding(14)
+      .frame(width: 300)
+      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
+      .overlay {
+        RoundedRectangle(cornerRadius: 18)
+          .stroke(.white.opacity(0.16), lineWidth: 0.5)
+      }
+      .shadow(radius: 24, y: 10)
+    }
+  }
+}
+
+private enum ChatModeOption: String, CaseIterable, Identifiable {
+  case auto = "Auto"
+  case local = "Local"
+  case cloud = "Cloud"
+
+  var id: Self { self }
+
+  var systemImage: String {
+    switch self {
+    case .auto: "sparkles"
+    case .local: "laptopcomputer"
+    case .cloud: "cloud"
     }
   }
 }

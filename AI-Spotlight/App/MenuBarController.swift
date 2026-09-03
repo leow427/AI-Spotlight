@@ -3,6 +3,11 @@ import AppKit
 @MainActor
 final class MenuBarController: NSObject {
   private var statusItem: NSStatusItem?
+  private let panelController: SpotlightPanelController
+
+  init(panelController: SpotlightPanelController) {
+    self.panelController = panelController
+  }
 
   func install() {
     guard statusItem == nil else { return }
@@ -36,16 +41,16 @@ final class MenuBarController: NSObject {
   }
 
   @objc private func openApp() {
-    revealMainWindow()
+    panelController.show()
   }
 
   @objc private func startNewChat() {
-    revealMainWindow()
+    panelController.show()
     NotificationCenter.default.post(name: .newChatRequested, object: nil)
   }
 
   @objc private func hideApp() {
-    NSApp.hide(nil)
+    panelController.hide()
   }
 
   @objc private func openSettings() {
@@ -58,13 +63,4 @@ final class MenuBarController: NSObject {
     NSApp.terminate(nil)
   }
 
-  private func revealMainWindow() {
-    NSApp.unhide(nil)
-    NSApp.activate(ignoringOtherApps: true)
-
-    let mainWindow = NSApp.windows.first { window in
-      window.canBecomeMain && window.title == "AI Spotlight"
-    }
-    mainWindow?.makeKeyAndOrderFront(nil)
-  }
 }
