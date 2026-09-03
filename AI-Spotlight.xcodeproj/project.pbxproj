@@ -404,7 +404,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				AI_SPOTLIGHT_BACKEND_URL = "";
-				CODE_SIGN_ENTITLEMENTS = "AI-Spotlight/Resources/AI-Spotlight.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -423,7 +422,6 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				AI_SPOTLIGHT_BACKEND_URL = "";
-				CODE_SIGN_ENTITLEMENTS = "AI-Spotlight/Resources/AI-Spotlight.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;

@@ -7,11 +7,12 @@ The service intentionally stores no prompts or responses. D1 stores only a one-w
 ## Configure
 
 1. Enable Sign in with Apple for the `com.leow427.AISpotlight` app identifier in the Apple Developer portal. Use a different bundle identifier only if `APPLE_CLIENT_ID` and the Xcode target are changed together.
-2. Create a D1 database and replace the placeholder `database_id` in `wrangler.jsonc`.
-3. Apply the quota migration with `npx wrangler@4 d1 migrations apply ai-spotlight-quota --remote`.
-4. Add `SESSION_SECRET`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` with `npx wrangler@4 secret put NAME`. Generate `SESSION_SECRET` with at least 32 random characters.
-5. Deploy with `npx wrangler@4 deploy`.
-6. Set the Xcode build setting `AI_SPOTLIGHT_BACKEND_URL` to the deployed HTTPS origin. Do not include `/v1` or a trailing API path.
+2. Select an Apple development team for the app target in Xcode, then add the Sign in with Apple capability under **Signing & Capabilities**. The entitlement is intentionally not assigned in the checked-in build settings, so contributors without a development team can build and use the API-key fallback.
+3. Create a D1 database and replace the placeholder `database_id` in `wrangler.jsonc`.
+4. Apply the quota migration with `npx wrangler@4 d1 migrations apply ai-spotlight-quota --remote`.
+5. Add `SESSION_SECRET`, `OPENAI_API_KEY`, and `ANTHROPIC_API_KEY` with `npx wrangler@4 secret put NAME`. Generate `SESSION_SECRET` with at least 32 random characters.
+6. Deploy with `npx wrangler@4 deploy`.
+7. Set the Xcode build setting `AI_SPOTLIGHT_BACKEND_URL` to the deployed HTTPS origin. Do not include `/v1` or a trailing API path.
 
 For local Worker development, copy `.dev.vars.example` to `.dev.vars` and replace every placeholder. `.dev.vars` is ignored by Git.
 
