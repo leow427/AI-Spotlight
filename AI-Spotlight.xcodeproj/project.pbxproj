@@ -24,6 +24,10 @@
 		D10000000000000000000005 /* LlamaBridge in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000001 /* LlamaBridge */; };
 		D10000000000000000000006 /* LocalInferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* LocalInferenceTests.swift */; };
 		D10000000000000000000007 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* ThirdPartyNotices.txt */; };
+		E10000000000000000000001 /* ChatDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* ChatDomain.swift */; };
+		E10000000000000000000002 /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* ChatSessionStore.swift */; };
+		E10000000000000000000003 /* LocalModelManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* LocalModelManifest.swift */; };
+		E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* ChatPersistenceTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -54,6 +58,10 @@
 		D20000000000000000000004 /* LocalChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChatViewModel.swift; sourceTree = "<group>"; };
 		D20000000000000000000005 /* LocalInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalInferenceTests.swift; sourceTree = "<group>"; };
 		D20000000000000000000006 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
+		E20000000000000000000001 /* ChatDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDomain.swift; sourceTree = "<group>"; };
+		E20000000000000000000002 /* ChatSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionStore.swift; sourceTree = "<group>"; };
+		E20000000000000000000003 /* LocalModelManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManifest.swift; sourceTree = "<group>"; };
+		E20000000000000000000004 /* ChatPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPersistenceTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000008 /* PrimaryAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimaryAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000009 /* PrimaryAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimaryAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -90,6 +98,7 @@
 			isa = PBXGroup;
 			children = (
 				A70000000000000000000003 /* App */,
+				E70000000000000000000001 /* Chat */,
 				D70000000000000000000001 /* LocalInference */,
 				A70000000000000000000004 /* Resources */,
 			);
@@ -126,6 +135,7 @@
 			children = (
 				A20000000000000000000007 /* AppCommandTests.swift */,
 				D20000000000000000000005 /* LocalInferenceTests.swift */,
+				E20000000000000000000004 /* ChatPersistenceTests.swift */,
 			);
 			path = "AI-SpotlightTests";
 			sourceTree = "<group>";
@@ -146,8 +156,18 @@
 				D20000000000000000000003 /* LlamaCPPModelEngine.swift */,
 				D20000000000000000000002 /* LocalModelInstallationStore.swift */,
 				D20000000000000000000001 /* LocalModelEngine.swift */,
+				E20000000000000000000003 /* LocalModelManifest.swift */,
 			);
 			path = LocalInference;
+			sourceTree = "<group>";
+		};
+		E70000000000000000000001 /* Chat */ = {
+			isa = PBXGroup;
+			children = (
+				E20000000000000000000001 /* ChatDomain.swift */,
+				E20000000000000000000002 /* ChatSessionStore.swift */,
+			);
+			path = Chat;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -260,6 +280,9 @@
 				D10000000000000000000002 /* LocalModelInstallationStore.swift in Sources */,
 				D10000000000000000000003 /* LlamaCPPModelEngine.swift in Sources */,
 				D10000000000000000000004 /* LocalChatViewModel.swift in Sources */,
+				E10000000000000000000001 /* ChatDomain.swift in Sources */,
+				E10000000000000000000002 /* ChatSessionStore.swift in Sources */,
+				E10000000000000000000003 /* LocalModelManifest.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -269,6 +292,7 @@
 			files = (
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
 				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
+				E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

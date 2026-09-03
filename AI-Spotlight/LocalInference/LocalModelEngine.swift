@@ -1,6 +1,6 @@
 import Foundation
 
-struct LocalModel: Sendable, Equatable {
+struct LocalModel: Codable, Sendable, Equatable, Identifiable {
   let id: String
   let displayName: String
   let fileURL: URL
@@ -25,6 +25,12 @@ struct LocalModelRequest: Sendable, Equatable {
 protocol LocalModelEngine: Sendable {
   func install(_ model: LocalModel) async throws
   func installedModel() async -> LocalModel?
+  func installedModels() async -> [LocalModel]
+  func selectModel(id: String) async throws
+  func download(
+    _ model: LocalModelDescriptor,
+    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
+  ) async throws -> LocalModel
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error>
   func unload() async
 }
@@ -32,6 +38,7 @@ protocol LocalModelEngine: Sendable {
 enum LocalInferenceError: LocalizedError, Equatable {
   case noModelInstalled
   case invalidModelFile
+  case unknownInstalledModel
   case bridgeFailure(String)
 
   var errorDescription: String? {
@@ -40,6 +47,8 @@ enum LocalInferenceError: LocalizedError, Equatable {
       "Choose a GGUF model before using Local mode."
     case .invalidModelFile:
       "The selected file is not a readable GGUF model."
+    case .unknownInstalledModel:
+      "That local model is no longer installed."
     case .bridgeFailure(let message):
       message
     }

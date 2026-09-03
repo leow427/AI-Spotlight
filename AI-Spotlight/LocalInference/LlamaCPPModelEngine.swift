@@ -3,6 +3,7 @@ import LlamaBridge
 
 actor LlamaCPPModelEngine: LocalModelEngine {
   private let installationStore: LocalModelInstallationStore
+  private let catalog: LocalModelCatalog
   private let contextSize: Int32
   private var engineHandle: AISLlamaEngineHandle?
   private var loadedModelURL: URL?
@@ -12,6 +13,7 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     contextSize: Int32 = 4_096
   ) {
     self.installationStore = installationStore
+    catalog = LocalModelCatalog(installationStore: installationStore)
     self.contextSize = contextSize
   }
 
@@ -22,6 +24,23 @@ actor LlamaCPPModelEngine: LocalModelEngine {
 
   func installedModel() async -> LocalModel? {
     installationStore.installedModel()
+  }
+
+  func installedModels() async -> [LocalModel] {
+    installationStore.installedModels()
+  }
+
+  func selectModel(id: String) async throws {
+    try installationStore.selectModel(id: id)
+    releaseEngine()
+  }
+
+  func download(
+    _ model: LocalModelDescriptor,
+    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
+  ) async throws -> LocalModel {
+    releaseEngine()
+    return try await catalog.download(model, progress: progress)
   }
 
   nonisolated func stream(

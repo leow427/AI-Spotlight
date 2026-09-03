@@ -132,6 +132,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       NotificationCenter.default.post(name: .modePaletteRequested, object: nil)
     case .stopStreaming:
       NotificationCenter.default.post(name: .stopStreamingRequested, object: nil)
+    case .cycleRecentChat:
+      NotificationCenter.default.post(name: .recentChatCycleRequested, object: nil)
     }
   }
 }

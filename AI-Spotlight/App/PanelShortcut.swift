@@ -4,6 +4,7 @@ enum PanelShortcut: Equatable {
   case newChat
   case modePalette
   case stopStreaming
+  case cycleRecentChat
 
   static func resolve(
     characters: String?,
@@ -11,6 +12,9 @@ enum PanelShortcut: Equatable {
   ) -> PanelShortcut? {
     let shortcutModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
     let relevantModifiers = modifiers.intersection(shortcutModifiers)
+    if relevantModifiers == .control, characters == "\t" {
+      return .cycleRecentChat
+    }
     guard relevantModifiers == .command else { return nil }
 
     switch characters?.lowercased() {

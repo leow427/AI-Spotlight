@@ -31,6 +31,17 @@ final class LocalInferenceTests: XCTestCase {
       Data("replacement fixture".utf8)
     )
     XCTAssertEqual(store.installedModel()?.displayName, "Replacement")
+
+    let secondSourceURL = root.appending(path: "second.gguf")
+    try Data("second fixture".utf8).write(to: secondSourceURL)
+    let secondInstalled = try store.install(
+      LocalModel(id: "Second Model", displayName: "Second", fileURL: secondSourceURL)
+    )
+    XCTAssertEqual(store.installedModels().map(\.id), ["Fixture Model", "Second Model"])
+
+    try store.selectModel(id: installed.id)
+    XCTAssertEqual(store.installedModel()?.id, installed.id)
+    XCTAssertEqual(secondInstalled.id, "Second Model")
   }
 
   func testInstallationStoreRejectsNonGGUFFile() throws {
@@ -65,7 +76,7 @@ final class LocalInferenceTests: XCTestCase {
         }
       }
     )
-    let viewModel = LocalChatViewModel(engine: engine)
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: makeSessionStore())
     await viewModel.refreshInstalledModel()
 
     viewModel.submit("Hello")
@@ -79,7 +90,7 @@ final class LocalInferenceTests: XCTestCase {
   @MainActor
   func testViewModelInstallsSelectedModelThroughEngine() async {
     let engine = MockLocalModelEngine()
-    let viewModel = LocalChatViewModel(engine: engine)
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: makeSessionStore())
     let selectedURL = URL(fileURLWithPath: "/tmp/My Model.gguf")
 
     viewModel.installModel(from: selectedURL)
@@ -100,7 +111,7 @@ final class LocalInferenceTests: XCTestCase {
         }
       }
     )
-    let viewModel = LocalChatViewModel(engine: engine)
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: makeSessionStore())
 
     viewModel.submit("Hello")
     await waitUntil {
@@ -126,7 +137,7 @@ final class LocalInferenceTests: XCTestCase {
         }
       }
     )
-    let viewModel = LocalChatViewModel(engine: engine)
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: makeSessionStore())
 
     viewModel.submit("Hello")
     await waitUntil { viewModel.messages.last?.content == "First" }
@@ -142,6 +153,7 @@ final class LocalInferenceTests: XCTestCase {
     let engine = MockLocalModelEngine(installedModel: fixtureModel())
     let viewModel = LocalChatViewModel(
       engine: engine,
+      sessionStore: makeSessionStore(),
       idleUnloadDelay: .seconds(300),
       sleep: { _ in }
     )
@@ -187,6 +199,13 @@ final class LocalInferenceTests: XCTestCase {
       fileURL: URL(fileURLWithPath: "/tmp/fixture.gguf")
     )
   }
+
+  private func makeSessionStore() -> ChatSessionStore {
+    ChatSessionStore(
+      applicationSupportDirectory: FileManager.default.temporaryDirectory
+        .appending(path: "LocalInferenceTests-\(UUID().uuidString)")
+    )
+  }
 }
 
 private enum MockError: LocalizedError {
@@ -228,6 +247,33 @@ private final class MockLocalModelEngine: LocalModelEngine, @unchecked Sendable 
 
   func installedModel() async -> LocalModel? {
     access { storedModel }
+  }
+
+  func installedModels() async -> [LocalModel] {
+    access { storedModel.map { [$0] } ?? [] }
+  }
+
+  func selectModel(id: String) async throws {
+    guard access({ storedModel?.id == id }) else {
+      throw LocalInferenceError.unknownInstalledModel
+    }
+  }
+
+  func download(
+    _ model: LocalModelDescriptor,
+    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
+  ) async throws -> LocalModel {
+    let localModel = LocalModel(
+      id: model.id,
+      displayName: model.displayName,
+      fileURL: URL(fileURLWithPath: "/tmp/\(model.id).gguf")
+    )
+    access { storedModel = localModel }
+    await progress(ModelDownloadProgress(
+      receivedByteCount: model.expectedByteCount,
+      expectedByteCount: model.expectedByteCount
+    ))
+    return localModel
   }
 
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> {

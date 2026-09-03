@@ -7,8 +7,15 @@ struct LocalModelInstallationStore: Sendable {
     let fileName: String
   }
 
+  private struct Library: Codable {
+    var selectedModelID: String?
+    var models: [Record]
+  }
+
   private let modelsDirectory: URL
   private let recordURL: URL
+
+  var modelsDirectoryURL: URL { modelsDirectory }
 
   init(modelsDirectory: URL? = nil) {
     let resolvedDirectory = modelsDirectory ?? FileManager.default
@@ -48,7 +55,11 @@ struct LocalModelInstallationStore: Sendable {
         displayName: model.displayName,
         fileName: fileName
       )
-      let data = try JSONEncoder().encode(record)
+      var library = loadLibrary()
+      library.models.removeAll { $0.id == record.id }
+      library.models.append(record)
+      library.selectedModelID = record.id
+      let data = try JSONEncoder().encode(library)
       try data.write(to: recordURL, options: .atomic)
       return LocalModel(
         id: record.id,
@@ -62,11 +73,43 @@ struct LocalModelInstallationStore: Sendable {
   }
 
   func installedModel() -> LocalModel? {
-    guard let data = try? Data(contentsOf: recordURL),
-          let record = try? JSONDecoder().decode(Record.self, from: data) else {
-      return nil
-    }
+    let library = loadLibrary()
+    guard let selectedModelID = library.selectedModelID,
+          let record = library.models.first(where: { $0.id == selectedModelID }) else { return nil }
+    return localModel(from: record)
+  }
 
+  func installedModels() -> [LocalModel] {
+    loadLibrary().models.compactMap(localModel(from:))
+      .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
+  }
+
+  func selectModel(id: String) throws {
+    var library = loadLibrary()
+    guard let record = library.models.first(where: { $0.id == id }),
+          localModel(from: record) != nil else {
+      throw LocalInferenceError.unknownInstalledModel
+    }
+    library.selectedModelID = id
+    let data = try JSONEncoder().encode(library)
+    try data.write(to: recordURL, options: .atomic)
+  }
+
+  private func loadLibrary() -> Library {
+    guard let data = try? Data(contentsOf: recordURL) else {
+      return Library(selectedModelID: nil, models: [])
+    }
+    if let library = try? JSONDecoder().decode(Library.self, from: data) {
+      return library
+    }
+    // Checkpoint 3 stored a single record. Keep that model when upgrading.
+    if let record = try? JSONDecoder().decode(Record.self, from: data) {
+      return Library(selectedModelID: record.id, models: [record])
+    }
+    return Library(selectedModelID: nil, models: [])
+  }
+
+  private func localModel(from record: Record) -> LocalModel? {
     let recordedFileURL = URL(fileURLWithPath: record.fileName)
     guard record.fileName == recordedFileURL.lastPathComponent,
           recordedFileURL.pathExtension.lowercased() == "gguf" else {

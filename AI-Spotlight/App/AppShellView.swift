@@ -8,16 +8,8 @@ struct AppShellView: View {
   @State private var draft = ""
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
-  @State private var selectedMode = ChatModeOption.auto
+  @State private var selectedMode = ChatMode.auto
   @FocusState private var isComposerFocused: Bool
-
-  private let recentChats = [
-    "Welcome to AI Spotlight",
-    "Local models",
-    "Writing notes",
-    "Project ideas",
-    "Quick questions",
-  ]
 
   init(
     glassAppearance: GlassAppearanceSettings,
@@ -37,12 +29,25 @@ struct AppShellView: View {
       NavigationSplitView {
         ScrollView {
           LazyVStack(alignment: .leading, spacing: 0) {
-            ForEach(recentChats, id: \.self) { title in
-              Label(title, systemImage: "message")
-                .lineLimit(1)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if localChat.sessions.isEmpty {
+              Text("No recent chats")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .padding(12)
+            } else {
+              ForEach(localChat.sessions) { session in
+                Button {
+                  localChat.selectSession(id: session.id)
+                } label: {
+                  Label(session.title, systemImage: "message")
+                    .lineLimit(1)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(localChat.selectedSessionID == session.id ? .white.opacity(0.10) : .clear)
+                }
+                .buttonStyle(.plain)
+              }
             }
 
             Divider()
@@ -103,6 +108,9 @@ struct AppShellView: View {
     .onReceive(NotificationCenter.default.publisher(for: .stopStreamingRequested)) { _ in
       localChat.stopStreaming()
     }
+    .onReceive(NotificationCenter.default.publisher(for: .recentChatCycleRequested)) { _ in
+      localChat.cycleRecentChat()
+    }
     .fileImporter(
       isPresented: $isModelImporterPresented,
       allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data],
@@ -148,15 +156,15 @@ struct AppShellView: View {
         .onSubmit(submitDraft)
 
       Menu {
-        ForEach(ChatModeOption.allCases) { mode in
+        ForEach(ChatMode.allCases) { mode in
           Button {
             selectedMode = mode
           } label: {
-            Label(mode.rawValue, systemImage: mode.systemImage)
+            Label(mode.displayName, systemImage: mode.systemImage)
           }
         }
       } label: {
-        Label(selectedMode.rawValue, systemImage: selectedMode.systemImage)
+        Label(selectedMode.displayName, systemImage: selectedMode.systemImage)
       }
       .menuStyle(.borderlessButton)
       .fixedSize()
@@ -229,6 +237,10 @@ struct AppShellView: View {
           ProgressView()
             .controlSize(.small)
           Text("Installing local model…")
+        case .downloading(let progress):
+          ProgressView(value: progress.fractionCompleted)
+            .frame(width: 72)
+          Text("Downloading \(progress.fractionCompleted, format: .percent.precision(.fractionLength(0)))")
         case .preparing:
           ProgressView()
             .controlSize(.small)
@@ -250,16 +262,10 @@ struct AppShellView: View {
             Image(systemName: "checkmark.circle")
             Text(model.displayName)
               .lineLimit(1)
-            Button("Change") {
-              isModelImporterPresented = true
-            }
-            .buttonStyle(.plain)
+            modelMenu
           } else {
             Text("A local GGUF model is required.")
-            Button("Choose Model") {
-              isModelImporterPresented = true
-            }
-            .buttonStyle(.plain)
+            modelMenu
           }
         }
       }
@@ -275,8 +281,8 @@ struct AppShellView: View {
 
   private var compactModeControls: some View {
     Picker("Mode", selection: $selectedMode) {
-      ForEach(ChatModeOption.allCases) { mode in
-        Text(mode.rawValue).tag(mode)
+      ForEach(ChatMode.allCases) { mode in
+        Text(mode.displayName).tag(mode)
       }
     }
     .pickerStyle(.segmented)
@@ -299,7 +305,7 @@ struct AppShellView: View {
           .font(.headline)
           .padding(.bottom, 2)
 
-        ForEach(ChatModeOption.allCases) { mode in
+        ForEach(ChatMode.allCases) { mode in
           Button {
             selectedMode = mode
             isModePalettePresented = false
@@ -308,7 +314,7 @@ struct AppShellView: View {
             HStack(spacing: 10) {
               Image(systemName: mode.systemImage)
                 .frame(width: 18)
-              Text(mode.rawValue)
+              Text(mode.displayName)
               Spacer()
               if selectedMode == mode {
                 Image(systemName: "checkmark")
@@ -323,9 +329,7 @@ struct AppShellView: View {
 
         Divider()
 
-        Label(localModelPaletteLabel, systemImage: "cpu")
-          .font(.caption)
-          .foregroundStyle(.secondary)
+        modelMenu
           .padding(.horizontal, 10)
           .padding(.top, 2)
       }
@@ -355,11 +359,49 @@ struct AppShellView: View {
       : "Cloud providers are not configured yet."
   }
 
-  private var localModelPaletteLabel: String {
-    if let model = localChat.installedModel {
-      return "Local: \(model.displayName)"
+  private var modelMenu: some View {
+    Menu {
+      if localChat.installedModels.isEmpty {
+        Text("No installed models")
+      } else {
+        Section("Installed") {
+          ForEach(localChat.installedModels) { model in
+            Button {
+              localChat.selectModel(id: model.id)
+            } label: {
+              Label(
+                model.displayName,
+                systemImage: localChat.installedModel?.id == model.id ? "checkmark" : "cpu"
+              )
+            }
+          }
+        }
+      }
+
+      let installedIDs = Set(localChat.installedModels.map(\.id))
+      let downloadableModels = LocalModelManifest.bundled.models.filter { !installedIDs.contains($0.id) }
+      if !downloadableModels.isEmpty {
+        Section("Download") {
+          ForEach(downloadableModels) { model in
+            Button {
+              selectedMode = .local
+              localChat.downloadModel(model)
+            } label: {
+              Text("\(model.displayName) · \(model.expectedByteCount, format: .byteCount(style: .file))")
+            }
+          }
+        }
+      }
+
+      Divider()
+      Button("Choose GGUF File…") {
+        isModelImporterPresented = true
+      }
+    } label: {
+      Label(localChat.installedModel?.displayName ?? "Choose Model", systemImage: "cpu")
     }
-    return "Local model not installed"
+    .menuStyle(.borderlessButton)
+    .disabled(localChat.isBusy)
   }
 
   private func submitDraft() {
@@ -371,7 +413,7 @@ struct AppShellView: View {
 }
 
 private struct LocalMessageView: View {
-  let message: LocalChatMessage
+  let message: ChatMessage
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -398,13 +440,7 @@ private struct LocalMessageView: View {
   }
 }
 
-private enum ChatModeOption: String, CaseIterable, Identifiable {
-  case auto = "Auto"
-  case local = "Local"
-  case cloud = "Cloud"
-
-  var id: Self { self }
-
+private extension ChatMode {
   var systemImage: String {
     switch self {
     case .auto: "sparkles"

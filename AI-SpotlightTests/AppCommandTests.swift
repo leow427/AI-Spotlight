@@ -37,6 +37,10 @@ final class AppCommandTests: XCTestCase {
       PanelShortcut.resolve(characters: ".", modifiers: .command),
       .stopStreaming
     )
+    XCTAssertEqual(
+      PanelShortcut.resolve(characters: "\t", modifiers: .control),
+      .cycleRecentChat
+    )
     XCTAssertNil(
       PanelShortcut.resolve(characters: "n", modifiers: [.command, .shift])
     )
