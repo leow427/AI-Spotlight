@@ -87,11 +87,10 @@ The first prototype includes Local, Cloud, and Auto modes only. Web search, Brav
    - Display the selected route and model before streaming begins.
    - If Cloud is not configured, remain Local and show a concise limitation notice. Explicit Local mode never makes a network request.
 
-7. **Add honest privacy behavior**
+7. **Add privacy behavior**
 
-   - Configure the panel as a standard AppKit utility panel; do not use private APIs or system shielding window levels.
-   - Offer `sharingType = .none` as an experimental best-effort setting, clearly labelled as unreliable.
-   - Do not promise screen-share exclusion. The dependable privacy action is instant dismissal through `Escape`, `⌥Space`, or the menu-bar Privacy Hide command.
+   - Configure the panel to be invisible to other screen sharing apps using the old utility NSWindow.sharingType = .none / NSWindowSharingNone.(i know this is no longer full proof)
+   -You may research if there is a better alternative for modern macOS, and if you find one, implement it. 
 
 ## Interfaces
 
