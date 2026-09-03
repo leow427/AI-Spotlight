@@ -1,8 +1,12 @@
+import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct AppShellView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
+  @StateObject private var localChat: LocalChatViewModel
   @State private var draft = ""
+  @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var selectedMode = ChatModeOption.auto
   @FocusState private var isComposerFocused: Bool
@@ -14,6 +18,16 @@ struct AppShellView: View {
     "Project ideas",
     "Quick questions",
   ]
+
+  init(
+    glassAppearance: GlassAppearanceSettings,
+    localEngine: any LocalModelEngine = LlamaCPPModelEngine()
+  ) {
+    self.glassAppearance = glassAppearance
+    _localChat = StateObject(
+      wrappedValue: LocalChatViewModel(engine: localEngine)
+    )
+  }
 
   var body: some View {
     ZStack {
@@ -43,22 +57,10 @@ struct AppShellView: View {
         .navigationTitle("Recent")
       } detail: {
         VStack(spacing: 0) {
-          Spacer()
-
-          VStack(spacing: 10) {
-            Image(systemName: "sparkles")
-              .font(.system(size: 30, weight: .light))
-              .foregroundStyle(.secondary)
-            Text("How can I help?")
-              .font(.title2.weight(.medium))
-            Text("Local-first assistance, ready when you are.")
-              .font(.callout)
-              .foregroundStyle(.secondary)
-          }
-
-          Spacer()
+          conversation
 
           VStack(alignment: .trailing, spacing: 8) {
+            localModelStatus
             compactModeControls
             composer
           }
@@ -78,6 +80,7 @@ struct AppShellView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       draft = ""
+      localChat.newChat()
       isModePalettePresented = false
       isComposerFocused = true
     }
@@ -85,10 +88,33 @@ struct AppShellView: View {
       isModePalettePresented.toggle()
     }
     .onReceive(NotificationCenter.default.publisher(for: .panelPresented)) { _ in
+      localChat.applicationBecameActive()
       isComposerFocused = true
     }
+    .onReceive(NotificationCenter.default.publisher(for: .panelHidden)) { _ in
+      localChat.applicationBecameInactive()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      localChat.applicationBecameActive()
+    }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
+      localChat.applicationBecameInactive()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .stopStreamingRequested)) { _ in
-      // Streaming is introduced in checkpoint 3; this notification is its cancellation hook.
+      localChat.stopStreaming()
+    }
+    .fileImporter(
+      isPresented: $isModelImporterPresented,
+      allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data],
+      allowsMultipleSelection: false
+    ) { result in
+      if case .success(let urls) = result, let url = urls.first {
+        localChat.installModel(from: url)
+        selectedMode = .local
+      }
+    }
+    .task {
+      await localChat.refreshInstalledModel()
     }
   }
 
@@ -118,6 +144,8 @@ struct AppShellView: View {
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($isComposerFocused)
+        .disabled(!canSubmitLocally)
+        .onSubmit(submitDraft)
 
       Menu {
         ForEach(ChatModeOption.allCases) { mode in
@@ -143,6 +171,105 @@ struct AppShellView: View {
     .overlay {
       RoundedRectangle(cornerRadius: 18)
         .stroke(.white.opacity(0.16), lineWidth: 0.5)
+    }
+  }
+
+  @ViewBuilder
+  private var conversation: some View {
+    if localChat.messages.isEmpty {
+      Spacer()
+
+      VStack(spacing: 10) {
+        Image(systemName: selectedMode == .local ? "laptopcomputer" : "sparkles")
+          .font(.system(size: 30, weight: .light))
+          .foregroundStyle(.secondary)
+        Text("How can I help?")
+          .font(.title2.weight(.medium))
+        Text(welcomeSubtitle)
+          .font(.callout)
+          .foregroundStyle(.secondary)
+          .multilineTextAlignment(.center)
+
+        if selectedMode == .local && localChat.installedModel == nil {
+          Button("Choose GGUF Model") {
+            isModelImporterPresented = true
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(localChat.isBusy)
+          .padding(.top, 4)
+        }
+      }
+
+      Spacer()
+    } else {
+      ScrollViewReader { proxy in
+        ScrollView {
+          LazyVStack(alignment: .leading, spacing: 18) {
+            ForEach(localChat.messages) { message in
+              LocalMessageView(message: message)
+                .id(message.id)
+            }
+          }
+          .padding(24)
+        }
+        .onChange(of: localChat.messages) { _, messages in
+          guard let lastMessage = messages.last else { return }
+          proxy.scrollTo(lastMessage.id, anchor: .bottom)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private var localModelStatus: some View {
+    if selectedMode == .local {
+      HStack(spacing: 8) {
+        switch localChat.state {
+        case .installing:
+          ProgressView()
+            .controlSize(.small)
+          Text("Installing local model…")
+        case .preparing:
+          ProgressView()
+            .controlSize(.small)
+          Text("Loading local model…")
+        case .streaming:
+          ProgressView()
+            .controlSize(.small)
+          Text("Generating locally")
+          Button("Stop") {
+            localChat.stopStreaming()
+          }
+          .buttonStyle(.plain)
+        case .failed(let message):
+          Image(systemName: "exclamationmark.triangle")
+          Text(message)
+            .lineLimit(2)
+        case .idle:
+          if let model = localChat.installedModel {
+            Image(systemName: "checkmark.circle")
+            Text(model.displayName)
+              .lineLimit(1)
+            Button("Change") {
+              isModelImporterPresented = true
+            }
+            .buttonStyle(.plain)
+          } else {
+            Text("A local GGUF model is required.")
+            Button("Choose Model") {
+              isModelImporterPresented = true
+            }
+            .buttonStyle(.plain)
+          }
+        }
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .trailing)
+    } else {
+      Text(selectedMode == .auto ? "Auto routing arrives in checkpoint 6." : "Cloud mode arrives in checkpoint 5.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
   }
 
@@ -196,7 +323,7 @@ struct AppShellView: View {
 
         Divider()
 
-        Label("Local model setup arrives in checkpoint 3", systemImage: "cpu")
+        Label(localModelPaletteLabel, systemImage: "cpu")
           .font(.caption)
           .foregroundStyle(.secondary)
           .padding(.horizontal, 10)
@@ -211,6 +338,63 @@ struct AppShellView: View {
       }
       .shadow(radius: 24, y: 10)
     }
+  }
+
+  private var canSubmitLocally: Bool {
+    selectedMode == .local && localChat.installedModel != nil && !localChat.isBusy
+  }
+
+  private var welcomeSubtitle: String {
+    if selectedMode == .local {
+      return localChat.installedModel == nil
+        ? "Choose a GGUF model once, then chat completely offline."
+        : "Runs on this Mac with no network requests."
+    }
+    return selectedMode == .auto
+      ? "Local-first assistance, ready when you are."
+      : "Cloud providers are not configured yet."
+  }
+
+  private var localModelPaletteLabel: String {
+    if let model = localChat.installedModel {
+      return "Local: \(model.displayName)"
+    }
+    return "Local model not installed"
+  }
+
+  private func submitDraft() {
+    guard canSubmitLocally else { return }
+    let prompt = draft
+    draft = ""
+    localChat.submit(prompt)
+  }
+}
+
+private struct LocalMessageView: View {
+  let message: LocalChatMessage
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 6) {
+      Text(message.role == .user ? "You" : "AI Spotlight")
+        .font(.caption.weight(.semibold))
+        .foregroundStyle(.secondary)
+
+      if message.content.isEmpty {
+        ProgressView()
+          .controlSize(.small)
+      } else if message.role == .assistant {
+        Text(renderedMarkdown)
+          .textSelection(.enabled)
+      } else {
+        Text(verbatim: message.content)
+          .textSelection(.enabled)
+      }
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+  }
+
+  private var renderedMarkdown: AttributedString {
+    (try? AttributedString(markdown: message.content)) ?? AttributedString(message.content)
   }
 }
 

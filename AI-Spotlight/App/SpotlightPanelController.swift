@@ -99,6 +99,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
   func hide() {
     panel.orderOut(nil)
+    NotificationCenter.default.post(name: .panelHidden, object: nil)
   }
 
   func toggle() {

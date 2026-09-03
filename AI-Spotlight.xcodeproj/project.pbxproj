@@ -17,6 +17,13 @@
 		A10000000000000000000008 /* GlobalHotKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* GlobalHotKeyMonitor.swift */; };
 		A10000000000000000000009 /* PanelShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* PanelShortcut.swift */; };
 		A1000000000000000000000A /* SpotlightPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* SpotlightPanelController.swift */; };
+		D10000000000000000000001 /* LocalModelEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* LocalModelEngine.swift */; };
+		D10000000000000000000002 /* LocalModelInstallationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* LocalModelInstallationStore.swift */; };
+		D10000000000000000000003 /* LlamaCPPModelEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* LlamaCPPModelEngine.swift */; };
+		D10000000000000000000004 /* LocalChatViewModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000004 /* LocalChatViewModel.swift */; };
+		D10000000000000000000005 /* LlamaBridge in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000001 /* LlamaBridge */; };
+		D10000000000000000000006 /* LocalInferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* LocalInferenceTests.swift */; };
+		D10000000000000000000007 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* ThirdPartyNotices.txt */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -41,6 +48,12 @@
 		A20000000000000000000011 /* GlobalHotKeyMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKeyMonitor.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* PanelShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelShortcut.swift; sourceTree = "<group>"; };
 		A20000000000000000000013 /* SpotlightPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightPanelController.swift; sourceTree = "<group>"; };
+		D20000000000000000000001 /* LocalModelEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelEngine.swift; sourceTree = "<group>"; };
+		D20000000000000000000002 /* LocalModelInstallationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelInstallationStore.swift; sourceTree = "<group>"; };
+		D20000000000000000000003 /* LlamaCPPModelEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCPPModelEngine.swift; sourceTree = "<group>"; };
+		D20000000000000000000004 /* LocalChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChatViewModel.swift; sourceTree = "<group>"; };
+		D20000000000000000000005 /* LocalInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalInferenceTests.swift; sourceTree = "<group>"; };
+		D20000000000000000000006 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
 		A20000000000000000000008 /* PrimaryAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimaryAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000009 /* PrimaryAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimaryAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -50,6 +63,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D10000000000000000000005 /* LlamaBridge in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -76,6 +90,7 @@
 			isa = PBXGroup;
 			children = (
 				A70000000000000000000003 /* App */,
+				D70000000000000000000001 /* LocalInference */,
 				A70000000000000000000004 /* Resources */,
 			);
 			path = "AI-Spotlight";
@@ -101,6 +116,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000006 /* Info.plist */,
+				D20000000000000000000006 /* ThirdPartyNotices.txt */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -109,6 +125,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000007 /* AppCommandTests.swift */,
+				D20000000000000000000005 /* LocalInferenceTests.swift */,
 			);
 			path = "AI-SpotlightTests";
 			sourceTree = "<group>";
@@ -120,6 +137,17 @@
 				A20000000000000000000009 /* PrimaryAgentTests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		D70000000000000000000001 /* LocalInference */ = {
+			isa = PBXGroup;
+			children = (
+				D20000000000000000000004 /* LocalChatViewModel.swift */,
+				D20000000000000000000003 /* LlamaCPPModelEngine.swift */,
+				D20000000000000000000002 /* LocalModelInstallationStore.swift */,
+				D20000000000000000000001 /* LocalModelEngine.swift */,
+			);
+			path = LocalInference;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -138,6 +166,9 @@
 			dependencies = (
 			);
 			name = "AI Spotlight";
+			packageProductDependencies = (
+				D40000000000000000000001 /* LlamaBridge */,
+			);
 			productName = PrimaryAgent;
 			productReference = A20000000000000000000008 /* PrimaryAgent.app */;
 			productType = "com.apple.product-type.application";
@@ -187,6 +218,9 @@
 				Base,
 			);
 			mainGroup = A70000000000000000000001;
+			packageReferences = (
+				D30000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LlamaBridge" */,
+			);
 			productRefGroup = A70000000000000000000006 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
@@ -202,6 +236,7 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				D10000000000000000000007 /* ThirdPartyNotices.txt in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -221,6 +256,10 @@
 				A10000000000000000000008 /* GlobalHotKeyMonitor.swift in Sources */,
 				A10000000000000000000009 /* PanelShortcut.swift in Sources */,
 				A1000000000000000000000A /* SpotlightPanelController.swift in Sources */,
+				D10000000000000000000001 /* LocalModelEngine.swift in Sources */,
+				D10000000000000000000002 /* LocalModelInstallationStore.swift in Sources */,
+				D10000000000000000000003 /* LlamaCPPModelEngine.swift in Sources */,
+				D10000000000000000000004 /* LocalChatViewModel.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,6 +268,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
+				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -383,6 +423,20 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		D30000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LlamaBridge" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LlamaBridge;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		D40000000000000000000001 /* LlamaBridge */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = LlamaBridge;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A40000000000000000000001 /* Project object */;
 }
