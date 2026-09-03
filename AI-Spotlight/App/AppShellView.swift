@@ -709,6 +709,13 @@ struct SettingsView: View {
         TextField("Manual model ID", text: $settings.preferredModelID)
           .textFieldStyle(.roundedBorder)
 
+        if settings.preferredProvider == .chatGPT,
+           settings.preferredModelID == CodexSubscriptionClient.defaultModelID {
+          Text("Reasoning: High")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
         HStack {
           Button(settings.isDiscovering ? "Refreshing…" : "Refresh Models") {
             Task { await settings.discoverModels(forceRefresh: true) }

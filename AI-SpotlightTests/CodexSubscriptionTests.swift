@@ -146,6 +146,59 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertEqual(models.map(\.provider), [.chatGPT, .chatGPT])
   }
 
+  func testNewCloudPreferencesDefaultToLunaWithoutChangingAPIDefaults() {
+    let suite = "CodexSettings.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let preferences = CloudPreferencesStore(defaults: defaults)
+    XCTAssertEqual(preferences.preferredProvider(), .chatGPT)
+    XCTAssertEqual(preferences.preferredModel(for: .chatGPT), "gpt-5.6-luna")
+    XCTAssertEqual(preferences.preferredModel(for: .openAI), "")
+    XCTAssertEqual(preferences.preferredModel(for: .anthropic), "")
+
+    preferences.setPreferredModel(" \n", for: .chatGPT)
+    XCTAssertEqual(CloudPreferencesStore(defaults: defaults).preferredModel(for: .chatGPT), "gpt-5.6-luna")
+  }
+
+  func testPreviousSolDefaultMigratesOnlyOnceAndPreservesAPISettings() {
+    let suite = "CodexSettings.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set("gpt-5.6-sol", forKey: "aiSpotlight.cloud.preferredModel.chatgpt-codex")
+    defaults.set("openai", forKey: "aiSpotlight.cloud.preferredProvider")
+    defaults.set("openai-model", forKey: "aiSpotlight.cloud.preferredModel.openai")
+    defaults.set("anthropic-model", forKey: "aiSpotlight.cloud.preferredModel.anthropic")
+
+    let preferences = CloudPreferencesStore(defaults: defaults)
+    XCTAssertEqual(preferences.preferredModel(for: .chatGPT), "gpt-5.6-luna")
+    XCTAssertEqual(preferences.preferredProvider(), .openAI)
+    XCTAssertEqual(preferences.preferredModel(for: .openAI), "openai-model")
+    XCTAssertEqual(preferences.preferredModel(for: .anthropic), "anthropic-model")
+
+    preferences.setPreferredModel("gpt-5.6-sol", for: .chatGPT)
+    XCTAssertEqual(CloudPreferencesStore(defaults: defaults).preferredModel(for: .chatGPT), "gpt-5.6-sol")
+  }
+
+  func testLunaDefaultMigrationPreservesOtherSavedChatGPTModels() {
+    let suite = "CodexSettings.\(UUID().uuidString)"
+    let defaults = UserDefaults(suiteName: suite)!
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set("custom-model", forKey: "aiSpotlight.cloud.preferredModel.chatgpt-codex")
+    XCTAssertEqual(CloudPreferencesStore(defaults: defaults).preferredModel(for: .chatGPT), "custom-model")
+  }
+
+  func testLunaStreamExplicitlyRequestsHighReasoning() async throws {
+    let transport = MockCodexTransport(turnNotifications: [delta("Hello"), completion("completed")])
+    let events = try await collect(CodexSubscriptionClient(transport: transport).stream(request(modelID: "gpt-5.6-luna")))
+    XCTAssertEqual(events, [.token("Hello"), .completed])
+    let requests = await transport.recordedRequests
+    let thread = try XCTUnwrap(requests.first { $0.method == "thread/start" })
+    XCTAssertEqual(thread.params["model"].string, "gpt-5.6-luna")
+    let turn = try XCTUnwrap(requests.first { $0.method == "turn/start" })
+    XCTAssertEqual(turn.params["threadId"].string, "thread-one")
+    XCTAssertEqual(turn.params["effort"].string, "high")
+  }
+
   func testSubscriptionStreamIsEphemeralAndPreservesConversationContext() async throws {
     let cleanup = expectation(description: "Thread unloaded")
     let transport = MockCodexTransport(turnNotifications: [
@@ -163,6 +216,7 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertEqual(thread.params["approvalPolicy"].string, "never")
     XCTAssertEqual(thread.params["modelProvider"].string, "openai")
     let turn = try XCTUnwrap(requests.first { $0.method == "turn/start" })
+    XCTAssertEqual(turn.params["effort"], .null, "Other models must retain their runtime reasoning default")
     let text = try XCTUnwrap(turn.params["input"].array?.first?["text"].string)
     XCTAssertTrue(text.contains("Previous answer"))
     XCTAssertTrue(text.contains("Latest question"))
@@ -230,7 +284,14 @@ final class CodexSubscriptionTests: XCTestCase {
     await settings.refreshChatGPTAccount()
     await settings.discoverModels()
     XCTAssertTrue(settings.isConfigured)
-    XCTAssertEqual(settings.preferredModelID, "model-one")
+    XCTAssertEqual(settings.preferredModelID, "gpt-5.6-luna")
+    XCTAssertEqual(settings.models.map(\.id), ["model-one", "model-two"])
+    settings.preferredModelID = ""
+    await settings.loadCachedModels()
+    XCTAssertEqual(settings.preferredModelID, "gpt-5.6-luna", "Catalog order must not replace the lighter default")
+    settings.preferredModelID = "model-two"
+    await settings.discoverModels(forceRefresh: true)
+    XCTAssertEqual(settings.preferredModelID, "model-two", "Refresh must preserve an explicit model selection")
     XCTAssertFalse(settings.hasAPIKey(for: .chatGPT))
     await settings.signOutOfChatGPT()
     XCTAssertFalse(settings.isConfigured)
@@ -241,12 +302,12 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertFalse((defaults.persistentDomain(forName: suite) ?? [:]).keys.contains { $0.lowercased().contains("token") })
   }
 
-  private func request() -> ChatRequest {
+  private func request(modelID: String = "model-one") -> ChatRequest {
     ChatRequest(sessionID: UUID(), messages: [
       ChatMessage(role: .user, content: "Previous question"),
       ChatMessage(role: .assistant, content: "Previous answer"),
       ChatMessage(role: .user, content: "Latest question"),
-    ], route: Route(mode: .cloud, providerID: CloudProviderID.chatGPT.rawValue, modelID: "model-one", usesNetwork: true))
+    ], route: Route(mode: .cloud, providerID: CloudProviderID.chatGPT.rawValue, modelID: modelID, usesNetwork: true))
   }
 
   private func delta(_ text: String, thread: String = "thread-one") -> CodexNotification {

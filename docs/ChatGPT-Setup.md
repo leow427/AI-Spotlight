@@ -3,7 +3,9 @@
 1. Install a current [Codex CLI](https://learn.chatgpt.com/docs/cli). This integration was developed against Codex 0.151.0. AI Spotlight checks Homebrew's standard locations, `~/.local/bin`, the Codex app bundle, and the launch environment's PATH. A custom absolute executable path can be supplied with `AI_SPOTLIGHT_CODEX_PATH` in the Xcode Run environment.
 2. Build and run the shared `AI-Spotlight` scheme. No Apple development team, Sign in with Apple entitlement, or backend is needed.
 3. Open Settings, choose **Sign in with ChatGPT**, and finish the browser login. On this Mac, macOS may ask permission for Codex to use Keychain.
-4. Select **ChatGPT via Codex**, choose a discovered model, and switch the main panel to **Cloud**. A successful login selects the ChatGPT provider automatically.
+4. Select **ChatGPT via Codex** and switch the main panel to **Cloud**. A successful login selects the ChatGPT provider automatically. The default is **GPT-5.6 Luna with High reasoning** (`gpt-5.6-luna`); you can choose a different model in Advanced Cloud Settings.
+
+On the first launch after this default change, an empty ChatGPT model preference or the previous Sol selection is updated to Luna once. Other saved model choices and API-provider preferences are preserved. Later model selections, including Sol, are kept across restarts. Luna requests explicitly use High reasoning; other models retain Codex's default reasoning. Model discovery never silently replaces Luna with the first listed model. If your account does not offer Luna, select an available model explicitly.
 
 This uses the ChatGPT plan's **Codex allowance**, with its plan-specific limits and available models. It does not turn a ChatGPT subscription into general OpenAI API credit, and it is not a wrapper around the ChatGPT website. The OpenAI and Anthropic API-key routes remain separately billed alternatives and are never automatic fallbacks.
 

@@ -4,6 +4,7 @@ import Foundation
 struct CloudPreferencesStore: @unchecked Sendable {
   private enum Key {
     static let preferredProvider = "aiSpotlight.cloud.preferredProvider"
+    static let didAdoptLunaDefault = "aiSpotlight.cloud.didAdoptLunaDefault"
     static func preferredModel(_ provider: CloudProviderID) -> String {
       "aiSpotlight.cloud.preferredModel.\(provider.rawValue)"
     }
@@ -13,6 +14,16 @@ struct CloudPreferencesStore: @unchecked Sendable {
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
+    if !defaults.bool(forKey: Key.didAdoptLunaDefault) {
+      let previousModel = defaults.string(forKey: Key.preferredModel(.chatGPT))?
+        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+      // Older versions persisted the first discovered model, usually Sol.
+      // Migrate once so a later explicit selection of Sol remains respected.
+      if previousModel.isEmpty || previousModel == "gpt-5.6-sol" {
+        defaults.set(CodexSubscriptionClient.defaultModelID, forKey: Key.preferredModel(.chatGPT))
+      }
+      defaults.set(true, forKey: Key.didAdoptLunaDefault)
+    }
   }
 
   func preferredProvider() -> CloudProviderID {
@@ -25,7 +36,11 @@ struct CloudPreferencesStore: @unchecked Sendable {
   }
 
   func preferredModel(for provider: CloudProviderID) -> String {
-    defaults.string(forKey: Key.preferredModel(provider)) ?? ""
+    let model = defaults.string(forKey: Key.preferredModel(provider)) ?? ""
+    if provider == .chatGPT && model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return CodexSubscriptionClient.defaultModelID
+    }
+    return model
   }
 
   func setPreferredModel(_ modelID: String, for provider: CloudProviderID) {
@@ -190,7 +205,7 @@ final class CloudSettingsModel: ObservableObject {
     let provider = preferredProvider
     if let cached = await catalog.cachedModels(for: provider), provider == preferredProvider {
       models = cached
-      selectFirstModelIfNeeded()
+      selectDefaultModelIfNeeded()
     }
   }
 
@@ -208,7 +223,7 @@ final class CloudSettingsModel: ObservableObject {
       )
       guard preferredProvider == provider, discoveryID == id else { return }
       models = discovered
-      selectFirstModelIfNeeded()
+      selectDefaultModelIfNeeded()
     } catch {
       guard preferredProvider == provider, discoveryID == id else { return }
       models = []
@@ -224,7 +239,7 @@ final class CloudSettingsModel: ObservableObject {
       if provider == preferredProvider {
         models = discovered
         discoveryError = nil
-        selectFirstModelIfNeeded()
+        selectDefaultModelIfNeeded()
       }
     } catch {
       connectionStates[provider] = .failed(error.localizedDescription)
@@ -235,9 +250,12 @@ final class CloudSettingsModel: ObservableObject {
     connectionStates[provider] ?? .idle
   }
 
-  private func selectFirstModelIfNeeded() {
-    guard preferredModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-          let firstModel = models.first else { return }
-    preferredModelID = firstModel.id
+  private func selectDefaultModelIfNeeded() {
+    guard preferredModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    if preferredProvider == .chatGPT {
+      preferredModelID = CodexSubscriptionClient.defaultModelID
+    } else if let firstModel = models.first {
+      preferredModelID = firstModel.id
+    }
   }
 }
