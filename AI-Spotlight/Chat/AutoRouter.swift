@@ -6,7 +6,6 @@ struct AutoRouter: Sendable {
     case explicitMode
     case cloudUnavailable
     case noLocalModel
-    case privateRequest
     case requiresWebSearch
     case exceedsLocalContext
     case requiresCoding
@@ -23,15 +22,12 @@ struct AutoRouter: Sendable {
 
   enum Limitation: Equatable, Sendable {
     case noLocalModel
-    case privateRequestRequiresLocalModel
     case unavailableCapability(Capability)
 
     var message: String {
       switch self {
       case .noLocalModel:
         "Choose a local model or connect Cloud before using Auto."
-      case .privateRequestRequiresLocalModel:
-        "This request stays on-device. Choose a local model to continue."
       case .unavailableCapability(.webSearch):
         "This request needs a web-capable cloud model, which is not configured."
       case .unavailableCapability(.coding):
@@ -180,17 +176,6 @@ struct AutoRouter: Sendable {
     cloud: CloudConfiguration
   ) -> Decision {
     let prompt = request.prompt.lowercased()
-    if explicitlyPrivate(prompt) {
-      guard let localModel = request.localModel else {
-        return Decision(
-          route: nil,
-          modelDisplayName: nil,
-          reason: .privateRequest,
-          limitation: .privateRequestRequiresLocalModel
-        )
-      }
-      return localDecision(for: localModel, reason: .privateRequest)
-    }
 
     if requiresWebSearch(prompt) {
       guard cloud.capabilities.supportsWebSearch else {
@@ -293,14 +278,6 @@ struct AutoRouter: Sendable {
       + contextMessages.reduce(into: 0) { $0 += $1.content.utf8.count }
     // A conservative estimate keeps the router cheap and prevents local context overflows.
     return (characterCount + 3) / 4 + LocalModelRequest(prompt: "").maximumTokenCount
-  }
-
-  private static func explicitlyPrivate(_ prompt: String) -> Bool {
-    containsAny(prompt, [
-      "private information", "this is private", "keep this private",
-      "do not send this", "don't send this", "do not share this",
-      "don't share this", "confidential", "sensitive personal",
-    ])
   }
 
   private static func requiresWebSearch(_ prompt: String) -> Bool {

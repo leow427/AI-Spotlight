@@ -67,9 +67,8 @@ final class AutoRouterTests: XCTestCase {
     XCTAssertEqual(decision.reason, .localPreferred)
   }
 
-  func testComplexityDoesNotOverridePrivacyLocalModeOrDisconnectedCloud() {
-    let prompt = "Design a resilient payment system and evaluate its failure modes."
-    let privateDecision = AutoRouter.decide(request(prompt: "This is private. " + prompt))
+  func testComplexityDoesNotOverrideLocalModeOrDisconnectedCloud() {
+    let prompt = "This is private. Design a resilient payment system and evaluate its failure modes."
     let localDecision = AutoRouter.decide(request(selectedMode: .local, prompt: prompt))
     let disconnectedDecision = AutoRouter.decide(AutoRouter.Request(
       selectedMode: .auto,
@@ -78,11 +77,10 @@ final class AutoRouterTests: XCTestCase {
       localModel: localModel,
       cloud: nil
     ))
-    for decision in [privateDecision, localDecision, disconnectedDecision] {
+    for decision in [localDecision, disconnectedDecision] {
       XCTAssertEqual(decision.route?.mode, .local)
       XCTAssertFalse(decision.route?.usesNetwork ?? true)
     }
-    XCTAssertEqual(privateDecision.reason, .privateRequest)
     XCTAssertEqual(localDecision.reason, .explicitMode)
     XCTAssertEqual(disconnectedDecision.reason, .cloudUnavailable)
   }
@@ -169,14 +167,40 @@ final class AutoRouterTests: XCTestCase {
     XCTAssertEqual(decision.reason, .exceedsLocalContext)
   }
 
-  func testExplicitPrivacyKeepsTheRequestLocalEvenWhenItNeedsCode() {
-    let decision = AutoRouter.decide(request(
-      prompt: "This is private information. Write Swift code for it."
+  func testPrivacyWordingDoesNotOverrideAutoRouting() {
+    let prefixes = [
+      "Private information.", "This is private.", "Keep this private.",
+      "Do not send this.", "Don't send this.", "Do not share this.",
+      "Don't share this.", "Confidential.", "Sensitive personal information.",
+    ]
+    let prompts = [
+      "Draft a warm thank-you note.",
+      "Write Swift code for it.",
+      "Evaluate the assumptions behind this strategy.",
+      "Search the web for the latest news.",
+    ]
+    for prompt in prompts {
+      let expected = AutoRouter.decide(request(prompt: prompt))
+      for prefix in prefixes {
+        let decision = AutoRouter.decide(request(prompt: prefix + " " + prompt))
+        XCTAssertEqual(decision, expected, prefix + " " + prompt)
+      }
+    }
+  }
+
+  func testPrivateWordingDoesNotRequireALocalModelInAuto() {
+    let decision = AutoRouter.decide(AutoRouter.Request(
+      selectedMode: .auto,
+      prompt: "This is private information. Draft a warm thank-you note.",
+      contextMessages: [],
+      localModel: nil,
+      cloud: cloud
     ))
 
-    XCTAssertEqual(decision.route?.mode, .local)
-    XCTAssertEqual(decision.reason, .privateRequest)
-    XCTAssertFalse(decision.route?.usesNetwork ?? true)
+    XCTAssertEqual(decision.route?.mode, .cloud)
+    XCTAssertEqual(decision.reason, .noLocalModel)
+    XCTAssertTrue(decision.route?.usesNetwork ?? false)
+    XCTAssertNil(decision.limitation)
   }
 
   func testWebRequestNeedsAWebCapableCloudModel() {
