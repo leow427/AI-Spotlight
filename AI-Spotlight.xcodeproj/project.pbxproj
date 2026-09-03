@@ -36,6 +36,7 @@
 		F10000000000000000000006 /* CloudModelCatalog.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000006 /* CloudModelCatalog.swift */; };
 		F10000000000000000000007 /* CloudSettingsModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000007 /* CloudSettingsModel.swift */; };
 		F10000000000000000000008 /* CloudModeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000008 /* CloudModeTests.swift */; };
+		F10000000000000000000009 /* CloudAccount.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000009 /* CloudAccount.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -78,6 +79,8 @@
 		F20000000000000000000006 /* CloudModelCatalog.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelCatalog.swift; sourceTree = "<group>"; };
 		F20000000000000000000007 /* CloudSettingsModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudSettingsModel.swift; sourceTree = "<group>"; };
 		F20000000000000000000008 /* CloudModeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModeTests.swift; sourceTree = "<group>"; };
+		F20000000000000000000009 /* CloudAccount.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudAccount.swift; sourceTree = "<group>"; };
+		F2000000000000000000000A /* AI-Spotlight.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "AI-Spotlight.entitlements"; sourceTree = "<group>"; };
 		A20000000000000000000008 /* PrimaryAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimaryAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000009 /* PrimaryAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimaryAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -143,6 +146,7 @@
 			children = (
 				A20000000000000000000006 /* Info.plist */,
 				D20000000000000000000006 /* ThirdPartyNotices.txt */,
+				F2000000000000000000000A /* AI-Spotlight.entitlements */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -191,6 +195,7 @@
 		F70000000000000000000001 /* Cloud */ = {
 			isa = PBXGroup;
 			children = (
+				F20000000000000000000009 /* CloudAccount.swift */,
 				F20000000000000000000001 /* CloudDomain.swift */,
 				F20000000000000000000002 /* KeychainCredentialStore.swift */,
 				F20000000000000000000003 /* CloudNetworking.swift */,
@@ -322,6 +327,7 @@
 				F10000000000000000000005 /* CloudProviderClients.swift in Sources */,
 				F10000000000000000000006 /* CloudModelCatalog.swift in Sources */,
 				F10000000000000000000007 /* CloudSettingsModel.swift in Sources */,
+				F10000000000000000000009 /* CloudAccount.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -397,6 +403,8 @@
 		AC0000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				AI_SPOTLIGHT_BACKEND_URL = "";
+				CODE_SIGN_ENTITLEMENTS = "AI-Spotlight/Resources/AI-Spotlight.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
@@ -414,6 +422,8 @@
 		AC0000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				AI_SPOTLIGHT_BACKEND_URL = "";
+				CODE_SIGN_ENTITLEMENTS = "AI-Spotlight/Resources/AI-Spotlight.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;

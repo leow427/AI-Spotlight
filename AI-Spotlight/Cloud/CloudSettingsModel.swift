@@ -44,12 +44,27 @@ final class CloudSettingsModel: ObservableObject {
 
   static let shared: CloudSettingsModel = {
     let credentialStore = KeychainCredentialStore()
+    let sessionStore = KeychainCloudAccountSessionStore()
+    let backend = CloudBackendConfiguration.live
+    let transport = URLSessionCloudTransport.shared
+    let accessResolver = PreferredCloudAccessResolver(
+      credentialStore: credentialStore,
+      sessionStore: sessionStore,
+      backend: backend
+    )
     return CloudSettingsModel(
       credentialStore: credentialStore,
       catalog: CloudModelCatalog(
-        credentialStore: credentialStore,
-        transport: URLSessionCloudTransport.shared
-      )
+        accessResolver: accessResolver,
+        transport: transport
+      ),
+      accessResolver: accessResolver,
+      sessionStore: sessionStore,
+      accountAuthenticator: URLSessionCloudAccountClient(
+        backend: backend,
+        transport: transport
+      ),
+      backend: backend
     )
   }()
 
@@ -78,27 +93,49 @@ final class CloudSettingsModel: ObservableObject {
   @Published private(set) var isDiscovering = false
   @Published private(set) var credentialRevision = 0
   @Published private(set) var connectionStates: [CloudProviderID: ConnectionState] = [:]
+  @Published private(set) var isSignedIn = false
+  @Published private(set) var isSigningIn = false
+  @Published private(set) var accountError: String?
 
   private let credentialStore: any CloudCredentialStore
   private let catalog: CloudModelCatalog
   private let preferences: CloudPreferencesStore
+  private let accessResolver: any CloudAccessResolving
+  private let sessionStore: any CloudAccountSessionStoring
+  private let accountAuthenticator: any CloudAccountAuthenticating
+  private let backend: CloudBackendConfiguration
 
   init(
     credentialStore: any CloudCredentialStore,
     catalog: CloudModelCatalog,
+    accessResolver: any CloudAccessResolving,
+    sessionStore: any CloudAccountSessionStoring,
+    accountAuthenticator: any CloudAccountAuthenticating,
+    backend: CloudBackendConfiguration,
     preferences: CloudPreferencesStore = CloudPreferencesStore()
   ) {
     self.credentialStore = credentialStore
     self.catalog = catalog
+    self.accessResolver = accessResolver
+    self.sessionStore = sessionStore
+    self.accountAuthenticator = accountAuthenticator
+    self.backend = backend
     self.preferences = preferences
     let provider = preferences.preferredProvider()
     preferredProvider = provider
     preferredModelID = preferences.preferredModel(for: provider)
+    isSignedIn = (try? sessionStore.session()) != nil
   }
 
   var isConfigured: Bool {
-    hasAPIKey(for: preferredProvider)
+    hasCloudAccess(for: preferredProvider)
       && !preferredModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+  }
+
+  var isAccountSignInAvailable: Bool { backend.isConfigured }
+
+  func hasCloudAccess(for provider: CloudProviderID) -> Bool {
+    (try? accessResolver.access(for: provider)) != nil
   }
 
   func hasAPIKey(for provider: CloudProviderID) -> Bool {
@@ -118,6 +155,40 @@ final class CloudSettingsModel: ObservableObject {
     try credentialStore.removeAPIKey(for: provider)
     credentialRevision += 1
     connectionStates[provider] = .idle
+  }
+
+  func signInWithApple(identityToken: Data, nonce: String) async {
+    guard !isSigningIn else { return }
+    isSigningIn = true
+    accountError = nil
+    defer { isSigningIn = false }
+    do {
+      let session = try await accountAuthenticator.signIn(
+        identityToken: identityToken,
+        nonce: nonce
+      )
+      try sessionStore.setSession(session)
+      isSignedIn = true
+      credentialRevision += 1
+      models = []
+      await discoverModels(forceRefresh: true)
+    } catch {
+      accountError = error.localizedDescription
+      isSignedIn = false
+    }
+  }
+
+  func signOut() {
+    do {
+      try sessionStore.removeSession()
+      isSignedIn = false
+      accountError = nil
+      credentialRevision += 1
+      models = []
+      Task { await loadCachedModels() }
+    } catch {
+      accountError = error.localizedDescription
+    }
   }
 
   func loadCachedModels() async {

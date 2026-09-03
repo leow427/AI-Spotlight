@@ -1,4 +1,5 @@
 import AppKit
+import AuthenticationServices
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -282,8 +283,8 @@ struct AppShellView: View {
       .frame(maxWidth: .infinity, alignment: .trailing)
     case .cloud:
       HStack(spacing: 8) {
-        if !cloudSettings.hasAPIKey(for: cloudSettings.preferredProvider) {
-          Text("Add a \(cloudSettings.preferredProvider.displayName) API key.")
+        if !cloudSettings.hasCloudAccess(for: cloudSettings.preferredProvider) {
+          Text("Sign in or add a \(cloudSettings.preferredProvider.displayName) API key.")
           SettingsLink { Text("Advanced Settings") }
         } else if cloudSettings.preferredModelID.isEmpty {
           Text("Choose a cloud model in Advanced Settings.")
@@ -419,7 +420,7 @@ struct AppShellView: View {
     if selectedMode == .cloud {
       return cloudSettings.isConfigured
         ? "Uses \(cloudSettings.preferredProvider.displayName) with a stateless request."
-        : "Add a provider key and model in Advanced Settings."
+        : "Sign in or add a provider key, then choose a model."
     }
     return "Local-first assistance, ready when you are."
   }
@@ -604,6 +605,7 @@ struct SettingsView: View {
   @ObservedObject private var settings: CloudSettingsModel
   @State private var openAIAPIKey = ""
   @State private var anthropicAPIKey = ""
+  @State private var appleSignInNonce: String?
   @State private var formError: String?
 
   init(settings: CloudSettingsModel = .shared) {
@@ -612,6 +614,57 @@ struct SettingsView: View {
 
   var body: some View {
     Form {
+      Section("AI Spotlight Account") {
+        if !settings.isAccountSignInAvailable {
+          Label(
+            "Account sign-in is unavailable until this build has a backend URL.",
+            systemImage: "server.rack"
+          )
+          .foregroundStyle(.secondary)
+        } else if settings.isSignedIn {
+          Label("Signed in with Apple", systemImage: "checkmark.circle.fill")
+            .foregroundStyle(.green)
+
+          Button("Sign Out", role: .destructive) {
+            settings.signOut()
+          }
+
+          Text("Cloud requests use AI Spotlight's provider accounts and usage allowance.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        } else {
+          SignInWithAppleButton(.continue) { request in
+            let nonce = AppleSignInNonce.make()
+            appleSignInNonce = nonce
+            request.nonce = AppleSignInNonce.sha256(nonce)
+          } onCompletion: { result in
+            handleAppleSignIn(result)
+          }
+          .signInWithAppleButtonStyle(.black)
+          .frame(height: 34)
+          .disabled(settings.isSigningIn)
+
+          if settings.isSigningIn {
+            HStack {
+              ProgressView()
+                .controlSize(.small)
+              Text("Signing in…")
+            }
+            .foregroundStyle(.secondary)
+          }
+
+          Text("Sign in without creating or pasting provider API keys.")
+            .font(.caption)
+            .foregroundStyle(.secondary)
+        }
+
+        if let accountError = settings.accountError {
+          Text(accountError)
+            .font(.caption)
+            .foregroundStyle(.red)
+        }
+      }
+
       Section("Advanced Cloud Settings") {
         Picker("Preferred provider", selection: $settings.preferredProvider) {
           ForEach(CloudProviderID.allCases) { provider in
@@ -644,7 +697,7 @@ struct SettingsView: View {
           }
           .disabled(
             settings.isDiscovering
-              || !settings.hasAPIKey(for: settings.preferredProvider)
+              || !settings.hasCloudAccess(for: settings.preferredProvider)
           )
           if settings.isDiscovering {
             ProgressView()
@@ -659,7 +712,7 @@ struct SettingsView: View {
         }
       }
 
-      Section("OpenAI") {
+      Section("OpenAI API Key · Developer Fallback") {
         SecureField(
           settings.hasAPIKey(for: .openAI) ? "Replace stored API key" : "API key",
           text: $openAIAPIKey
@@ -674,7 +727,7 @@ struct SettingsView: View {
           .foregroundStyle(.secondary)
       }
 
-      Section("Anthropic") {
+      Section("Anthropic API Key · Developer Fallback") {
         SecureField(
           settings.hasAPIKey(for: .anthropic) ? "Replace stored API key" : "API key",
           text: $anthropicAPIKey
@@ -692,17 +745,36 @@ struct SettingsView: View {
       }
     }
     .formStyle(.grouped)
-    .frame(width: 560, height: 600)
+    .frame(width: 560, height: 720)
     .navigationTitle("AI Spotlight Settings")
     .task {
       await settings.loadCachedModels()
-      if settings.hasAPIKey(for: settings.preferredProvider), settings.models.isEmpty {
+      if settings.hasCloudAccess(for: settings.preferredProvider), settings.models.isEmpty {
         await settings.discoverModels()
       }
     }
     .onChange(of: settings.preferredProvider) { _, provider in
-      guard settings.hasAPIKey(for: provider) else { return }
+      guard settings.hasCloudAccess(for: provider) else { return }
       Task { await settings.discoverModels() }
+    }
+  }
+
+  private func handleAppleSignIn(_ result: Result<ASAuthorization, Error>) {
+    defer { appleSignInNonce = nil }
+    switch result {
+    case .success(let authorization):
+      guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
+            let identityToken = credential.identityToken,
+            let nonce = appleSignInNonce else {
+        formError = CloudProviderError.invalidAppleCredential.localizedDescription
+        return
+      }
+      formError = nil
+      Task {
+        await settings.signInWithApple(identityToken: identityToken, nonce: nonce)
+      }
+    case .failure(let error):
+      formError = error.localizedDescription
     }
   }
 

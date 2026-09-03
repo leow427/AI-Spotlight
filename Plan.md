@@ -72,6 +72,7 @@ The first prototype includes Local, Cloud, and Auto modes only. Web search, Brav
    - Fetch and cache available models from each configured provider for 24 hours; allow a manual model ID if discovery fails.
    - Add Advanced Settings for API keys, connection tests, preferred cloud provider, and preferred cloud model.
    - Send cloud requests statelessly and disable OpenAI response storage with `store: false`.
+   - For distributed builds, support Sign in with Apple through an AI Spotlight backend that owns provider credentials, enforces a daily request allowance, and streams stateless provider responses. Keep Keychain-backed API keys as a developer fallback.
 
 6. **Add predictable Auto mode**
 

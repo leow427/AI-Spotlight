@@ -2,3 +2,8 @@
 DerivedData/
 *.xcuserstate
 xcuserdata/
+backend/.dev.vars
+backend/.dev.vars.*
+!backend/.dev.vars.example
+backend/.wrangler/
+backend/node_modules/

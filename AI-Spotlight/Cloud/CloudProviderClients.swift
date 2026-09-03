@@ -1,10 +1,18 @@
 import Foundation
 
 struct CloudProviderRegistry: Sendable {
-  static let live = CloudProviderRegistry(
-    credentialStore: KeychainCredentialStore(),
-    transport: URLSessionCloudTransport.shared
-  )
+  static let live: CloudProviderRegistry = {
+    let credentialStore = KeychainCredentialStore()
+    let accessResolver = PreferredCloudAccessResolver(
+      credentialStore: credentialStore,
+      sessionStore: KeychainCloudAccountSessionStore(),
+      backend: .live
+    )
+    return CloudProviderRegistry(
+      accessResolver: accessResolver,
+      transport: URLSessionCloudTransport.shared
+    )
+  }()
 
   let openAI: any ChatProvider
   let anthropic: any ChatProvider
@@ -13,12 +21,22 @@ struct CloudProviderRegistry: Sendable {
     credentialStore: any CloudCredentialStore,
     transport: any CloudNetworkTransport
   ) {
+    self.init(
+      accessResolver: DirectCloudAccessResolver(credentialStore: credentialStore),
+      transport: transport
+    )
+  }
+
+  init(
+    accessResolver: any CloudAccessResolving,
+    transport: any CloudNetworkTransport
+  ) {
     openAI = OpenAIResponsesClient(
-      credentialStore: credentialStore,
+      accessResolver: accessResolver,
       transport: transport
     )
     anthropic = AnthropicMessagesClient(
-      credentialStore: credentialStore,
+      accessResolver: accessResolver,
       transport: transport
     )
   }
@@ -32,7 +50,7 @@ struct CloudProviderRegistry: Sendable {
 }
 
 struct OpenAIResponsesClient: ChatProvider {
-  private let credentialStore: any CloudCredentialStore
+  private let accessResolver: any CloudAccessResolving
   private let transport: any CloudNetworkTransport
   private let responsesURL: URL
 
@@ -41,7 +59,19 @@ struct OpenAIResponsesClient: ChatProvider {
     transport: any CloudNetworkTransport,
     responsesURL: URL = URL(string: "https://api.openai.com/v1/responses")!
   ) {
-    self.credentialStore = credentialStore
+    self.init(
+      accessResolver: DirectCloudAccessResolver(credentialStore: credentialStore),
+      transport: transport,
+      responsesURL: responsesURL
+    )
+  }
+
+  init(
+    accessResolver: any CloudAccessResolving,
+    transport: any CloudNetworkTransport,
+    responsesURL: URL = URL(string: "https://api.openai.com/v1/responses")!
+  ) {
+    self.accessResolver = accessResolver
     self.transport = transport
     self.responsesURL = responsesURL
   }
@@ -50,8 +80,12 @@ struct OpenAIResponsesClient: ChatProvider {
     AsyncThrowingStream { continuation in
       let task = Task {
         do {
-          let urlRequest = try makeRequest(for: request)
-          try await consume(urlRequest, continuation: continuation)
+          let prepared = try makeRequest(for: request)
+          try await consume(
+            prepared.request,
+            usesBackend: prepared.usesBackend,
+            continuation: continuation
+          )
         } catch {
           continuation.finish(throwing: normalizedCloudError(error))
         }
@@ -60,11 +94,16 @@ struct OpenAIResponsesClient: ChatProvider {
     }
   }
 
-  private func makeRequest(for request: ChatRequest) throws -> URLRequest {
+  private struct PreparedRequest {
+    let request: URLRequest
+    let usesBackend: Bool
+  }
+
+  private func makeRequest(for request: ChatRequest) throws -> PreparedRequest {
     guard request.route.providerID == CloudProviderID.openAI.rawValue else {
       throw CloudProviderError.invalidResponse
     }
-    guard let apiKey = try credentialStore.apiKey(for: .openAI), !apiKey.isEmpty else {
+    guard let access = try accessResolver.access(for: .openAI) else {
       throw CloudProviderError.missingAPIKey(.openAI)
     }
 
@@ -87,16 +126,19 @@ struct OpenAIResponsesClient: ChatProvider {
       stream: true,
       store: false
     )
-    var urlRequest = URLRequest(url: responsesURL)
+    var urlRequest = URLRequest(
+      url: access.endpoint(provider: .openAI, operation: "responses", directURL: responsesURL)
+    )
     urlRequest.httpMethod = "POST"
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+    urlRequest.setValue("Bearer \(access.credential)", forHTTPHeaderField: "Authorization")
     urlRequest.httpBody = try JSONEncoder().encode(body)
-    return urlRequest
+    return PreparedRequest(request: urlRequest, usesBackend: access.usesBackend)
   }
 
   private func consume(
     _ request: URLRequest,
+    usesBackend: Bool,
     continuation: AsyncThrowingStream<ChatEvent, Error>.Continuation
   ) async throws {
     var parser = ServerSentEventParser()
@@ -123,7 +165,12 @@ struct OpenAIResponsesClient: ChatProvider {
 
     guard let statusCode else { throw CloudProviderError.invalidResponse }
     guard (200...299).contains(statusCode) else {
-      throw cloudHTTPError(provider: .openAI, statusCode: statusCode, data: errorBody)
+      throw cloudHTTPError(
+        provider: .openAI,
+        statusCode: statusCode,
+        data: errorBody,
+        usesBackend: usesBackend
+      )
     }
     for event in parser.finish() {
       didComplete = try handle(event, continuation: continuation) || didComplete
@@ -180,7 +227,7 @@ private struct OpenAIStreamPayload: Decodable {
 }
 
 struct AnthropicMessagesClient: ChatProvider {
-  private let credentialStore: any CloudCredentialStore
+  private let accessResolver: any CloudAccessResolving
   private let transport: any CloudNetworkTransport
   private let messagesURL: URL
 
@@ -189,7 +236,19 @@ struct AnthropicMessagesClient: ChatProvider {
     transport: any CloudNetworkTransport,
     messagesURL: URL = URL(string: "https://api.anthropic.com/v1/messages")!
   ) {
-    self.credentialStore = credentialStore
+    self.init(
+      accessResolver: DirectCloudAccessResolver(credentialStore: credentialStore),
+      transport: transport,
+      messagesURL: messagesURL
+    )
+  }
+
+  init(
+    accessResolver: any CloudAccessResolving,
+    transport: any CloudNetworkTransport,
+    messagesURL: URL = URL(string: "https://api.anthropic.com/v1/messages")!
+  ) {
+    self.accessResolver = accessResolver
     self.transport = transport
     self.messagesURL = messagesURL
   }
@@ -198,8 +257,12 @@ struct AnthropicMessagesClient: ChatProvider {
     AsyncThrowingStream { continuation in
       let task = Task {
         do {
-          let urlRequest = try makeRequest(for: request)
-          try await consume(urlRequest, continuation: continuation)
+          let prepared = try makeRequest(for: request)
+          try await consume(
+            prepared.request,
+            usesBackend: prepared.usesBackend,
+            continuation: continuation
+          )
         } catch {
           continuation.finish(throwing: normalizedCloudError(error))
         }
@@ -208,11 +271,16 @@ struct AnthropicMessagesClient: ChatProvider {
     }
   }
 
-  private func makeRequest(for request: ChatRequest) throws -> URLRequest {
+  private struct PreparedRequest {
+    let request: URLRequest
+    let usesBackend: Bool
+  }
+
+  private func makeRequest(for request: ChatRequest) throws -> PreparedRequest {
     guard request.route.providerID == CloudProviderID.anthropic.rawValue else {
       throw CloudProviderError.invalidResponse
     }
-    guard let apiKey = try credentialStore.apiKey(for: .anthropic), !apiKey.isEmpty else {
+    guard let access = try accessResolver.access(for: .anthropic) else {
       throw CloudProviderError.missingAPIKey(.anthropic)
     }
 
@@ -240,17 +308,24 @@ struct AnthropicMessagesClient: ChatProvider {
         .map { InputMessage(role: $0.role.rawValue, content: $0.content) },
       stream: true
     )
-    var urlRequest = URLRequest(url: messagesURL)
+    var urlRequest = URLRequest(
+      url: access.endpoint(provider: .anthropic, operation: "messages", directURL: messagesURL)
+    )
     urlRequest.httpMethod = "POST"
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
-    urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+    if access.usesBackend {
+      urlRequest.setValue("Bearer \(access.credential)", forHTTPHeaderField: "Authorization")
+    } else {
+      urlRequest.setValue(access.credential, forHTTPHeaderField: "x-api-key")
+      urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+    }
     urlRequest.httpBody = try JSONEncoder().encode(body)
-    return urlRequest
+    return PreparedRequest(request: urlRequest, usesBackend: access.usesBackend)
   }
 
   private func consume(
     _ request: URLRequest,
+    usesBackend: Bool,
     continuation: AsyncThrowingStream<ChatEvent, Error>.Continuation
   ) async throws {
     var parser = ServerSentEventParser()
@@ -277,7 +352,12 @@ struct AnthropicMessagesClient: ChatProvider {
 
     guard let statusCode else { throw CloudProviderError.invalidResponse }
     guard (200...299).contains(statusCode) else {
-      throw cloudHTTPError(provider: .anthropic, statusCode: statusCode, data: errorBody)
+      throw cloudHTTPError(
+        provider: .anthropic,
+        statusCode: statusCode,
+        data: errorBody,
+        usesBackend: usesBackend
+      )
     }
     for event in parser.finish() {
       didComplete = try handle(event, continuation: continuation) || didComplete

@@ -29,11 +29,14 @@ enum CloudProviderError: LocalizedError, Equatable, Sendable {
   case requestFailed(statusCode: Int, message: String?)
   case streamEndedUnexpectedly
   case providerMessage(String)
+  case backendNotConfigured
+  case invalidAppleCredential
+  case accountAuthenticationFailed
 
   var errorDescription: String? {
     switch self {
     case .missingAPIKey(let provider):
-      "Add an API key for \(provider.displayName) in Advanced Settings."
+      "Sign in with Apple or add an API key for \(provider.displayName) in Advanced Settings."
     case .offline:
       "The cloud provider could not be reached. Check your internet connection."
     case .authenticationFailed(let provider):
@@ -49,6 +52,12 @@ enum CloudProviderError: LocalizedError, Equatable, Sendable {
       "The cloud response ended before it completed."
     case .providerMessage(let message):
       message
+    case .backendNotConfigured:
+      "AI Spotlight account sign-in is not configured in this build."
+    case .invalidAppleCredential:
+      "Sign in with Apple did not return a valid identity credential."
+    case .accountAuthenticationFailed:
+      "Your AI Spotlight account session is invalid or expired. Sign in again."
     }
   }
 }
@@ -93,22 +102,23 @@ func normalizedCloudError(_ error: Error) -> Error {
 func cloudHTTPError(
   provider: CloudProviderID,
   statusCode: Int,
-  data: Data
+  data: Data,
+  usesBackend: Bool = false
 ) -> CloudProviderError {
   switch statusCode {
   case 401, 403:
-    return .authenticationFailed(provider)
+    return usesBackend ? .accountAuthenticationFailed : .authenticationFailed(provider)
   case 429:
     return .rateLimited(provider)
   default:
     return .requestFailed(
       statusCode: statusCode,
-      message: providerErrorMessage(in: data)
+      message: cloudServiceErrorMessage(in: data)
     )
   }
 }
 
-private func providerErrorMessage(in data: Data) -> String? {
+func cloudServiceErrorMessage(in data: Data) -> String? {
   guard !data.isEmpty,
         let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
     return nil
