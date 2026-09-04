@@ -181,6 +181,88 @@ final class LocalInferenceTests: XCTestCase {
   }
 
   @MainActor
+  func testLocalFollowupReceivesHistoryAndSwitchingChatsDoesNotLeakIt() async throws {
+    let engine = MockLocalModelEngine(installedModel: fixtureModel(), stream: { _ in
+      AsyncThrowingStream { $0.yield("response"); $0.finish() }
+    })
+    let store = makeSessionStore()
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: store)
+    viewModel.submit("First question")
+    await waitUntil { viewModel.state == .idle && viewModel.messages.count == 2 }
+    let firstSession = try XCTUnwrap(viewModel.selectedSessionID)
+    viewModel.submit("Second question")
+    await waitUntil { viewModel.state == .idle && viewModel.messages.count == 4 }
+    XCTAssertEqual(engine.requests[1].messages.map(\.content), ["First question", "response", "Second question"])
+    XCTAssertEqual(engine.requests[1].messages.map(\.role), [.user, .assistant, .user])
+    viewModel.newChat()
+    viewModel.submit("Separate question")
+    await waitUntil { viewModel.state == .idle && viewModel.messages.count == 2 }
+    XCTAssertEqual(engine.requests[2].messages.map(\.content), ["Separate question"])
+    viewModel.selectSession(id: firstSession)
+    viewModel.submit("Third question")
+    await waitUntil { viewModel.state == .idle && viewModel.messages.count == 6 }
+    XCTAssertEqual(engine.requests[3].messages.map(\.content), ["First question", "response", "Second question", "response", "Third question"])
+    let saved = try XCTUnwrap(store.load().first { $0.id == firstSession }?.messages)
+    XCTAssertEqual(saved.map(\.id), viewModel.messages.map(\.id))
+    XCTAssertEqual(saved.map(\.role), viewModel.messages.map(\.role))
+    XCTAssertEqual(saved.map(\.content), viewModel.messages.map(\.content))
+  }
+
+  @MainActor
+  func testLocalTrimmingDoesNotDeletePersistedHistory() async throws {
+    let store = makeSessionStore()
+    let original = [
+      ChatMessage(role: .user, content: String(repeating: "old", count: 2_000)),
+      ChatMessage(role: .assistant, content: "old reply"),
+      ChatMessage(role: .user, content: "recent"),
+      ChatMessage(role: .assistant, content: "recent reply"),
+    ]
+    try store.save([ChatSession(messages: original)])
+    let persistedOriginal = store.load()[0].messages
+    let engine = MockLocalModelEngine(installedModel: fixtureModel())
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: store)
+    viewModel.submit("current")
+    await waitUntil { viewModel.state == .idle && engine.requests.count == 1 }
+    XCTAssertEqual(engine.requests[0].messages.map(\.content), ["recent", "recent reply", "current"])
+    XCTAssertEqual(Array(store.load()[0].messages.prefix(4)), persistedOriginal)
+    XCTAssertEqual(store.load()[0].messages.count, 6)
+    XCTAssertNotNil(viewModel.contextNotice)
+  }
+
+  @MainActor
+  func testContextRejectionPreservesDraftAndDoesNotPersistOrGenerate() async {
+    let engine = MockLocalModelEngine(installedModel: fixtureModel())
+    let store = makeSessionStore()
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: store)
+    let original = "  " + String(repeating: "x", count: 40_000) + "\n"
+    var draft = original
+    viewModel.submit(draft, onAccepted: { draft = "" })
+    await waitUntil { if case .failed = viewModel.state { return true }; return false }
+    XCTAssertEqual(draft, original)
+    XCTAssertTrue(engine.requests.isEmpty)
+    XCTAssertTrue(store.load().isEmpty)
+    for provider in CloudProviderID.allCases {
+      viewModel.submitCloud(draft, provider: provider, modelID: "manual", onAccepted: { draft = "" })
+      XCTAssertEqual(draft, original)
+      XCTAssertTrue(viewModel.messages.isEmpty)
+      XCTAssertTrue(store.load().isEmpty)
+      guard case .failed(let message) = viewModel.state else { return XCTFail("Expected context rejection") }
+      XCTAssertTrue(message.contains("Shorten"))
+    }
+  }
+
+  @MainActor
+  func testAcceptedLocalRequestClearsDraftOnlyAfterPreparation() async {
+    let engine = MockLocalModelEngine(installedModel: fixtureModel())
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: makeSessionStore())
+    var draft = "Hello"
+    viewModel.submit(draft, onAccepted: { draft = "" })
+    XCTAssertEqual(draft, "Hello")
+    await waitUntil { viewModel.state == .idle && engine.requests.count == 1 }
+    XCTAssertEqual(draft, "")
+  }
+
+  @MainActor
   private func waitUntil(
     _ condition: @escaping @MainActor () -> Bool,
     iterations: Int = 1_000

@@ -7,16 +7,27 @@ struct LocalModel: Codable, Sendable, Equatable, Identifiable {
 }
 
 struct LocalModelRequest: Sendable, Equatable {
-  let prompt: String
+  let messages: [ChatMessage]
+
+  var prompt: String { messages.last?.content ?? "" }
   let maximumTokenCount: Int
   let temperature: Float
 
   init(
     prompt: String,
-    maximumTokenCount: Int = 512,
+    maximumTokenCount: Int = ModelContextPolicy.localOutputTokens,
     temperature: Float = 0.7
   ) {
-    self.prompt = prompt
+    self.init(messages: [ChatMessage(role: .user, content: prompt)],
+              maximumTokenCount: maximumTokenCount, temperature: temperature)
+  }
+
+  init(
+    messages: [ChatMessage],
+    maximumTokenCount: Int = ModelContextPolicy.localOutputTokens,
+    temperature: Float = 0.7
+  ) {
+    self.messages = messages
     self.maximumTokenCount = maximumTokenCount
     self.temperature = temperature
   }
@@ -31,6 +42,7 @@ protocol LocalModelEngine: Sendable {
     _ model: LocalModelDescriptor,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
   ) async throws -> LocalModel
+  func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error>
   func unload() async
 }
@@ -52,5 +64,16 @@ enum LocalInferenceError: LocalizedError, Equatable {
     case .bridgeFailure(let message):
       message
     }
+  }
+}
+
+extension LocalModelEngine {
+  func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
+    try ChatContextPreparer.prepare(
+      request.messages,
+      budget: ContextBudget(contextWindow: ModelContextPolicy.localContextWindow,
+                            outputTokens: request.maximumTokenCount, overheadTokens: 256),
+      countTokens: { $0.reduce(0) { $0 + $1.content.utf8.count + 32 } }
+    )
   }
 }

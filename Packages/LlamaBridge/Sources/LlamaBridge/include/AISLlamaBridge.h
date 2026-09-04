@@ -10,6 +10,31 @@ extern "C" {
 
 typedef void * AISLlamaEngineHandle;
 
+typedef struct {
+  const char * role;
+  const char * content;
+} AISLlamaChatMessage;
+
+// Applies the same native template formatter used by inference. Returns the
+// required byte count (excluding NUL), or -1 on failure. A null buffer measures.
+int32_t AISLlamaFormatChat(
+  const char * chat_template,
+  const AISLlamaChatMessage * messages,
+  int32_t message_count,
+  char * buffer,
+  int32_t buffer_capacity
+);
+
+int32_t AISLlamaEngineContextSize(AISLlamaEngineHandle engine);
+
+// Counts the selected model's fully formatted/tokenized conversation, including
+// special tokens. Does not decode tokens or change the engine's KV state.
+int32_t AISLlamaEngineCountChatTokens(
+  AISLlamaEngineHandle engine,
+  const AISLlamaChatMessage * messages,
+  int32_t message_count
+);
+
 AISLlamaEngineHandle AISLlamaEngineCreate(
   const char * model_path,
   int32_t context_size
@@ -19,7 +44,8 @@ void AISLlamaEngineDestroy(AISLlamaEngineHandle engine);
 
 bool AISLlamaEngineBeginCompletion(
   AISLlamaEngineHandle engine,
-  const char * prompt,
+  const AISLlamaChatMessage * messages,
+  int32_t message_count,
   int32_t maximum_token_count,
   float temperature
 );

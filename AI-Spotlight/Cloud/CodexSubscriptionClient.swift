@@ -97,6 +97,8 @@ struct CodexSubscriptionClient: ChatProvider {
         var completed = false
         do {
           guard request.route.providerID == CloudProviderID.chatGPT.rawValue else { throw CodexError.invalidResponse }
+          let prepared = try CloudContext.prepare(request)
+          let boundedRequest = ChatRequest(sessionID: request.sessionID, messages: prepared.messages, route: request.route)
           guard try await account() != nil else { throw CodexError.notSignedIn }
           let notifications = try await transport.notifications()
           defer { Task { await notifications.cancel() } }
@@ -111,7 +113,7 @@ struct CodexSubscriptionClient: ChatProvider {
               "turn/start",
               params: Self.turnParameters(
                 threadID: id,
-                request: request,
+                request: boundedRequest,
                 thinkingCapacity: thinkingCapacity()
               )
             )
@@ -192,11 +194,7 @@ struct CodexSubscriptionClient: ChatProvider {
   }
 
   static func prompt(for request: ChatRequest) throws -> String {
-    let messages = request.messages.filter { !$0.content.isEmpty }
-    if messages.count == 1 { return messages[0].content }
-    let transcript = CodexValue.array(messages.map {
-      .object(["role": .string($0.role.rawValue), "content": .string($0.content)])
-    })
-    return "Continue this conversation:\n" + String(decoding: try JSONEncoder().encode(transcript), as: UTF8.self)
+    let prepared = try CloudContext.prepare(request)
+    return try CloudContext.codexPrompt(prepared.messages)
   }
 }

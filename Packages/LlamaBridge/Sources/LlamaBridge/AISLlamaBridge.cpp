@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cstring>
 #include <mutex>
+#include <limits>
 #include <string>
 #include <thread>
 #include <vector>
@@ -16,6 +17,7 @@ struct Engine {
   llama_context * context = nullptr;
   const llama_vocab * vocabulary = nullptr;
   llama_sampler * sampler = nullptr;
+  int32_t context_limit = 0;
   int32_t generated_token_count = 0;
   int32_t maximum_token_count = 0;
 };
@@ -33,39 +35,64 @@ void set_error(const std::string & message) {
   last_error = message;
 }
 
-std::string format_prompt(Engine * engine, const char * prompt) {
-  const char * chat_template = llama_model_chat_template(engine->model, nullptr);
-  if (chat_template == nullptr) {
-    return std::string(prompt);
+bool format_prompt(
+  const char * chat_template,
+  const AISLlamaChatMessage * messages,
+  int32_t message_count,
+  std::string & result
+) {
+  if (chat_template == nullptr || chat_template[0] == '\0') {
+    set_error("This model has no chat template. Choose a GGUF instruct/chat model with a supported template.");
+    return false;
   }
-
-  llama_chat_message message = {"user", prompt};
+  if (messages == nullptr || message_count <= 0) {
+    set_error("The local conversation is empty.");
+    return false;
+  }
+  std::vector<llama_chat_message> chat;
+  for (int32_t index = 0; index < message_count; ++index) {
+    const auto & message = messages[index];
+    const char * expected_role = index % 2 == 0 ? "user" : "assistant";
+    if (message.role == nullptr || message.content == nullptr ||
+        std::strcmp(message.role, expected_role) != 0) {
+      set_error("The local conversation must contain ordered user/assistant turns.");
+      return false;
+    }
+    chat.push_back({message.role, message.content});
+  }
+  if (message_count % 2 == 0) {
+    set_error("The local conversation must end with the current user message.");
+    return false;
+  }
   const int32_t required_size = llama_chat_apply_template(
-    chat_template,
-    &message,
-    1,
-    true,
-    nullptr,
-    0
+    chat_template, chat.data(), chat.size(), true, nullptr, 0
   );
-  if (required_size <= 0) {
-    return std::string(prompt);
+  if (required_size <= 0 || required_size == std::numeric_limits<int32_t>::max()) {
+    set_error("llama.cpp cannot apply this model's chat template. Choose a model with a supported template.");
+    return false;
   }
-
   std::vector<char> formatted(static_cast<size_t>(required_size) + 1, '\0');
   const int32_t written = llama_chat_apply_template(
-    chat_template,
-    &message,
-    1,
-    true,
-    formatted.data(),
-    static_cast<int32_t>(formatted.size())
+    chat_template, chat.data(), chat.size(), true, formatted.data(), required_size + 1
   );
-  if (written <= 0) {
-    return std::string(prompt);
+  if (written <= 0 || written > required_size) {
+    set_error("llama.cpp could not format the conversation.");
+    return false;
   }
+  result.assign(formatted.data(), static_cast<size_t>(written));
+  return true;
+}
 
-  return std::string(formatted.data(), static_cast<size_t>(written));
+int32_t count_tokens(Engine * engine, const std::string & prompt) {
+  const int32_t count = -llama_tokenize(
+    engine->vocabulary, prompt.c_str(), static_cast<int32_t>(prompt.size()),
+    nullptr, 0, true, true
+  );
+  if (count <= 0) {
+    set_error("llama.cpp could not tokenize the conversation.");
+    return -1;
+  }
+  return count;
 }
 
 void replace_sampler(Engine * engine, float temperature) {
@@ -114,7 +141,15 @@ AISLlamaEngineHandle AISLlamaEngineCreate(
   }
 
   auto context_parameters = llama_context_default_params();
-  context_parameters.n_ctx = static_cast<uint32_t>(context_size);
+  const int32_t training_context = llama_model_n_ctx_train(engine->model);
+  if (training_context <= 0) {
+    set_error("The model does not declare a usable context size.");
+    llama_model_free(engine->model);
+    delete engine;
+    return nullptr;
+  }
+  engine->context_limit = std::min(context_size, training_context);
+  context_parameters.n_ctx = static_cast<uint32_t>(engine->context_limit);
   context_parameters.n_batch = std::min<uint32_t>(512, context_parameters.n_ctx);
   const unsigned int hardware_threads = std::max(1U, std::thread::hardware_concurrency());
   const int32_t thread_count = static_cast<int32_t>(std::max(1U, std::min(8U, hardware_threads - 1U)));
@@ -128,6 +163,7 @@ AISLlamaEngineHandle AISLlamaEngineCreate(
     return nullptr;
   }
 
+  engine->context_limit = std::min(engine->context_limit, static_cast<int32_t>(llama_n_ctx(engine->context)));
   engine->vocabulary = llama_model_get_vocab(engine->model);
   return static_cast<AISLlamaEngineHandle>(engine);
 }
@@ -150,36 +186,69 @@ void AISLlamaEngineDestroy(AISLlamaEngineHandle engine_handle) {
   delete engine;
 }
 
+int32_t AISLlamaFormatChat(
+  const char * chat_template,
+  const AISLlamaChatMessage * messages,
+  int32_t message_count,
+  char * buffer,
+  int32_t buffer_capacity
+) {
+  std::string formatted;
+  if (!format_prompt(chat_template, messages, message_count, formatted)) { return -1; }
+  const auto size = static_cast<int32_t>(formatted.size());
+  if (buffer != nullptr && buffer_capacity > size) {
+    std::memcpy(buffer, formatted.c_str(), formatted.size() + 1);
+  }
+  return size;
+}
+
+int32_t AISLlamaEngineContextSize(AISLlamaEngineHandle engine_handle) {
+  const auto * engine = static_cast<Engine *>(engine_handle);
+  return engine == nullptr ? 0 : engine->context_limit;
+}
+
+int32_t AISLlamaEngineCountChatTokens(
+  AISLlamaEngineHandle engine_handle,
+  const AISLlamaChatMessage * messages,
+  int32_t message_count
+) {
+  auto * engine = static_cast<Engine *>(engine_handle);
+  if (engine == nullptr) {
+    set_error("The local engine is not loaded.");
+    return -1;
+  }
+  std::string formatted;
+  if (!format_prompt(llama_model_chat_template(engine->model, nullptr), messages, message_count, formatted)) {
+    return -1;
+  }
+  return count_tokens(engine, formatted);
+}
+
 bool AISLlamaEngineBeginCompletion(
   AISLlamaEngineHandle engine_handle,
-  const char * prompt,
+  const AISLlamaChatMessage * messages,
+  int32_t message_count,
   int32_t maximum_token_count,
   float temperature
 ) {
   auto * engine = static_cast<Engine *>(engine_handle);
-  if (engine == nullptr || prompt == nullptr) {
+  if (engine == nullptr || maximum_token_count <= 0) {
     set_error("The local inference request is invalid.");
     return false;
   }
 
-  const std::string formatted_prompt = format_prompt(engine, prompt);
-  const int32_t required_token_count = -llama_tokenize(
-    engine->vocabulary,
-    formatted_prompt.c_str(),
-    static_cast<int32_t>(formatted_prompt.size()),
-    nullptr,
-    0,
-    true,
-    true
-  );
-  if (required_token_count <= 0) {
-    set_error("llama.cpp could not tokenize the prompt.");
+  std::string formatted_prompt;
+  if (!format_prompt(llama_model_chat_template(engine->model, nullptr), messages, message_count, formatted_prompt)) {
     return false;
   }
+  const int32_t required_token_count = count_tokens(engine, formatted_prompt);
+  if (required_token_count <= 0) { return false; }
 
-  const int32_t context_size = static_cast<int32_t>(llama_n_ctx(engine->context));
-  if (required_token_count >= context_size) {
-    set_error("The prompt is too long for the installed local model context.");
+  const int32_t context_size = engine->context_limit;
+  // Keep one extra slot and the entire requested output allowance. Never silently
+  // shrink output to squeeze in an oversized input.
+  if (static_cast<int64_t>(required_token_count) + maximum_token_count + 1 > context_size) {
+    set_error("This conversation exceeds the local model context after reserving reply space. Shorten the message or choose a model with a larger context.");
     return false;
   }
 
@@ -201,7 +270,7 @@ bool AISLlamaEngineBeginCompletion(
   llama_kv_self_clear(engine->context);
   replace_sampler(engine, temperature);
 
-  constexpr int32_t batch_size = 512;
+  const int32_t batch_size = static_cast<int32_t>(llama_n_batch(engine->context));
   for (int32_t offset = 0; offset < token_count; offset += batch_size) {
     const int32_t current_batch_size = std::min(batch_size, token_count - offset);
     llama_batch prompt_batch = llama_batch_get_one(
@@ -216,10 +285,7 @@ bool AISLlamaEngineBeginCompletion(
   }
 
   engine->generated_token_count = 0;
-  engine->maximum_token_count = std::max(
-    1,
-    std::min(maximum_token_count, context_size - token_count)
-  );
+  engine->maximum_token_count = maximum_token_count;
   return true;
 }
 

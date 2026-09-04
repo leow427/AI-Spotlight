@@ -1,0 +1,156 @@
+import Foundation
+
+struct ContextBudget: Equatable, Sendable {
+  let contextWindow: Int
+  let outputTokens: Int
+  let overheadTokens: Int
+  var inputLimit: Int = .max
+
+  var availableInputTokens: Int {
+    max(0, min(inputLimit, contextWindow - outputTokens - overheadTokens))
+  }
+}
+
+/// Shared by request preparation, Auto, and model-selection metadata. Limits for
+/// unverified IDs are application policy, not claims about provider capabilities.
+enum ModelContextPolicy {
+  static let localContextWindow = 4_096
+  static let localOutputTokens = 512
+
+  static func cloud(provider: CloudProviderID, modelID: String) -> ContextBudget {
+    // Exact IDs only; unknown snapshots/manual selections use the fallback.
+    // Sources and the conservative fallback policy are in docs/Context-Budgets.md.
+    let knownOpenAI = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"].contains(modelID)
+    if provider == .chatGPT {
+      return ContextBudget(
+        contextWindow: knownOpenAI ? 1_050_000 : 32_768,
+        outputTokens: knownOpenAI ? 128_000 : 16_384,
+        overheadTokens: 8_192,
+        inputLimit: 32_768
+      )
+    }
+    return ContextBudget(
+      contextWindow: provider == .openAI && knownOpenAI ? 1_050_000 : 8_192,
+      outputTokens: 4_096,
+      overheadTokens: 512,
+      inputLimit: 32_768
+    )
+  }
+}
+
+extension CloudModel {
+  var contextBudget: ContextBudget {
+    ModelContextPolicy.cloud(provider: provider, modelID: id)
+  }
+}
+
+enum ChatContextError: LocalizedError, Equatable {
+  case missingCurrentPrompt
+  case oversizedPrompt(inputLimit: Int)
+  case invalidText
+
+  var errorDescription: String? {
+    switch self {
+    case .missingCurrentPrompt:
+      "Enter a message before sending."
+    case .oversizedPrompt(let inputLimit):
+      "This message alone exceeds the selected model's input budget (\(inputLimit) tokens after reserving reply space). Shorten it or choose a model with a larger context. Your draft has been kept."
+    case .invalidText:
+      "This message contains a null character that the local model cannot read. Remove it and try again. Your draft has been kept."
+    }
+  }
+}
+
+struct PreparedConversation: Equatable, Sendable {
+  let messages: [ChatMessage]
+  let inputTokenCount: Int
+  let omittedMessageCount: Int
+  let budget: ContextBudget
+
+  var notice: String? {
+    guard omittedMessageCount > 0 else { return nil }
+    return "\(omittedMessageCount) earlier messages were omitted from this request to fit the model's context or keep complete turns. Saved chat history is unchanged."
+  }
+}
+
+enum ChatContextPreparer {
+  /// A request is a suffix of complete user/assistant turns plus the current user
+  /// message. Empty placeholders and unanswered/otherwise orphaned turns stay on
+  /// disk, but cannot become misleading context for a later question.
+  static func prepare(
+    _ messages: [ChatMessage],
+    budget: ContextBudget,
+    countTokens: ([ChatMessage]) throws -> Int
+  ) throws -> PreparedConversation {
+    guard let current = messages.last, current.role == .user,
+          !current.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      throw ChatContextError.missingCurrentPrompt
+    }
+    var retained = [current]
+    var tokenCount = try countTokens(retained)
+    guard budget.outputTokens > 0, tokenCount <= budget.availableInputTokens else {
+      throw ChatContextError.oversizedPrompt(inputLimit: budget.availableInputTokens)
+    }
+
+    var turns: [[ChatMessage]] = []
+    var index = 0
+    while index + 1 < messages.count - 1 {
+      let user = messages[index]
+      let assistant = messages[index + 1]
+      if user.role == .user, assistant.role == .assistant,
+         !user.content.isEmpty, !assistant.content.isEmpty {
+        turns.append([user, assistant])
+        index += 2
+      } else {
+        index += 1
+      }
+    }
+    for turn in turns.reversed() {
+      let candidate = turn + retained
+      let candidateCount = try countTokens(candidate)
+      guard candidateCount <= budget.availableInputTokens else { break }
+      retained = candidate
+      tokenCount = candidateCount
+    }
+    return PreparedConversation(
+      messages: retained,
+      inputTokenCount: tokenCount,
+      omittedMessageCount: messages.count - retained.count,
+      budget: budget
+    )
+  }
+}
+
+enum CloudContext {
+  private struct Message: Encodable {
+    let role: String
+    let content: String
+  }
+
+  static func encodedMessages(_ messages: [ChatMessage]) throws -> Data {
+    try JSONEncoder().encode(messages.map { Message(role: $0.role.rawValue, content: $0.content) })
+  }
+
+  static func codexPrompt(_ messages: [ChatMessage]) throws -> String {
+    if messages.count == 1 { return messages[0].content }
+    return "Continue this conversation:\n" + String(decoding: try encodedMessages(messages), as: UTF8.self)
+  }
+
+  /// One UTF-8 byte per token deliberately overestimates text tokenization,
+  /// including JSON escaping/role wrappers. Hidden protocol text has its own reserve.
+  static func inputTokenCount(_ messages: [ChatMessage], provider: CloudProviderID) throws -> Int {
+    if provider == .chatGPT { return try codexPrompt(messages).utf8.count }
+    return try encodedMessages(messages).count
+  }
+
+  static func prepare(_ request: ChatRequest) throws -> PreparedConversation {
+    guard let provider = CloudProviderID(rawValue: request.route.providerID) else {
+      throw CloudProviderError.invalidResponse
+    }
+    return try ChatContextPreparer.prepare(
+      request.messages,
+      budget: ModelContextPolicy.cloud(provider: provider, modelID: request.route.modelID),
+      countTokens: { try inputTokenCount($0, provider: provider) }
+    )
+  }
+}

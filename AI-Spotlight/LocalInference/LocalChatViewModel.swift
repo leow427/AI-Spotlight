@@ -18,6 +18,7 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var selectedSessionID: UUID?
   @Published private(set) var installedModel: LocalModel?
   @Published private(set) var installedModels: [LocalModel] = []
+  @Published private(set) var contextNotice: String?
   @Published private(set) var state: State = .idle
 
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
@@ -126,19 +127,32 @@ final class LocalChatViewModel: ObservableObject {
     }
   }
 
-  func submit(_ prompt: String) {
+  func submit(_ prompt: String, onAccepted: @escaping @MainActor () -> Void = {}) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedPrompt.isEmpty, !isBusy else { return }
     idleUnloadTask?.cancel()
     let responseID = UUID()
-    let sessionID = ensureSelectedSession()
-    append(ChatMessage(role: .user, content: trimmedPrompt), to: sessionID)
-    append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
+    let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
+    let request = LocalModelRequest(messages: messages + [userMessage])
+    contextNotice = nil
     state = .preparing
 
     generationTask = Task { [weak self, engine] in
       do {
-        for try await fragment in engine.stream(LocalModelRequest(prompt: trimmedPrompt)) {
+        let prepared = try await engine.prepare(request)
+        try Task.checkCancellation()
+        guard let owner = self else { return }
+        let sessionID = owner.ensureSelectedSession()
+        owner.contextNotice = prepared.notice
+        owner.append(userMessage, to: sessionID)
+        owner.append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
+        onAccepted()
+        let boundedRequest = LocalModelRequest(
+          messages: prepared.messages,
+          maximumTokenCount: request.maximumTokenCount,
+          temperature: request.temperature
+        )
+        for try await fragment in engine.stream(boundedRequest) {
           try Task.checkCancellation()
           guard let self else { return }
           self.state = .streaming
@@ -160,34 +174,39 @@ final class LocalChatViewModel: ObservableObject {
   func submitCloud(
     _ prompt: String,
     provider providerID: CloudProviderID,
-    modelID: String
+    modelID: String,
+    onAccepted: @escaping @MainActor () -> Void = {}
   ) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedPrompt.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
     idleUnloadTask?.cancel()
-    let responseID = UUID()
-    let sessionID = ensureSelectedSession()
-    append(ChatMessage(role: .user, content: trimmedPrompt), to: sessionID)
-    guard let requestMessages = sessions.first(where: { $0.id == sessionID })?.messages else {
-      state = .failed("Unable to prepare this chat for the cloud provider.")
-      return
-    }
-    append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
-    state = .preparing
-
     let route = Route(
       mode: .cloud,
       providerID: providerID.rawValue,
       modelID: trimmedModelID,
       usesNetwork: true
     )
+    let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
+    let prepared: PreparedConversation
+    contextNotice = nil
+    do {
+      prepared = try CloudContext.prepare(ChatRequest(
+        sessionID: selectedSessionID ?? UUID(), messages: messages + [userMessage], route: route
+      ))
+    } catch {
+      state = .failed(error.localizedDescription)
+      return
+    }
+    let sessionID = ensureSelectedSession()
+    let responseID = UUID()
+    append(userMessage, to: sessionID)
+    append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
+    contextNotice = prepared.notice
+    state = .preparing
+    onAccepted()
     let provider = cloudProviders.provider(for: providerID)
-    let request = ChatRequest(
-      sessionID: sessionID,
-      messages: requestMessages,
-      route: route
-    )
+    let request = ChatRequest(sessionID: sessionID, messages: prepared.messages, route: route)
     generationTask = Task { [weak self] in
       do {
         for try await event in provider.stream(request) {
@@ -223,6 +242,7 @@ final class LocalChatViewModel: ObservableObject {
 
   func newChat() {
     stopStreaming()
+    contextNotice = nil
     let session = ChatSession()
     sessions.append(session)
     selectedSessionID = session.id
@@ -233,10 +253,12 @@ final class LocalChatViewModel: ObservableObject {
   func selectSession(id: UUID) {
     guard sessions.contains(where: { $0.id == id }), !isBusy else { return }
     selectedSessionID = id
+    contextNotice = nil
   }
 
   func cycleRecentChat() {
     guard !isBusy, !sessions.isEmpty else { return }
+    contextNotice = nil
     let selectedIndex = selectedSessionID.flatMap { id in sessions.firstIndex(where: { $0.id == id }) }
     selectedSessionID = sessions[selectedIndex.map { ($0 + 1) % sessions.count } ?? 0].id
   }

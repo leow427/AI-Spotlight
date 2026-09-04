@@ -35,7 +35,7 @@ struct AutoRouter: Sendable {
       case .unavailableCapability(.advancedReasoning):
         "No available model is configured for this reasoning request."
       case .unavailableCapability(.largerContext):
-        "This chat exceeds the available model context."
+        "This message exceeds the available model input budget. Shorten it or choose a model with a larger context. Your draft has been kept."
       }
     }
   }
@@ -56,17 +56,10 @@ struct AutoRouter: Sendable {
     let reasoningLevel: ReasoningLevel
 
     static let localDefault = Self(
-      maximumContextTokens: 4_096,
+      maximumContextTokens: ModelContextPolicy.localContextWindow,
       supportsCoding: false,
       supportsWebSearch: false,
       reasoningLevel: .basic
-    )
-
-    static let cloudDefault = Self(
-      maximumContextTokens: 128_000,
-      supportsCoding: true,
-      supportsWebSearch: false,
-      reasoningLevel: .advanced
     )
   }
 
@@ -80,12 +73,15 @@ struct AutoRouter: Sendable {
       provider: CloudProviderID,
       modelID: String,
       modelDisplayName: String? = nil,
-      capabilities: ModelCapabilities = .cloudDefault
+      capabilities: ModelCapabilities? = nil
     ) {
       self.provider = provider
       self.modelID = modelID
       self.modelDisplayName = modelDisplayName ?? modelID
-      self.capabilities = capabilities
+      self.capabilities = capabilities ?? ModelCapabilities(
+        maximumContextTokens: ModelContextPolicy.cloud(provider: provider, modelID: modelID).contextWindow,
+        supportsCoding: true, supportsWebSearch: false, reasoningLevel: .advanced
+      )
     }
   }
 
@@ -189,12 +185,27 @@ struct AutoRouter: Sendable {
       return cloudDecision(for: cloud, reason: .requiresWebSearch)
     }
 
-    let contextTokenCount = estimatedTokens(
-      for: request.prompt,
-      contextMessages: request.contextMessages
+    let candidateMessages = request.contextMessages + [ChatMessage(role: .user, content: request.prompt)]
+    let localBudget = ContextBudget(
+      contextWindow: request.localCapabilities.maximumContextTokens,
+      outputTokens: ModelContextPolicy.localOutputTokens, overheadTokens: 256
     )
-    if contextTokenCount > request.localCapabilities.maximumContextTokens {
-      guard cloud.capabilities.maximumContextTokens >= contextTokenCount else {
+    // This is a cheap conservative routing estimate. Local acceptance uses the
+    // selected GGUF's real template/tokenizer and effective runtime context.
+    let localInputCount = candidateMessages.reduce(0) { $0 + $1.content.utf8.count + 32 }
+    if localInputCount > localBudget.availableInputTokens {
+      var cloudBudget = ModelContextPolicy.cloud(provider: cloud.provider, modelID: cloud.modelID)
+      cloudBudget = ContextBudget(
+        contextWindow: min(cloudBudget.contextWindow, cloud.capabilities.maximumContextTokens),
+        outputTokens: cloudBudget.outputTokens, overheadTokens: cloudBudget.overheadTokens,
+        inputLimit: cloudBudget.inputLimit
+      )
+      // A long saved transcript is trimmable; reject only when the latest prompt
+      // cannot fit. Final preparation applies the same shared policy before send.
+      let prepared = try? ChatContextPreparer.prepare(candidateMessages, budget: cloudBudget) {
+        try CloudContext.inputTokenCount($0, provider: cloud.provider)
+      }
+      guard prepared != nil else {
         return Decision(
           route: nil,
           modelDisplayName: nil,
@@ -268,16 +279,6 @@ struct AutoRouter: Sendable {
       reason: reason,
       limitation: nil
     )
-  }
-
-  private static func estimatedTokens(
-    for prompt: String,
-    contextMessages: [ChatMessage]
-  ) -> Int {
-    let characterCount = prompt.utf8.count
-      + contextMessages.reduce(into: 0) { $0 += $1.content.utf8.count }
-    // A conservative estimate keeps the router cheap and prevents local context overflows.
-    return (characterCount + 3) / 4 + LocalModelRequest(prompt: "").maximumTokenCount
   }
 
   private static func requiresWebSearch(_ prompt: String) -> Bool {

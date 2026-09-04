@@ -41,7 +41,8 @@ final class CloudModeTests: XCTestCase {
     XCTAssertEqual(object["store"] as? Bool, false)
     XCTAssertEqual(object["stream"] as? Bool, true)
     XCTAssertNil(object["previous_response_id"])
-    XCTAssertEqual((object["input"] as? [[String: Any]])?.count, 2)
+    XCTAssertEqual((object["input"] as? [[String: Any]])?.count, 3)
+    XCTAssertEqual(object["max_output_tokens"] as? Int, 4_096)
   }
 
   func testAnthropicStreamsMessagesWithRequiredHeaders() async throws {
@@ -237,12 +238,107 @@ final class CloudModeTests: XCTestCase {
     )
   }
 
+  func testDirectProvidersBoundRequestsAndReserveOutputAtSerializationBoundary() async throws {
+    for provider in [CloudProviderID.openAI, .anthropic] {
+      let transport = MockCloudTransport(streamHandler: { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.response(statusCode: 200))
+          let event = provider == .openAI ? "response.completed" : "message_stop"
+          continuation.yield(.data(Data("data: {\"type\":\"\(event)\"}\n\n".utf8)))
+          continuation.finish()
+        }
+      })
+      let registry = CloudProviderRegistry(
+        credentialStore: MockCredentialStore(keys: [provider: "fixture-key"]), transport: transport
+      )
+      let base = makeRequest(provider: provider)
+      let messages = [
+        ChatMessage(role: .user, content: String(repeating: "old", count: 4_000)),
+        ChatMessage(role: .assistant, content: "old answer"),
+      ] + base.messages
+      let request = ChatRequest(sessionID: base.sessionID, messages: messages, route: base.route)
+      _ = try await collect(registry.provider(for: provider).stream(request))
+      let sent = try XCTUnwrap(transport.streamRequests.first?.httpBody)
+      let body = try XCTUnwrap(JSONSerialization.jsonObject(with: sent) as? [String: Any])
+      let outgoing = try XCTUnwrap(body[provider == .openAI ? "input" : "messages"] as? [[String: String]])
+      XCTAssertEqual(outgoing.map { $0["content"] }, base.messages.map(\.content))
+      XCTAssertEqual(outgoing.map { $0["role"] }, ["user", "assistant", "user"])
+      XCTAssertEqual(body[provider == .openAI ? "max_output_tokens" : "max_tokens"] as? Int, 4_096)
+      XCTAssertEqual(request.messages.count, 5)
+    }
+  }
+
+  func testDirectProvidersRejectOversizedPromptBeforeNetwork() async {
+    for provider in [CloudProviderID.openAI, .anthropic] {
+      let transport = MockCloudTransport()
+      let registry = CloudProviderRegistry(
+        credentialStore: MockCredentialStore(keys: [provider: "fixture-key"]), transport: transport
+      )
+      let base = makeRequest(provider: provider)
+      let request = ChatRequest(sessionID: base.sessionID, messages: [
+        ChatMessage(role: .user, content: String(repeating: "x", count: 40_000)),
+      ], route: base.route)
+      do {
+        _ = try await collect(registry.provider(for: provider).stream(request))
+        XCTFail("Oversized request was accepted")
+      } catch { XCTAssertTrue(error is ChatContextError) }
+      XCTAssertTrue(transport.streamRequests.isEmpty)
+    }
+  }
+
+  @MainActor
+  func testCloudTrimmingPreservesStoredTranscriptForEveryProvider() async throws {
+    for provider in CloudProviderID.allCases {
+      let root = FileManager.default.temporaryDirectory.appending(path: "CloudContextPersistence-\(UUID())")
+      defer { try? FileManager.default.removeItem(at: root) }
+      let store = ChatSessionStore(applicationSupportDirectory: root)
+      let original = [
+        ChatMessage(role: .user, content: String(repeating: "old", count: 20_000)),
+        ChatMessage(role: .assistant, content: "old reply"),
+        ChatMessage(role: .user, content: "recent"),
+        ChatMessage(role: .assistant, content: "recent reply"),
+      ]
+      try store.save([ChatSession(messages: original)])
+      let persistedOriginal = store.load()[0].messages
+      let ended = expectation(description: "Cloud request completed")
+      let transport = MockCloudTransport(streamHandler: { _ in
+        AsyncThrowingStream { continuation in
+          continuation.yield(.response(statusCode: 200))
+          let event = provider == .openAI ? "response.completed" : "message_stop"
+          continuation.yield(.data(Data("data: {\"type\":\"\(event)\"}\n\n".utf8)))
+          continuation.finish()
+          ended.fulfill()
+        }
+      })
+      let registry = CloudProviderRegistry(
+        credentialStore: MockCredentialStore(keys: [provider: "fixture-key"]),
+        transport: transport,
+        chatGPT: ContextCompletionProvider(onRequest: { request in
+          XCTAssertEqual(request.messages.map(\.content), ["recent", "recent reply", "current"])
+          ended.fulfill()
+        })
+      )
+      let viewModel = LocalChatViewModel(
+        engine: LlamaCPPModelEngine(installationStore: LocalModelInstallationStore(modelsDirectory: root.appending(path: "models"))),
+        cloudProviders: registry, sessionStore: store
+      )
+      var draft = "current"
+      viewModel.submitCloud(draft, provider: provider, modelID: "manual", onAccepted: { draft = "" })
+      XCTAssertEqual(draft, "")
+      await fulfillment(of: [ended], timeout: 2)
+      XCTAssertEqual(Array(store.load()[0].messages.prefix(4)), persistedOriginal)
+      XCTAssertEqual(store.load()[0].messages.count, 6)
+      XCTAssertNotNil(viewModel.contextNotice)
+    }
+  }
+
   private func makeRequest(provider: CloudProviderID) -> ChatRequest {
     ChatRequest(
       sessionID: UUID(),
       messages: [
         ChatMessage(role: .user, content: "Previous question"),
         ChatMessage(role: .assistant, content: "Previous answer"),
+        ChatMessage(role: .user, content: "Current question"),
       ],
       route: Route(
         mode: .cloud,
@@ -374,5 +470,14 @@ private final class CloudCancellationProbe: @unchecked Sendable {
     lock.lock()
     defer { lock.unlock() }
     return operation()
+  }
+}
+
+private struct ContextCompletionProvider: ChatProvider {
+  let onRequest: @Sendable (ChatRequest) -> Void
+
+  func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
+    onRequest(request)
+    return AsyncThrowingStream { $0.yield(.completed); $0.finish() }
   }
 }

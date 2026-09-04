@@ -72,6 +72,7 @@ struct OpenAIResponsesClient: ChatProvider {
       throw CloudProviderError.missingAPIKey(.openAI)
     }
 
+    let prepared = try CloudContext.prepare(request)
     struct InputMessage: Encodable {
       let role: String
       let content: String
@@ -81,15 +82,22 @@ struct OpenAIResponsesClient: ChatProvider {
       let input: [InputMessage]
       let stream: Bool
       let store: Bool
+      let maxOutputTokens: Int
+
+      enum CodingKeys: String, CodingKey {
+        case model, input, stream, store
+        case maxOutputTokens = "max_output_tokens"
+      }
     }
 
     let body = Body(
       model: request.route.modelID,
-      input: request.messages
+      input: prepared.messages
         .filter { !$0.content.isEmpty }
         .map { InputMessage(role: $0.role.rawValue, content: $0.content) },
       stream: true,
-      store: false
+      store: false,
+      maxOutputTokens: prepared.budget.outputTokens
     )
     var urlRequest = URLRequest(url: responsesURL)
     urlRequest.httpMethod = "POST"
@@ -220,6 +228,7 @@ struct AnthropicMessagesClient: ChatProvider {
       throw CloudProviderError.missingAPIKey(.anthropic)
     }
 
+    let prepared = try CloudContext.prepare(request)
     struct InputMessage: Encodable {
       let role: String
       let content: String
@@ -238,8 +247,8 @@ struct AnthropicMessagesClient: ChatProvider {
 
     let body = Body(
       model: request.route.modelID,
-      maxTokens: 4_096,
-      messages: request.messages
+      maxTokens: prepared.budget.outputTokens,
+      messages: prepared.messages
         .filter { !$0.content.isEmpty }
         .map { InputMessage(role: $0.role.rawValue, content: $0.content) },
       stream: true

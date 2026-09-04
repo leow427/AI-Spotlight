@@ -87,6 +87,12 @@ struct AppShellView: View {
 
           VStack(alignment: .trailing, spacing: 8) {
             routeStatus
+            if let notice = localChat.contextNotice {
+              Text(notice)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             compactModeControls
             composer
           }
@@ -586,15 +592,18 @@ struct AppShellView: View {
   private func submitDraft() {
     guard canSubmit else { return }
     let prompt = draft
-    draft = ""
+    let accepted: @MainActor () -> Void = {
+      if draft == prompt { draft = "" }
+    }
     switch selectedMode {
     case .local:
-      localChat.submit(prompt)
+      localChat.submit(prompt, onAccepted: accepted)
     case .cloud:
       localChat.submitCloud(
         prompt,
         provider: cloudSettings.preferredProvider,
-        modelID: cloudSettings.preferredModelID
+        modelID: cloudSettings.preferredModelID,
+        onAccepted: accepted
       )
     case .auto:
       let request = AutoRouter.Request(
@@ -615,10 +624,10 @@ struct AppShellView: View {
       guard let route = decision.route else { return }
       switch route.mode {
       case .local:
-        localChat.submit(prompt)
+        localChat.submit(prompt, onAccepted: accepted)
       case .cloud:
         guard let cloud = autoCloudConfiguration else { return }
-        localChat.submitCloud(prompt, provider: cloud.provider, modelID: cloud.modelID)
+        localChat.submitCloud(prompt, provider: cloud.provider, modelID: cloud.modelID, onAccepted: accepted)
       case .auto:
         break
       }

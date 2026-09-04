@@ -10,7 +10,7 @@ actor LlamaCPPModelEngine: LocalModelEngine {
 
   init(
     installationStore: LocalModelInstallationStore = LocalModelInstallationStore(),
-    contextSize: Int32 = 4_096
+    contextSize: Int32 = Int32(ModelContextPolicy.localContextWindow)
   ) {
     self.installationStore = installationStore
     catalog = LocalModelCatalog(installationStore: installationStore)
@@ -41,6 +41,24 @@ actor LlamaCPPModelEngine: LocalModelEngine {
   ) async throws -> LocalModel {
     releaseEngine()
     return try await catalog.download(model, progress: progress)
+  }
+
+  func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
+    try Task.checkCancellation()
+    let handle = try loadEngineIfNeeded()
+    return try ChatContextPreparer.prepare(
+      request.messages,
+      budget: ContextBudget(contextWindow: Int(AISLlamaEngineContextSize(handle)),
+                            outputTokens: request.maximumTokenCount, overheadTokens: 1),
+      countTokens: { messages in
+        try Task.checkCancellation()
+        let count = try LocalChatBridge.withMessages(messages) { pointer, count in
+          AISLlamaEngineCountChatTokens(handle, pointer, count)
+        }
+        guard count > 0 else { throw bridgeError() }
+        return Int(count)
+      }
+    )
   }
 
   nonisolated func stream(
@@ -132,10 +150,11 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     _ request: LocalModelRequest,
     with handle: AISLlamaEngineHandle
   ) throws {
-    let didBegin = request.prompt.withCString { prompt in
+    let didBegin = try LocalChatBridge.withMessages(request.messages) { messages, count in
       AISLlamaEngineBeginCompletion(
         handle,
-        prompt,
+        messages,
+        count,
         Int32(clamping: request.maximumTokenCount),
         request.temperature
       )
@@ -158,5 +177,50 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     }
     engineHandle = nil
     loadedModelURL = nil
+  }
+}
+
+/// Owns all C strings for the duration of a bridge call. No conversation state is
+/// retained here or in the native KV cache between completion requests.
+enum LocalChatBridge {
+  static func formatted(_ messages: [ChatMessage], template: String) throws -> String {
+    try withMessages(messages) { pointer, count in
+      try template.withCString { template in
+        let length = AISLlamaFormatChat(template, pointer, count, nil, 0)
+        guard length > 0 else {
+          throw LocalInferenceError.bridgeFailure(String(cString: AISLlamaBridgeLastError()))
+        }
+        var buffer = [CChar](repeating: 0, count: Int(length) + 1)
+        let written = AISLlamaFormatChat(template, pointer, count, &buffer, Int32(buffer.count))
+        guard written == length else {
+          throw LocalInferenceError.bridgeFailure("The local chat template could not be formatted.")
+        }
+        return buffer.withUnsafeBufferPointer { String(cString: $0.baseAddress!) }
+      }
+    }
+  }
+
+  static func withMessages<T>(
+    _ messages: [ChatMessage],
+    _ body: (UnsafePointer<AISLlamaChatMessage>?, Int32) throws -> T
+  ) throws -> T {
+    guard messages.count <= Int(Int32.max),
+          !messages.contains(where: { $0.content.utf8.contains(0) }) else {
+      throw ChatContextError.invalidText
+    }
+    let roles = messages.map { Array($0.role.rawValue.utf8CString) }
+    let contents = messages.map { Array($0.content.utf8CString) }
+    var allocations: [UnsafeMutablePointer<CChar>] = []
+    defer { allocations.forEach { $0.deallocate() } }
+    func copy(_ bytes: [CChar]) -> UnsafePointer<CChar> {
+      let pointer = UnsafeMutablePointer<CChar>.allocate(capacity: bytes.count)
+      pointer.initialize(from: bytes, count: bytes.count)
+      allocations.append(pointer)
+      return UnsafePointer(pointer)
+    }
+    let native = zip(roles, contents).map {
+      AISLlamaChatMessage(role: copy($0), content: copy($1))
+    }
+    return try native.withUnsafeBufferPointer { try body($0.baseAddress, Int32($0.count)) }
   }
 }

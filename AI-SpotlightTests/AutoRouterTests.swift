@@ -227,6 +227,21 @@ final class AutoRouterTests: XCTestCase {
     XCTAssertEqual(webDecision.reason, .requiresWebSearch)
   }
 
+  func testLongHistoryIsTrimmableButOversizedCurrentPromptIsRejected() {
+    let longHistory = [
+      ChatMessage(role: .user, content: String(repeating: "x", count: 50_000)),
+      ChatMessage(role: .assistant, content: "answer"),
+    ]
+    let decision = AutoRouter.decide(AutoRouter.Request(
+      selectedMode: .auto, prompt: "Continue", contextMessages: longHistory, localModel: localModel, cloud: cloud
+    ))
+    XCTAssertEqual(decision.route?.mode, .cloud)
+    XCTAssertEqual(decision.reason, .exceedsLocalContext)
+    let rejected = AutoRouter.decide(request(prompt: String(repeating: "x", count: 50_000)))
+    XCTAssertNil(rejected.route)
+    XCTAssertEqual(rejected.limitation, .unavailableCapability(.largerContext))
+  }
+
   private let localModel = LocalModel(
     id: "local-model",
     displayName: "Local Model",

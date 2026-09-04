@@ -306,6 +306,39 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertFalse((defaults.persistentDomain(forName: suite) ?? [:]).keys.contains { $0.lowercased().contains("token") })
   }
 
+  func testCodexBoundsSerializedContextAndKeepsOriginalMessages() async throws {
+    let transport = MockCodexTransport(turnNotifications: [completion("completed")])
+    let base = request()
+    let messages = [
+      ChatMessage(role: .user, content: String(repeating: "old", count: 20_000)),
+      ChatMessage(role: .assistant, content: "old answer"),
+    ] + base.messages
+    let fullRequest = ChatRequest(sessionID: base.sessionID, messages: messages, route: base.route)
+    _ = try await collect(CodexSubscriptionClient(transport: transport).stream(fullRequest))
+    let requests = await transport.recordedRequests
+    let turn = try XCTUnwrap(requests.first { $0.method == "turn/start" })
+    let text = try XCTUnwrap(turn.params["input"].array?.first?["text"].string)
+    XCTAssertFalse(text.contains(String(repeating: "old", count: 10)))
+    XCTAssertTrue(text.contains("Previous answer"))
+    XCTAssertTrue(text.contains("Latest question"))
+    XCTAssertLessThanOrEqual(text.utf8.count, ModelContextPolicy.cloud(provider: .chatGPT, modelID: base.route.modelID).availableInputTokens)
+    XCTAssertEqual(fullRequest.messages.count, messages.count)
+  }
+
+  func testCodexRejectsOversizedInputBeforeStartingServerRequests() async {
+    let transport = MockCodexTransport()
+    let base = request()
+    let oversized = ChatRequest(sessionID: base.sessionID, messages: [
+      ChatMessage(role: .user, content: String(repeating: "x", count: 40_000)),
+    ], route: base.route)
+    do {
+      _ = try await collect(CodexSubscriptionClient(transport: transport).stream(oversized))
+      XCTFail("Oversized request was accepted")
+    } catch { XCTAssertTrue(error is ChatContextError) }
+    let requests = await transport.recordedRequests
+    XCTAssertTrue(requests.isEmpty)
+  }
+
   private func request(modelID: String = "model-one") -> ChatRequest {
     ChatRequest(sessionID: UUID(), messages: [
       ChatMessage(role: .user, content: "Previous question"),
