@@ -18,20 +18,18 @@ enum ModelContextPolicy {
   static let localOutputTokens = 512
 
   static func cloud(provider: CloudProviderID, modelID: String) -> ContextBudget {
-    // Exact IDs only; unknown snapshots/manual selections use the fallback.
-    // Sources and the conservative fallback policy are in docs/Context-Budgets.md.
-    let knownOpenAI = ["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"].contains(modelID)
+    let metadata = CloudModelCapabilities.metadata(provider: provider, modelID: modelID)
     if provider == .chatGPT {
       return ContextBudget(
-        contextWindow: knownOpenAI ? 1_050_000 : 32_768,
-        outputTokens: knownOpenAI ? 128_000 : 16_384,
+        contextWindow: metadata?.contextWindow ?? 32_768,
+        outputTokens: metadata?.maximumOutputTokens ?? 16_384,
         overheadTokens: 8_192,
         inputLimit: 32_768
       )
     }
     return ContextBudget(
-      contextWindow: provider == .openAI && knownOpenAI ? 1_050_000 : 8_192,
-      outputTokens: 4_096,
+      contextWindow: metadata?.contextWindow ?? 8_192,
+      outputTokens: min(4_096, metadata?.maximumOutputTokens ?? 4_096),
       overheadTokens: 512,
       inputLimit: 32_768
     )
@@ -146,6 +144,9 @@ enum CloudContext {
   static func prepare(_ request: ChatRequest) throws -> PreparedConversation {
     guard let provider = CloudProviderID(rawValue: request.route.providerID) else {
       throw CloudProviderError.invalidResponse
+    }
+    if CloudModelCapabilities.compatibility(provider: provider, modelID: request.route.modelID) == .unsupported {
+      throw CloudProviderError.unsupportedModel(provider, modelID: request.route.modelID)
     }
     return try ChatContextPreparer.prepare(
       request.messages,

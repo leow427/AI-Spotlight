@@ -17,23 +17,28 @@ All Cloud clients enforce preparation again at their serialization boundary.
 
 `Chat/ChatContext.swift` owns `ModelContextPolicy`, `ContextBudget`, and Cloud
 serialization estimates. `CloudModel.contextBudget`, Auto routing, the view model,
-and outgoing Cloud clients use it. Group E should extend this metadata when adding
-verified models; model discovery must not introduce a separate context-limit table
-or infer a context window from an arbitrary name prefix. Limit metadata alone is
-not endpoint compatibility or account access validation (Group E).
+and outgoing Cloud clients use it. Group E added `CloudModelCapabilities` as the
+shared source of reviewed endpoint compatibility and published model limits.
+See [Cloud-Model-Selection.md](Cloud-Model-Selection.md) for exact IDs and provider
+sources. Unknown IDs do not inherit limits from a name prefix. Compatibility and
+limit metadata do not certify account access or billing.
 
 | Route/model | Context window or application policy | Reserved output | Reserved protocol | Input cap |
 |---|---:|---:|---:|---:|
 | Local | Smaller of runtime allocation, GGUF training context, and configured context (default 4,096) | 512 by default | Exact template/special tokens counted, plus 1 spare token | Remaining capacity |
-| OpenAI GPT-5.6 Luna/Terra/Sol, exact IDs | 1,050,000 supported context | 4,096, sent as `max_output_tokens` | 512 | 32,768 |
+| OpenAI GPT-5.6 Luna/Terra/Sol and `gpt-5.6` API alias | 1,050,000 supported context | 4,096, sent as `max_output_tokens` | 512 | 32,768 |
+| OpenAI GPT-5.4 Mini and GPT-5 Mini, reviewed IDs | 400,000 supported context | 4,096 | 512 | 32,768 |
+| OpenAI GPT-4.1 / Mini, reviewed IDs | 1,047,576 supported context | 4,096 | 512 | 32,768 |
+| OpenAI GPT-4o / Mini, reviewed IDs | 128,000 supported context | 4,096 | 512 | 32,768 |
 | Other OpenAI IDs and Anthropic IDs | Conservative 8,192 application policy | 4,096, sent as `max_output_tokens`/`max_tokens` | 512 | Remaining 3,584 |
 | Codex GPT-5.6 Luna/Terra/Sol, exact IDs | 1,050,000 supported context | 128,000 | 8,192 | 32,768 |
 | Other Codex IDs | Conservative 32,768 application policy | 16,384 | 8,192 | Remaining 8,192 |
 
 The actual input allowance is the smaller of the cap and context minus output and
 protocol reserves. Unknown/manual IDs stay usable under a conservative policy;
-these values do not certify their actual provider limits. A model with a smaller
-window or incompatible endpoint can still reject a request. The app does not
+these values do not certify their actual provider limits. Known incompatible
+OpenAI model families are rejected before sending. An unverified model with a
+smaller window or incompatible endpoint can still reject a request. The app does not
 assume every manually entered model has 128,000 tokens. Expanding verified
 metadata belongs in the shared policy, with provider sources and regression tests.
 

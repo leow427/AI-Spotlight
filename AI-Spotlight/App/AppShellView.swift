@@ -344,8 +344,9 @@ struct AppShellView: View {
             ? "Sign in with ChatGPT to use your Codex allowance."
             : "Add a \(cloudSettings.preferredProvider.displayName) API key.")
           Button("Advanced Settings", action: openSettings)
-        } else if cloudSettings.preferredModelID.isEmpty {
-          Text("Choose a cloud model in Advanced Settings.")
+        } else if !cloudSettings.isConfigured {
+          Text(cloudSettings.selectedModelCompatibility.message)
+            .lineLimit(2)
           Button("Advanced Settings", action: openSettings)
         } else {
           switch localChat.state {
@@ -367,6 +368,10 @@ struct AppShellView: View {
             Image(systemName: "cloud")
             Text("\(cloudSettings.preferredProvider.displayName) · \(cloudSettings.preferredModelID)")
               .lineLimit(1)
+            if cloudSettings.selectedModelCompatibility == .unverified {
+              Text("Unverified")
+                .help(cloudSettings.selectedModelCompatibility.message)
+            }
           case .installing, .downloading:
             Text("Finish the local model task before using Cloud mode.")
           }
@@ -869,11 +874,15 @@ struct SettingsView: View {
         }
 
         if settings.models.isEmpty {
-          Text("Model discovery has not returned any models. Enter a model ID manually below.")
+          Text(settings.modelDiscoveryNotice
+            ?? "Refresh models to find compatible chat choices, or enter a model ID manually.")
             .font(.caption)
             .foregroundStyle(.secondary)
         } else {
           Picker("Preferred model", selection: $settings.preferredModelID) {
+            if settings.preferredModelID.isEmpty {
+              Text("Choose a model").tag("")
+            }
             ForEach(settings.models) { model in
               Text(model.displayName).tag(model.id)
             }
@@ -886,6 +895,11 @@ struct SettingsView: View {
 
         TextField("Manual model ID", text: $settings.preferredModelID)
           .textFieldStyle(.roundedBorder)
+
+        Text(settings.selectedModelCompatibility.message)
+          .font(.caption)
+          .foregroundStyle(settings.selectedModelCompatibility == .unsupported ? Color.red : Color.secondary)
+          .fixedSize(horizontal: false, vertical: true)
 
         if settings.preferredProvider == .chatGPT {
           Picker("Thinking capacity", selection: $settings.codexThinkingCapacity) {
@@ -1021,8 +1035,12 @@ struct SettingsView: View {
       }
       .foregroundStyle(.secondary)
     case .connected(let modelCount):
-      Label("Connected · \(modelCount) models available", systemImage: "checkmark.circle.fill")
-        .foregroundStyle(.green)
+      VStack(alignment: .leading, spacing: 4) {
+        Label("API reachable · Compatible chat models: \(modelCount)", systemImage: "checkmark.circle")
+        Text("Model-list check only. Sending and billing were not tested.")
+          .font(.caption)
+      }
+      .foregroundStyle(.secondary)
     case .failed(let message):
       Label(message, systemImage: "exclamationmark.triangle.fill")
         .foregroundStyle(.red)

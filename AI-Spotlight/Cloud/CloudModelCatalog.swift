@@ -46,7 +46,7 @@ actor CloudModelCatalog {
           now.timeIntervalSince(entry.fetchedAt) < Self.cacheLifetime else {
       return nil
     }
-    return entry.models
+    return CloudModelCapabilities.chatModels(entry.models, for: provider)
   }
 
   func models(
@@ -58,14 +58,14 @@ actor CloudModelCatalog {
     if !forceRefresh,
        let entry = archive.providers[provider.rawValue],
        now.timeIntervalSince(entry.fetchedAt) < Self.cacheLifetime {
-      return entry.models
+      return CloudModelCapabilities.chatModels(entry.models, for: provider)
     }
 
     if provider == .chatGPT {
       let discovered = try await codex.models()
       archive.providers[provider.rawValue] = CacheEntry(fetchedAt: now, models: discovered)
       try saveArchive(archive)
-      return discovered
+      return CloudModelCapabilities.chatModels(discovered, for: provider)
     }
 
     guard let apiKey = try credentialStore.apiKey(for: provider), !apiKey.isEmpty else {
@@ -87,15 +87,12 @@ actor CloudModelCatalog {
     }
 
     let discoveredModels = try decodeModels(response.data, provider: provider)
-    guard !discoveredModels.isEmpty else {
-      throw CloudProviderError.invalidResponse
-    }
     archive.providers[provider.rawValue] = CacheEntry(
       fetchedAt: now,
       models: discoveredModels
     )
     try saveArchive(archive)
-    return discoveredModels
+    return CloudModelCapabilities.chatModels(discoveredModels, for: provider)
   }
 
   func clearCache(for provider: CloudProviderID) throws {
@@ -137,7 +134,6 @@ actor CloudModelCatalog {
       }
       return response.data
         .map { CloudModel(id: $0.id, displayName: $0.id, provider: provider) }
-        .sorted { $0.id.localizedStandardCompare($1.id) == .orderedAscending }
     case .anthropic:
       struct Response: Decodable {
         struct Model: Decodable {

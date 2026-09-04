@@ -84,6 +84,7 @@ final class CloudSettingsModel: ObservableObject {
       preferences.setPreferredProvider(preferredProvider)
       preferredModelID = preferences.preferredModel(for: preferredProvider)
       models = []
+      hasLoadedModelList = false
       discoveryError = nil
       Task { await loadCachedModels() }
     }
@@ -103,6 +104,7 @@ final class CloudSettingsModel: ObservableObject {
   }
 
   @Published private(set) var models: [CloudModel] = []
+  @Published private(set) var hasLoadedModelList = false
   @Published private(set) var discoveryError: String?
   @Published private(set) var isDiscovering = false
   @Published private(set) var credentialRevision = 0
@@ -141,7 +143,22 @@ final class CloudSettingsModel: ObservableObject {
 
   var isConfigured: Bool {
     hasCloudAccess(for: preferredProvider)
-      && !preferredModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+      && selectedModelCompatibility.allowsSending
+  }
+
+  var selectedModelCompatibility: CloudModelCompatibility {
+    let id = preferredModelID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let compatibility = CloudModelCapabilities.compatibility(provider: preferredProvider, modelID: id)
+    if compatibility == .unverified, preferredProvider != .openAI,
+       models.contains(where: { $0.id == id }) {
+      return .compatible
+    }
+    return compatibility
+  }
+
+  var modelDiscoveryNotice: String? {
+    guard hasLoadedModelList, models.isEmpty else { return nil }
+    return "No verified text-chat models were found. Refresh after checking model access, or enter a model ID manually. Saved selections are kept."
   }
 
   func hasCloudAccess(for provider: CloudProviderID) -> Bool {
@@ -220,6 +237,7 @@ final class CloudSettingsModel: ObservableObject {
     let provider = preferredProvider
     if let cached = await catalog.cachedModels(for: provider), provider == preferredProvider {
       models = cached
+      hasLoadedModelList = true
       selectDefaultModelIfNeeded()
     }
   }
@@ -238,10 +256,12 @@ final class CloudSettingsModel: ObservableObject {
       )
       guard preferredProvider == provider, discoveryID == id else { return }
       models = discovered
+      hasLoadedModelList = true
       selectDefaultModelIfNeeded()
     } catch {
       guard preferredProvider == provider, discoveryID == id else { return }
       models = []
+      hasLoadedModelList = false
       discoveryError = error.localizedDescription
     }
   }
@@ -253,6 +273,7 @@ final class CloudSettingsModel: ObservableObject {
       connectionStates[provider] = .connected(discovered.count)
       if provider == preferredProvider {
         models = discovered
+        hasLoadedModelList = true
         discoveryError = nil
         selectDefaultModelIfNeeded()
       }
@@ -269,8 +290,8 @@ final class CloudSettingsModel: ObservableObject {
     guard preferredModelID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     if preferredProvider == .chatGPT {
       preferredModelID = CodexSubscriptionClient.defaultModelID
-    } else if let firstModel = models.first {
-      preferredModelID = firstModel.id
+    } else if let defaultModel = CloudModelCapabilities.chatModels(models, for: preferredProvider).first {
+      preferredModelID = defaultModel.id
     }
   }
 }

@@ -50,6 +50,7 @@ struct CloudModel: Codable, Equatable, Identifiable, Sendable {
 
 enum CloudProviderError: LocalizedError, Equatable, Sendable {
   case missingAPIKey(CloudProviderID)
+  case unsupportedModel(CloudProviderID, modelID: String)
   case offline
   case authenticationFailed(CloudProviderID)
   case rateLimited(CloudProviderID)
@@ -62,6 +63,8 @@ enum CloudProviderError: LocalizedError, Equatable, Sendable {
     switch self {
     case .missingAPIKey(let provider):
       "Add an API key for \(provider.displayName) in Advanced Settings."
+    case .unsupportedModel(let provider, let modelID):
+      "\(modelID) cannot be used for text chat with \(provider.displayName) in AI Spotlight. Choose a compatible model in Advanced Settings."
     case .offline:
       "The cloud provider could not be reached. Check your internet connection."
     case .authenticationFailed(let provider):

@@ -169,7 +169,7 @@ final class CloudModeTests: XCTestCase {
     defer { try? FileManager.default.removeItem(at: root) }
     let transport = MockCloudTransport(dataHandler: { _ in
       CloudDataResponse(
-        data: Data("{\"data\":[{\"id\":\"gpt-test\"}]}".utf8),
+        data: Data("{\"data\":[{\"id\":\"gpt-4o-mini\"}]}".utf8),
         statusCode: 200
       )
     })
@@ -190,7 +190,7 @@ final class CloudModeTests: XCTestCase {
       now: now.addingTimeInterval(25 * 60 * 60)
     )
 
-    XCTAssertEqual(first.map(\.id), ["gpt-test"])
+    XCTAssertEqual(first.map(\.id), ["gpt-4o-mini"])
     XCTAssertEqual(cached, first)
     XCTAssertEqual(refreshed, first)
     XCTAssertEqual(transport.dataRequests.count, 2)
