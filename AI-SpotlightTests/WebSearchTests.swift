@@ -265,11 +265,23 @@ final class WebSearchTests: XCTestCase {
 
   func testSearchIconAssetRendersInBothComposerStates() throws {
     XCTAssertNotNil(NSImage(named: "WebSearch"), "The supplied SVG must be bundled as an image asset")
+    let hiddenControls = NSHostingView(rootView: WebSearchControls(
+      isEnabled: .constant(false), isPresented: .constant(false), isBusy: false, openSettings: {}
+    ))
+    let visibleControls = NSHostingView(rootView: WebSearchControls(
+      isEnabled: .constant(true), isPresented: .constant(true), isBusy: false, openSettings: {}
+    ))
+    XCTAssertEqual(visibleControls.fittingSize.width - hiddenControls.fittingSize.width, 40, accuracy: 0.5,
+                   "Adding search reserves the icon width plus spacing before the text field")
+    XCTAssertEqual(visibleControls.fittingSize.height, hiddenControls.fittingSize.height,
+                   "Revealing search must not change composer height")
     let preview = VStack(alignment: .leading, spacing: 20) {
-      ForEach([false, true], id: \.self) { enabled in
-        Text(enabled ? "Web Search on" : "Web Search off").font(.caption).foregroundStyle(.secondary)
+      ForEach(0..<3) { state in
+        Text(["Before adding Web Search", "Added · Search off", "Added · Search on"][state])
+          .font(.caption).foregroundStyle(.secondary)
         HStack(spacing: 10) {
-          WebSearchControls(isEnabled: .constant(enabled), isBusy: false, openSettings: {})
+          WebSearchControls(isEnabled: .constant(state == 2), isPresented: .constant(state > 0),
+                            isBusy: false, openSettings: {})
           Text("Ask anything").foregroundStyle(.secondary)
           Spacer()
           Label("Auto", systemImage: "sparkles").font(.callout)
@@ -283,10 +295,10 @@ final class WebSearchTests: XCTestCase {
     .background(Color(nsColor: .windowBackgroundColor))
     // AppKit hosting renders the native Menu control as well as SwiftUI content.
     let view = NSHostingView(rootView: preview)
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 260),
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 660, height: 380),
                           styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view
-    view.frame = NSRect(x: 0, y: 0, width: 660, height: 260)
+    view.frame = NSRect(x: 0, y: 0, width: 660, height: 380)
     view.layoutSubtreeIfNeeded()
     window.displayIfNeeded()
     let image = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))

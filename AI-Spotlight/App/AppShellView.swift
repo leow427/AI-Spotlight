@@ -8,6 +8,8 @@ struct AppShellView: View {
   @StateObject private var localChat: LocalChatViewModel
   @State private var draft = ""
   @State private var isSearchEnabled = false
+  @State private var isSearchPresented = false
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
   @ObservedObject private var searchSettings = WebSearchSettings.shared
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
@@ -126,6 +128,7 @@ struct AppShellView: View {
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       draft = ""
       isSearchEnabled = false
+      isSearchPresented = false
       localChat.newChat()
       isModePalettePresented = false
       isComposerFocused = true
@@ -173,8 +176,12 @@ struct AppShellView: View {
     }
     .onChange(of: draft) { _, value in
       guard let remainder = SearchCommand.remainder(in: value) else { return }
+      isSearchPresented = true
       isSearchEnabled = true
       draft = remainder
+    }
+    .onChange(of: isSearchPresented) { _, _ in
+      isComposerFocused = true
     }
     .onChange(of: selectedMode, initial: true) { _, mode in
       localChat.clearAutoRouteDecision()
@@ -204,7 +211,10 @@ struct AppShellView: View {
 
   private var composer: some View {
     HStack(spacing: 10) {
-      WebSearchControls(isEnabled: $isSearchEnabled, isBusy: localChat.isBusy, openSettings: openSettings)
+      WebSearchControls(
+        isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
+        isBusy: localChat.isBusy, openSettings: openSettings
+      )
 
       TextField("Ask anything", text: $draft, axis: .vertical)
         .textFieldStyle(.plain)
@@ -228,6 +238,7 @@ struct AppShellView: View {
       .help("Mode changes apply to your next request.")
       .fixedSize()
     }
+    .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: isSearchPresented)
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
     .background {

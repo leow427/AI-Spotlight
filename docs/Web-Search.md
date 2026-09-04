@@ -4,11 +4,15 @@ Add a Brave Search API key with **LLM Context** access in **Settings → Web Sea
 The key is stored in macOS Keychain under a separate search service, never in
 preferences or chat history. Brave API usage is separate from model-provider usage.
 
-Enable search using the globe/search icon inside the left side of the composer,
-**+ → Web Search**, or a leading **/search** command. The icon is grey when off and
-light green when on. Click it again to turn search off. Search stays selected for
-subsequent messages until turned off; a new chat resets it. Controls have dedicated
-space in the composer and do not overlay the text field.
+The search icon starts hidden. Add and enable it with **+ → Web Search** or a
+leading **/search** command. It pops into place with a short spring animation as
+the text field moves over. Its expanding slot keeps the icon clear of the text
+throughout the animation; Reduce Motion disables the spring.
+
+Once added, the icon toggles grey when off and light green when on. Search stays
+selected for subsequent messages until turned off. **+ → Remove Web Search**
+disables search and hides the icon; a new chat also resets it. The composer keeps
+the same height whether the icon is hidden or visible.
 
 ![Composer with Web Search off and on](images/web-search-composer.png)
 
