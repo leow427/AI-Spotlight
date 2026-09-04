@@ -86,6 +86,7 @@
 		0AF3BC1AE08E378481D15AE6 /* ScreenPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D267E54BF81B4240CEC2339 /* ScreenPipelineTests.swift */; };
 		52FB913A027D7DEBFD96E69D /* ScreenViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF75EE2F32B58204588607B5 /* ScreenViewTests.swift */; };
 		749A74810619BC2371A900AB /* ScreenNativeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B9B38819695DE62E80CBE1 /* ScreenNativeSmokeTests.swift */; };
+		0C22F41F6C6A79FFFDD2AB4C /* AppBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8423E65D659544F0E0BC57F6 /* AppBundleTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -180,6 +181,7 @@
 		5D267E54BF81B4240CEC2339 /* ScreenPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenPipelineTests.swift"; sourceTree = SOURCE_ROOT; };
 		AF75EE2F32B58204588607B5 /* ScreenViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenViewTests.swift"; sourceTree = SOURCE_ROOT; };
 		41B9B38819695DE62E80CBE1 /* ScreenNativeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenNativeSmokeTests.swift"; sourceTree = SOURCE_ROOT; };
+		8423E65D659544F0E0BC57F6 /* AppBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/AppBundleTests.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -204,6 +206,7 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				8423E65D659544F0E0BC57F6 /* AppBundleTests.swift */,
 				41B9B38819695DE62E80CBE1 /* ScreenNativeSmokeTests.swift */,
 				AF75EE2F32B58204588607B5 /* ScreenViewTests.swift */,
 				5D267E54BF81B4240CEC2339 /* ScreenPipelineTests.swift */,
@@ -519,6 +522,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0C22F41F6C6A79FFFDD2AB4C /* AppBundleTests.swift in Sources */,
 				749A74810619BC2371A900AB /* ScreenNativeSmokeTests.swift in Sources */,
 				52FB913A027D7DEBFD96E69D /* ScreenViewTests.swift in Sources */,
 				0AF3BC1AE08E378481D15AE6 /* ScreenPipelineTests.swift in Sources */,
@@ -611,6 +615,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.leow427.AISpotlight;
 				PRODUCT_NAME = PrimaryAgent;
@@ -628,6 +633,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.leow427.AISpotlight;
 				PRODUCT_NAME = PrimaryAgent;

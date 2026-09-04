@@ -177,13 +177,27 @@ claim to drag a real system selection. On the user's unlocked Mac, verify:
 - Auto/Cloud with upload disabled, declining the first explanation, then explicitly
   enabling upload with a configured provider and confirming a real response.
 
-The final local build and static analyzer passed. All 36 new Screen and local
-vision tests passed, including the opt-in native smoke test. The complete suite
-ran 212 tests: two existing window-focus tests failed three assertions while the
-macOS session was locked. Those same failures were reproduced on an untouched
-copy of the starting commit; the original tests and assertions were preserved.
-No live cloud screenshot upload has been performed. GitHub CI results and any
-subsequent local rerun are recorded in the PR.
+After the Mac was unlocked, the full local suite passed all 212 tests, including
+the original window-focus checks and the opt-in native vision smoke test. The
+original focus tests and assertions were preserved. No live cloud screenshot
+upload has been performed. Final verification results are recorded in the PR.
+
+Standalone launch verification then exposed a missing framework runpath: the
+llama framework was embedded, but the app could only find it through Xcode's test
+environment. Debug and Release now search the bundle's Frameworks directory.
+`AppBundleTests` checks actual binary load commands and resolves the dependency
+inside the app bundle, without using XCTest's environment search paths. This
+regression test reproduced the original launch failure before the fix. With the
+fix, that check and the existing window-focus checks pass, Debug and Release
+builds pass, static analysis passes, and the Release app launches independently
+of Xcode and remains running.
+
+A subsequent full local run with the new regression test reached a macOS
+Documents-folder consent prompt in an existing catalog test and was interrupted
+while awaiting user approval. No test or assertion was removed. The PR records
+clean GitHub CI results for the final revision. Interactive region selection and
+system consent decisions still require the user because this session has no
+native mouse-control tool.
 
 ## Primary references
 
