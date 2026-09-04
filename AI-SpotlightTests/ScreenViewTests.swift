@@ -1,10 +1,128 @@
 import AppKit
+import Combine
+import LocalAuthentication
+import Security
 import SwiftUI
 import XCTest
 @testable import PrimaryAgent
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testKeychainAvailabilityUsesAttributesWithoutAuthentication() throws {
+    let store = KeychainCredentialStore(copyMatching: { query, _ in
+      let query = query as NSDictionary
+      XCTAssertNil(query[kSecReturnData])
+      XCTAssertEqual(query[kSecReturnAttributes] as? Bool, true)
+      XCTAssertEqual((query[kSecUseAuthenticationContext] as? LAContext)?.interactionNotAllowed, true)
+      return errSecSuccess
+    })
+    XCTAssertTrue(try store.containsAPIKey(for: .openAI))
+    for status in [errSecItemNotFound, errSecInteractionNotAllowed] {
+      let unavailable = KeychainCredentialStore(copyMatching: { _, _ in status })
+      XCTAssertFalse(try unavailable.containsAPIKey(for: .openAI))
+    }
+  }
+
+  func testCloudAvailabilityDoesNotReadTheSecretDuringScreenRouting() throws {
+    let credentials = PresenceOnlyCredentials()
+    let settings = CloudSettingsModel(credentialStore: credentials,
+      catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport()),
+      codexAvailable: { false })
+    XCTAssertTrue(settings.hasCloudAccess(for: .openAI))
+  }
+
+  func testComposerSearchSettingsDoNotReadTheSecret() {
+    XCTAssertTrue(WebSearchSettings(credentials: PresenceOnlyCredentials()).hasAPIKey)
+  }
+
+  func testFullPanelRetainsContentDuringScreenSubmission() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenPanel-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let suite = "ScreenPanel-\(UUID())"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defaults.set(true, forKey: "localModelOnboardingDismissed")
+    addTeardownBlock {
+      try? FileManager.default.removeItem(at: directory)
+      UserDefaults().removePersistentDomain(forName: suite)
+    }
+    let stream = AsyncThrowingStream<String, Error>.makeStream()
+    let started = expectation(description: "Screen request reaches local text model")
+    let model = LocalModel(id: "text", displayName: "Qwen2.5 3B Instruct Q8_0", fileURL: directory.appendingPathComponent("text.gguf"))
+    let engine = PanelScreenEngine(model: model, response: stream.stream, started: { started.fulfill() })
+    let chat = LocalChatViewModel(engine: engine, sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
+    await chat.refreshInstalledModel()
+    let screen = ScreenComposerCoordinator(captureService: PreviewCapture(), ocrService: PreviewOCR())
+    let credentials = ScreenTestCredentialStore()
+    let cloud = CloudSettingsModel(credentialStore: credentials,
+      catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport(), cacheDirectory: directory),
+      preferences: CloudPreferencesStore(defaults: defaults), codexAvailable: { false })
+    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, defaults: defaults, trust: nil)
+    await advisor.start(installedModels: [model])
+    let appearance = GlassAppearanceSettings(defaults: defaults)
+    let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, cloudSettings: cloud,
+      localChat: chat, screen: screen, modelAdvisor: advisor,
+      searchSettings: WebSearchSettings(credentials: PanelSearchCredentials()))
+      .transaction { $0.disablesAnimations = true })
+    let sizes = PanelSizeStore(defaults: defaults)
+    sizes.save(NSSize(width: 752, height: 462))
+    let controller = SpotlightPanelController(glassAppearance: appearance, sizeStore: sizes, contentView: view)
+    controller.show()
+    defer { controller.hide() }
+    _ = await screen.capture()
+    screen.draft = "What is the answer to this piece of code?"
+    let attachment = try XCTUnwrap(screen.attachment)
+    try await renderPanel(view, state: "attached")
+    screen.updateDecision(.text(model.screenModel))
+    chat.submitScreen(screen.draft, attachment: attachment, decision: .text(model.screenModel), selectedMode: .auto,
+      cloudUploadAllowed: { false }) {
+        screen.draft = ""
+        screen.removeAttachment()
+      }
+    await fulfillment(of: [started], timeout: 5)
+    try await renderPanel(view, state: "loading")
+    let reply = expectation(description: "First reply appears")
+    let replyToken = chat.$sessions.filter { $0.flatMap(\.messages).contains { $0.content == "The answer is values.count." } }
+      .prefix(1).sink { _ in reply.fulfill() }
+    stream.continuation.yield("The answer is values.count.")
+    await fulfillment(of: [reply], timeout: 5)
+    replyToken.cancel()
+    try await renderPanel(view, state: "reply")
+    let done = expectation(description: "Request finished")
+    let token = chat.$state.filter { $0 == .idle }.prefix(1).sink { _ in done.fulfill() }
+    stream.continuation.finish()
+    await fulfillment(of: [done], timeout: 5)
+    token.cancel()
+    try await renderPanel(view, state: "finished")
+    XCTAssertNil(screen.attachment)
+    XCTAssertFalse(chat.isBusy)
+  }
+
+  private func renderPanel(_ view: NSView, state: String) async throws {
+    await Task.yield()
+    view.layoutSubtreeIfNeeded()
+    view.window?.displayIfNeeded()
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Panel-\(state).png"))
+    let rendered = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    rendered.name = "Screen panel · \(state)"
+    rendered.lifetime = .keepAlways
+    add(rendered)
+    XCTAssertEqual(view.bounds.size, NSSize(width: 752, height: 462))
+    let pixels = try XCTUnwrap(bitmap.cgImage)
+    let text = try await ScreenOCRService().recognize(pixels).text.lowercased()
+    let expected = switch state {
+    case "attached": ["screen region", "what is the answer"]
+    case "loading": ["preparing", "stop", "what is the answer"]
+    case "reply": ["the answer is", "streaming", "stop", "ask anything"]
+    default: ["the answer is", "local ocr", "ask anything"]
+    }
+    for phrase in expected {
+      XCTAssertTrue(text.contains(phrase), "Visible panel content missing during \(state): \(phrase)")
+    }
+  }
+
   func testScreenIconSlotAndNativeComposerStates() async throws {
     let icon = try XCTUnwrap(NSImage(named: "ScreenCapture"))
     let pixels = try XCTUnwrap(icon.cgImage(forProposedRect: nil, context: nil, hints: nil))
@@ -58,6 +176,42 @@ final class ScreenViewTests: XCTestCase {
     rendered.lifetime = .keepAlways
     add(rendered)
   }
+}
+
+private struct PresenceOnlyCredentials: CloudCredentialStore, WebSearchCredentialStore {
+  func containsAPIKey(for provider: CloudProviderID) -> Bool { true }
+  func containsAPIKey() -> Bool { true }
+  func apiKey(for provider: CloudProviderID) -> String? { apiKey() }
+  func apiKey() -> String? {
+    XCTFail("Checking availability must not decrypt a secret or open a Keychain prompt")
+    return nil
+  }
+  func setAPIKey(_ value: String, for provider: CloudProviderID) {}
+  func removeAPIKey(for provider: CloudProviderID) {}
+  func setAPIKey(_ value: String) {}
+  func removeAPIKey() {}
+}
+
+private struct PanelSearchCredentials: WebSearchCredentialStore {
+  func apiKey() -> String? { nil }
+  func setAPIKey(_ value: String) {}
+  func removeAPIKey() {}
+}
+
+private actor PanelScreenEngine: LocalModelEngine {
+  let model: LocalModel
+  nonisolated let response: AsyncThrowingStream<String, Error>
+  nonisolated let started: @Sendable () -> Void
+  init(model: LocalModel, response: AsyncThrowingStream<String, Error>, started: @escaping @Sendable () -> Void) {
+    self.model = model; self.response = response; self.started = started
+  }
+  func installedModel() -> LocalModel? { model }
+  func installedModels() -> [LocalModel] { [model] }
+  func install(_ model: LocalModel) {}
+  func selectModel(id: String) {}
+  func download(_ model: LocalModelDescriptor, progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) -> LocalModel { self.model }
+  nonisolated func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> { started(); return response }
+  func unload() {}
 }
 
 @MainActor

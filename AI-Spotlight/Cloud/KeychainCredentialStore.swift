@@ -1,11 +1,37 @@
 import Foundation
+import LocalAuthentication
 import Security
 
 struct KeychainCredentialStore: CloudCredentialStore {
+  typealias CopyMatching = @Sendable (CFDictionary, UnsafeMutablePointer<CFTypeRef?>?) -> OSStatus
   private let service: String
+  private let copyMatching: CopyMatching
 
-  init(service: String = "com.leow427.AISpotlight.cloud-api-keys") {
+  init(
+    service: String = "com.leow427.AISpotlight.cloud-api-keys",
+    copyMatching: @escaping CopyMatching = { SecItemCopyMatching($0, $1) }
+  ) {
     self.service = service
+    self.copyMatching = copyMatching
+  }
+
+  func containsAPIKey(for provider: CloudProviderID) throws -> Bool {
+    try containsAPIKey(account: provider.rawValue)
+  }
+
+  func containsAPIKey(account: String) throws -> Bool {
+    // Routing and SwiftUI rendering only need existence. Reading password data here
+    // can wait on a Keychain authorization dialog and freeze the panel's UI thread.
+    var query = baseQuery(account: account)
+    query[kSecMatchLimit] = kSecMatchLimitOne
+    query[kSecReturnAttributes] = true
+    let authentication = LAContext()
+    authentication.interactionNotAllowed = true
+    query[kSecUseAuthenticationContext] = authentication
+    let status = copyMatching(query as CFDictionary, nil)
+    if status == errSecItemNotFound || status == errSecInteractionNotAllowed { return false }
+    guard status == errSecSuccess else { throw KeychainError(status: status) }
+    return true
   }
 
   func apiKey(for provider: CloudProviderID) throws -> String? {
@@ -18,7 +44,7 @@ struct KeychainCredentialStore: CloudCredentialStore {
     query[kSecMatchLimit] = kSecMatchLimitOne
 
     var result: CFTypeRef?
-    let status = SecItemCopyMatching(query as CFDictionary, &result)
+    let status = copyMatching(query as CFDictionary, &result)
     if status == errSecItemNotFound { return nil }
     guard status == errSecSuccess,
           let data = result as? Data,

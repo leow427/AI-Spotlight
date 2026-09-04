@@ -177,27 +177,39 @@ claim to drag a real system selection. On the user's unlocked Mac, verify:
 - Auto/Cloud with upload disabled, declining the first explanation, then explicitly
   enabling upload with a configured provider and confirming a real response.
 
-After the Mac was unlocked, the full local suite passed all 212 tests, including
-the original window-focus checks and the opt-in native vision smoke test. The
-original focus tests and assertions were preserved. No live cloud screenshot
-upload has been performed. Final verification results are recorded in the PR.
-
-Standalone launch verification then exposed a missing framework runpath: the
-llama framework was embedded, but the app could only find it through Xcode's test
+Standalone launch verification exposed a missing framework runpath: the llama
+framework was embedded, but the app could only find it through Xcode's test
 environment. Debug and Release now search the bundle's Frameworks directory.
-`AppBundleTests` checks actual binary load commands and resolves the dependency
-inside the app bundle, without using XCTest's environment search paths. This
-regression test reproduced the original launch failure before the fix. With the
-fix, that check and the existing window-focus checks pass, Debug and Release
-builds pass, static analysis passes, and the Release app launches independently
-of Xcode and remains running.
+`AppBundleTests` checks the actual binary load commands and resolves the dependency
+inside the app bundle. The Release app was verified launching outside Xcode.
 
-A subsequent full local run with the new regression test reached a macOS
-Documents-folder consent prompt in an existing catalog test and was interrupted
-while awaiting user approval. No test or assertion was removed. The PR records
-clean GitHub CI results for the final revision. Interactive region selection and
-system consent decisions still require the user because this session has no
-native mouse-control tool.
+Investigation of an open-but-blank panel on Screen submission found synchronous
+secret reads in credential-availability checks. A sampled local test process was
+blocked in `SecItemCopyMatching` on the main thread, waiting for Keychain access.
+Screen routing called the same credential-read path for cloud availability,
+even when local OCR could answer. Availability checks now request only Keychain
+attributes with authentication interaction disallowed. Actual API-key retrieval
+remains in the provider request path. Search settings use the same metadata check
+so constructing the composer cannot ask to decrypt its search key.
+
+Regression tests assert that availability checks never read secrets, inspect the
+noninteractive Keychain query, and render the complete native panel at 752×462 in
+Auto mode through attachment, loading, first response, and completion. Apple
+Vision verifies that the prompt, progress/Stop controls, and reply remain visible
+in the rendered output. These tests use synthetic images, isolated chat storage,
+and a controlled local stream.
+
+The credential regressions failed before the fix. All 60 targeted tests and the
+full 217-test suite pass locally afterward, including the optional native vision
+fixture. An initial full run hit an existing Codex app-server EOF/timeout timing
+failure; the unchanged test passed in isolation and the unchanged full suite then
+passed. No test or assertion was removed or weakened. The PR records build,
+analysis, and CI results for the final revision.
+
+The exact user-operated Auto screenshot flow still needs confirmation with the
+updated app. No live cloud screenshot upload has been performed. Native mouse
+control is unavailable in this assistant session; real selection and system
+consent checks above require the user.
 
 ## Primary references
 

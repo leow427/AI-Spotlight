@@ -6,8 +6,8 @@ struct AppShellView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
-  @ObservedObject private var modelAdvisor = LocalModelAdvisor.shared
-  @StateObject private var screen = ScreenComposerCoordinator()
+  @ObservedObject private var modelAdvisor: LocalModelAdvisor
+  @StateObject private var screen: ScreenComposerCoordinator
   @ObservedObject private var screenSettings = ScreenSettings.shared
   @ObservedObject private var connectivity = ScreenConnectivity.shared
   @State private var isScreenPermissionPresented = false
@@ -18,7 +18,7 @@ struct AppShellView: View {
   @State private var isSearchEnabled = false
   @State private var isSearchPresented = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @ObservedObject private var searchSettings = WebSearchSettings.shared
+  @ObservedObject private var searchSettings: WebSearchSettings
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
@@ -29,12 +29,19 @@ struct AppShellView: View {
     glassAppearance: GlassAppearanceSettings,
     localEngine: (any LocalModelEngine)? = nil,
     cloudSettings: CloudSettingsModel = .shared,
-    cloudProviders: CloudProviderRegistry = .live
+    cloudProviders: CloudProviderRegistry = .live,
+    localChat: LocalChatViewModel? = nil,
+    screen: ScreenComposerCoordinator = ScreenComposerCoordinator(),
+    modelAdvisor: LocalModelAdvisor = .shared,
+    searchSettings: WebSearchSettings = .shared
   ) {
     self.glassAppearance = glassAppearance
     self.cloudSettings = cloudSettings
+    self.modelAdvisor = modelAdvisor
+    self.searchSettings = searchSettings
+    _screen = StateObject(wrappedValue: screen)
     _localChat = StateObject(
-      wrappedValue: localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
+      wrappedValue: localChat ?? localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
     )
   }
 

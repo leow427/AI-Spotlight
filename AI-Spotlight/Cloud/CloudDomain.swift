@@ -87,9 +87,16 @@ enum CloudProviderError: LocalizedError, Equatable, Sendable {
 }
 
 protocol CloudCredentialStore: Sendable {
+  func containsAPIKey(for provider: CloudProviderID) throws -> Bool
   func apiKey(for provider: CloudProviderID) throws -> String?
   func setAPIKey(_ apiKey: String, for provider: CloudProviderID) throws
   func removeAPIKey(for provider: CloudProviderID) throws
+}
+
+extension CloudCredentialStore {
+  func containsAPIKey(for provider: CloudProviderID) throws -> Bool {
+    try apiKey(for: provider)?.isEmpty == false
+  }
 }
 
 enum CloudNetworkEvent: Sendable, Equatable {
