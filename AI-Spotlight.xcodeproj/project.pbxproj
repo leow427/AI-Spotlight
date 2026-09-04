@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		C30000000000000000000002 /* LocalModelInstallationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */; };
+		C40000000000000000000002 /* CloudStreamingTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40000000000000000000001 /* CloudStreamingTransportTests.swift */; };
 		B30000000000000000000002 /* RequestLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000001 /* RequestLifecycleTests.swift */; };
 		A10000000000000000000001 /* AI_SpotlightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* AI_SpotlightApp.swift */; };
 		A10000000000000000000002 /* ApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ApplicationDelegate.swift */; };
@@ -59,6 +60,7 @@
 
 /* Begin PBXFileReference section */
 		C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelInstallationStoreTests.swift; sourceTree = "<group>"; };
+		C40000000000000000000001 /* CloudStreamingTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStreamingTransportTests.swift; sourceTree = "<group>"; };
 		B30000000000000000000001 /* RequestLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestLifecycleTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000001 /* AI_SpotlightApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_SpotlightApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationDelegate.swift; sourceTree = "<group>"; };
@@ -173,6 +175,7 @@
 				A20000000000000000000007 /* AppCommandTests.swift */,
 				D20000000000000000000005 /* LocalInferenceTests.swift */,
 				C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */,
+				C40000000000000000000001 /* CloudStreamingTransportTests.swift */,
 				E20000000000000000000004 /* ChatPersistenceTests.swift */,
 				E20000000000000000000006 /* AutoRouterTests.swift */,
 				F20000000000000000000008 /* CloudModeTests.swift */,
@@ -365,6 +368,7 @@
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
 				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
 				C30000000000000000000002 /* LocalModelInstallationStoreTests.swift in Sources */,
+				C40000000000000000000002 /* CloudStreamingTransportTests.swift in Sources */,
 				E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */,
 				E10000000000000000000006 /* AutoRouterTests.swift in Sources */,
 				F10000000000000000000008 /* CloudModeTests.swift in Sources */,

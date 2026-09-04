@@ -32,7 +32,9 @@ final class URLSessionCloudTransport: CloudNetworkTransport, @unchecked Sendable
           for try await byte in bytes {
             try Task.checkCancellation()
             buffer.append(byte)
-            if buffer.count == 4_096 {
+            // Forward complete SSE lines promptly, even while the connection stays open.
+            // Keep long lines bounded here; the parser joins raw bytes before UTF-8 decoding.
+            if byte == 0x0A || buffer.count == 4_096 {
               continuation.yield(.data(Data(buffer)))
               buffer.removeAll(keepingCapacity: true)
             }
