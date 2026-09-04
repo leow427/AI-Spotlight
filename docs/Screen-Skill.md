@@ -126,6 +126,46 @@ completion, failure, or cancellation. The embedded text-only llama.cpp b5046
 bridge remains unchanged; no native dependency upgrade or mandatory vision-model
 download is introduced.
 
+## Stable development signing
+
+macOS associates Screen Recording consent with the app's signed code identity,
+not just its displayed name or bundle identifier. An ad-hoc build has a
+hash-based identity that changes whenever the executable changes. System
+Settings can therefore show an enabled `PrimaryAgent` entry while a newly built
+copy still fails `CGPreflightScreenCaptureAccess()`.
+
+Use two separate build paths during development:
+
+- For interactive Screen testing, run the app from Xcode with **Automatically
+  manage signing** enabled, a development team selected, and **Apple
+  Development** as the signing certificate. Keep
+  `com.leow427.AISpotlight` as the bundle identifier.
+- For build, test, and analyzer verification, use the commands in `AGENTS.md`.
+  They disable signing and place their products in
+  `/tmp/AI-Spotlight-Verification`. They also disable Launch Services
+  registration and unregister the temporary host after app-hosted tests, so it
+  cannot replace or compete with the signed app that macOS authorized. Do not
+  launch the app from that verification directory.
+
+If Xcode has no development identity, open **Xcode → Settings → Accounts**, sign
+in with an Apple Account, select its team, choose **Manage Certificates**, and
+create an **Apple Development** certificate. Then select that team in the app
+target's **Signing & Capabilities** pane.
+
+After changing from ad-hoc to Apple Development signing, perform this recovery
+once:
+
+1. Quit every running copy of PrimaryAgent.
+2. Run `tccutil reset ScreenCapture com.leow427.AISpotlight` in Terminal.
+3. Build and run the signed app from Xcode.
+4. Use Screen, allow **Screen & System Audio Recording**, and restart the app
+   when macOS asks.
+
+Later signed rebuilds with the same team and bundle identifier retain consent.
+If a build needs permission again, inspect the launched app with
+`codesign -d -r- /path/to/PrimaryAgent.app`. A designated requirement consisting
+only of `cdhash` identifies another ad-hoc build.
+
 ## Verification
 
 Development proceeded sequentially, with a successful build before each phase's
@@ -174,10 +214,7 @@ claim to drag a real system selection. On the user's unlocked Mac, verify:
   one automatic submission; **/screen** alone must wait.
 - Escape, retake cancellation, draft preservation, and a secondary display.
 - Denied Screen Recording permission and a newly granted permission that requires
-  restarting the app, using the actual signed application identity. Local ad-hoc
-  builds receive a new code identity after rebuilding; a visible `PrimaryAgent`
-  entry can therefore belong to an older executable. Remove the stale entry and
-  add the current app after the final build, or use a stable Apple-signed build.
+  restarting the app, using the Apple Development-signed application identity.
 - Charts, diagrams, photos, and little/no readable text in Local with and without
   an installed vision model.
 - Auto/Cloud with upload disabled, declining the first explanation, then explicitly
@@ -219,6 +256,8 @@ consent checks above require the user.
 
 ## Primary references
 
+- [Apple DTS: ad-hoc signing makes every ScreenCaptureKit build a new app](https://developer.apple.com/forums/thread/819406)
+- [Create and manage an Apple Development signing identity in Xcode](https://developer.apple.com/documentation/xcode/sharing-your-teams-signing-certificates)
 - [Apple Vision text recognition](https://developer.apple.com/documentation/vision/vnrecognizetextrequest)
 - [OpenAI image inputs](https://developers.openai.com/api/docs/guides/images-vision)
 - [Anthropic vision inputs](https://platform.claude.com/docs/en/build-with-claude/vision)

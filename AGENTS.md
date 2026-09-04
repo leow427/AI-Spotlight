@@ -19,13 +19,18 @@ directories. Document any intentional deviation in `Plan.md` or `docs/`.
 Use the shared `AI-Spotlight` scheme so local verification matches CI:
 
 ```sh
-xcodebuild build -project AI-Spotlight.xcodeproj -scheme AI-Spotlight \
-  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
-xcodebuild test -project AI-Spotlight.xcodeproj -scheme AI-Spotlight \
-  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
-xcodebuild analyze -project AI-Spotlight.xcodeproj -scheme AI-Spotlight \
-  -destination 'platform=macOS' CODE_SIGNING_ALLOWED=NO
+scripts/verify-xcode.sh build
+scripts/verify-xcode.sh test
+scripts/verify-xcode.sh analyze
 ```
+
+Keep unsigned verification products in this isolated DerivedData path and out of
+Launch Services. The helper also unregisters the temporary app after app-hosted
+tests. Never launch its app product for interactive Screen testing: an unsigned
+or ad-hoc rebuild has a changing code identity and invalidates macOS Screen
+Recording consent. Build and run the interactive app from Xcode with a stable
+Apple Development signing identity and team selected. Pass targeted-test options
+after the action; `-only-testing` works as it does with `xcodebuild`.
 
 Run the build, test suite, and static analyzer before requesting review.
 
