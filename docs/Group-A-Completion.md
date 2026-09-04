@@ -3,7 +3,7 @@
 Implemented locally in `/Users/leo/Documents/AI-Spotlight-Real` on 2026-09-04.
 Base revision: `b9c93c1c04055afaa7d87033ba0ffdcf79a5a8b1` (`main`).
 Repository: [leow427/AI-Spotlight](https://github.com/leow427/AI-Spotlight).
-This report records validation before publication. Commit and push were subsequently authorized by the user; no pull request, merge, or deployment is part of this change.
+This report records validation before publication.
 
 | Group | Status | Changed behavior | Tests/evidence | Remaining limitation |
 |---|---|---|---|---|
