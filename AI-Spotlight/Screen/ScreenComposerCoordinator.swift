@@ -62,6 +62,9 @@ final class ScreenComposerCoordinator: ObservableObject {
   }
 
   private func captureRegion() async throws -> NSImage? {
+    // Permission UI belongs in front of the visible panel. Hide only once the
+    // process is authorized and interactive region selection is about to start.
+    try captureService.prepareForCapture()
     NotificationCenter.default.post(name: .screenCaptureBegan, object: nil)
     defer { NotificationCenter.default.post(name: .screenCaptureEnded, object: nil) }
     return try await captureService.capture()

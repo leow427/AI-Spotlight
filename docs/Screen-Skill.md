@@ -13,11 +13,14 @@ Web Search and support for Reduce Motion.
 ## Capture and local processing
 
 `ScreenCaptureService` preflights Screen Recording permission and requests it
-when absent. If permission is granted but preflight still fails, the app explains
-that it needs to be restarted. The coordinator hides the panel and other visible
-AI Spotlight windows, blocks panel/settings shortcuts from reopening them during
-selection, waits 200 ms, and invokes `/usr/sbin/screencapture -i -x` with a UUID
-PNG path. It eagerly decodes the image and deletes the file before returning.
+when absent. Permission preparation happens while the panel is still visible, so
+a denial or stale macOS permission entry keeps the draft and shows an inline
+explanation without hiding the UI. If permission is granted but preflight still
+fails, the app explains that it needs to be restarted. Once authorized, the
+coordinator makes the panel fully transparent and click-through while keeping its
+SwiftUI compositor surface ordered. It hides other visible AI Spotlight windows,
+blocks panel/settings shortcuts from reopening them during selection, waits 200
+ms, and invokes `/usr/sbin/screencapture -i -x` with a UUID PNG path. It eagerly decodes the image and deletes the file before returning.
 No output file means cancellation. The panel's original frame is restored, so
 capture does not move the panel between displays; macOS owns region selection.
 
@@ -171,7 +174,10 @@ claim to drag a real system selection. On the user's unlocked Mac, verify:
   one automatic submission; **/screen** alone must wait.
 - Escape, retake cancellation, draft preservation, and a secondary display.
 - Denied Screen Recording permission and a newly granted permission that requires
-  restarting the app, using the actual signed application identity.
+  restarting the app, using the actual signed application identity. Local ad-hoc
+  builds receive a new code identity after rebuilding; a visible `PrimaryAgent`
+  entry can therefore belong to an older executable. Remove the stale entry and
+  add the current app after the final build, or use a stable Apple-signed build.
 - Charts, diagrams, photos, and little/no readable text in Local with and without
   an installed vision model.
 - Auto/Cloud with upload disabled, declining the first explanation, then explicitly

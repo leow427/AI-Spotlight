@@ -2,7 +2,12 @@ import AppKit
 import CoreGraphics
 
 protocol ScreenCapturing: Sendable {
+  @MainActor func prepareForCapture() throws
   @MainActor func capture() async throws -> NSImage?
+}
+
+extension ScreenCapturing {
+  @MainActor func prepareForCapture() throws {}
 }
 
 enum ScreenCaptureError: LocalizedError, Equatable {
@@ -10,7 +15,7 @@ enum ScreenCaptureError: LocalizedError, Equatable {
   var errorDescription: String? {
     switch self {
     case .permissionDenied:
-      "Allow AI Spotlight in System Settings → Privacy & Security → Screen & System Audio Recording, then try again."
+      "macOS is not granting Screen Recording to this copy of AI Spotlight. If PrimaryAgent is already enabled in System Settings, remove that stale entry, add the currently running app, then quit and reopen AI Spotlight. Your draft has been kept."
     case .restartRequired:
       "Screen Recording permission was granted. Quit and reopen AI Spotlight to make screenshot pixels available, then try again. Your draft has been kept."
     case .invalidImage: "The screenshot could not be read. Please retake it."
@@ -30,17 +35,23 @@ final class ScreenCaptureService: ScreenCapturing {
   }
   private let environment: Environment
   private var isCapturing = false
+  private var hasPreparedCapture = false
 
   init(environment: Environment = Environment()) { self.environment = environment }
 
+  func prepareForCapture() throws {
+    guard !isCapturing else { throw ScreenCaptureError.alreadyCapturing }
+    try ensurePermission()
+    hasPreparedCapture = true
+  }
+
   func capture() async throws -> NSImage? {
     guard !isCapturing else { throw ScreenCaptureError.alreadyCapturing }
+    let wasPrepared = hasPreparedCapture
+    hasPreparedCapture = false
     isCapturing = true
     defer { isCapturing = false }
-    if !environment.preflight() {
-      guard environment.requestAccess() else { throw ScreenCaptureError.permissionDenied }
-      guard environment.preflight() else { throw ScreenCaptureError.restartRequired }
-    }
+    if !wasPrepared { try ensurePermission() }
     try await environment.waitForPanel()
     try Task.checkCancellation()
     let url = environment.temporaryDirectory.appendingPathComponent("ai-spotlight-screen-\(UUID().uuidString).png")
@@ -54,6 +65,12 @@ final class ScreenCaptureService: ScreenCapturing {
       throw ScreenCaptureError.invalidImage
     }
     return NSImage(cgImage: pixels, size: NSSize(width: pixels.width, height: pixels.height))
+  }
+
+  private func ensurePermission() throws {
+    guard !environment.preflight() else { return }
+    guard environment.requestAccess() else { throw ScreenCaptureError.permissionDenied }
+    guard environment.preflight() else { throw ScreenCaptureError.restartRequired }
   }
 
   private static func runSelection(_ url: URL) async throws {

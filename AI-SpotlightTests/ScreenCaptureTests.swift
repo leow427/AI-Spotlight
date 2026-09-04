@@ -13,6 +13,22 @@ final class ScreenCaptureTests: XCTestCase {
     XCTAssertNil(ScreenCommand.remainder(in: "`/screen`"))
   }
 
+  func testPermissionFailureDoesNotHideThePanel() async {
+    let probe = CaptureNotificationProbe()
+    NotificationCenter.default.addObserver(probe, selector: #selector(CaptureNotificationProbe.began),
+      name: .screenCaptureBegan, object: nil)
+    NotificationCenter.default.addObserver(probe, selector: #selector(CaptureNotificationProbe.ended),
+      name: .screenCaptureEnded, object: nil)
+    defer { NotificationCenter.default.removeObserver(probe) }
+    let screen = ScreenComposerCoordinator(captureService: PermissionFailingCapture())
+    screen.draft = "keep this question"
+    _ = await screen.capture()
+    XCTAssertEqual(probe.beginCount, 0)
+    XCTAssertEqual(probe.endCount, 0)
+    XCTAssertEqual(screen.draft, "keep this question")
+    XCTAssertNotNil(screen.error)
+  }
+
   func testCancellationPreservesDraftAndPreviousAttachment() async throws {
     let capture = CaptureStub()
     let screen = ScreenComposerCoordinator(captureService: capture)
@@ -103,10 +119,15 @@ final class ScreenCaptureTests: XCTestCase {
     defer { panel.hide() }
     NotificationCenter.default.post(name: .screenCaptureBegan, object: nil)
     XCTAssertFalse(panel.isVisible)
+    XCTAssertTrue(window.isVisible, "Keep the compositor surface alive while the transparent panel is hidden")
+    XCTAssertEqual(window.alphaValue, 0)
+    XCTAssertTrue(window.ignoresMouseEvents)
     panel.toggle()
     XCTAssertFalse(panel.isVisible)
     NotificationCenter.default.post(name: .screenCaptureEnded, object: nil)
     XCTAssertTrue(panel.isVisible)
+    XCTAssertEqual(window.alphaValue, 1)
+    XCTAssertFalse(window.ignoresMouseEvents)
     XCTAssertEqual(window.frame, frame)
     XCTAssertEqual(view.stringValue, "draft")
   }
@@ -116,6 +137,23 @@ final class ScreenCaptureTests: XCTestCase {
       bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB,
       bytesPerRow: 0, bitsPerPixel: 0)!
     return try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+  }
+}
+
+@MainActor
+private final class CaptureNotificationProbe: NSObject {
+  var beginCount = 0
+  var endCount = 0
+  @objc func began() { beginCount += 1 }
+  @objc func ended() { endCount += 1 }
+}
+
+@MainActor
+private struct PermissionFailingCapture: ScreenCapturing {
+  func prepareForCapture() throws { throw ScreenCaptureError.permissionDenied }
+  func capture() async throws -> NSImage? {
+    XCTFail("Capture must not start after permission preparation fails")
+    return nil
   }
 }
 
