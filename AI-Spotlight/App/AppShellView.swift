@@ -6,6 +6,7 @@ struct AppShellView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
+  @ObservedObject private var modelAdvisor = LocalModelAdvisor.shared
   @State private var draft = ""
   @State private var isSearchEnabled = false
   @State private var isSearchPresented = false
@@ -19,17 +20,14 @@ struct AppShellView: View {
 
   init(
     glassAppearance: GlassAppearanceSettings,
-    localEngine: any LocalModelEngine = LlamaCPPModelEngine(),
+    localEngine: (any LocalModelEngine)? = nil,
     cloudSettings: CloudSettingsModel = .shared,
     cloudProviders: CloudProviderRegistry = .live
   ) {
     self.glassAppearance = glassAppearance
     self.cloudSettings = cloudSettings
     _localChat = StateObject(
-      wrappedValue: LocalChatViewModel(
-        engine: localEngine,
-        cloudProviders: cloudProviders
-      )
+      wrappedValue: localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
     )
   }
 
@@ -77,7 +75,7 @@ struct AppShellView: View {
             .padding(.horizontal, 12)
             .padding(.top, 12)
 
-            DeveloperToolsView(glassAppearance: glassAppearance)
+            DeveloperToolsView(glassAppearance: glassAppearance, advisor: modelAdvisor, chat: localChat)
               .padding(12)
           }
           .frame(maxWidth: .infinity, alignment: .leading)
@@ -141,6 +139,7 @@ struct AppShellView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .panelPresented)) { _ in
       localChat.applicationBecameActive()
+      Task { await modelAdvisor.refreshCatalog() }
       isComposerFocused = true
     }
     .onReceive(NotificationCenter.default.publisher(for: .panelHidden)) { _ in
@@ -158,6 +157,9 @@ struct AppShellView: View {
     .onReceive(NotificationCenter.default.publisher(for: .recentChatCycleRequested)) { _ in
       localChat.cycleRecentChat()
     }
+    .sheet(isPresented: $modelAdvisor.isOnboardingPresented, onDismiss: { modelAdvisor.dismissOnboarding() }) {
+      LocalModelOnboardingView(advisor: modelAdvisor, chat: localChat)
+    }
     .sheet(isPresented: $isHelpPresented) {
       KeyboardShortcutsHelpView()
     }
@@ -173,6 +175,7 @@ struct AppShellView: View {
     }
     .task {
       await localChat.refreshInstalledModel()
+      await modelAdvisor.start(installedModels: localChat.installedModels)
     }
     .onChange(of: draft) { _, value in
       guard let remainder = SearchCommand.remainder(in: value) else { return }
@@ -331,6 +334,9 @@ struct AppShellView: View {
     case .local:
       HStack(spacing: 8) {
         switch localChat.state {
+        case .benchmarking:
+          ProgressView().controlSize(.small)
+          Text("Checking model performance…")
         case .installing:
           ProgressView()
             .controlSize(.small)
@@ -405,7 +411,7 @@ struct AppShellView: View {
               Text("Unverified")
                 .help(cloudSettings.selectedModelCompatibility.message)
             }
-          case .installing, .downloading:
+          case .installing, .downloading, .benchmarking:
             Text("Finish the local model task before using Cloud mode.")
           }
         }
@@ -593,20 +599,10 @@ struct AppShellView: View {
         }
       }
 
-      let installedIDs = Set(localChat.installedModels.map(\.id))
-      let downloadableModels = LocalModelManifest.bundled.models.filter { !installedIDs.contains($0.id) }
-      if !downloadableModels.isEmpty {
-        Section("Download") {
-          ForEach(downloadableModels) { model in
-            Button {
-              selectedMode = .local
-              localChat.downloadModel(model)
-            } label: {
-              Text("\(model.displayName) · \(model.expectedByteCount, format: .byteCount(style: .file))")
-            }
-          }
-        }
+      Button("Find a Model for This Mac…") {
+        Task { await modelAdvisor.replayOnboarding() }
       }
+      Button("Manage Models in Settings…", action: openSettings)
 
       Divider()
       Button("Choose GGUF File…") {
@@ -820,11 +816,27 @@ private struct KeyboardShortcutsHelpView: View {
 
 private struct DeveloperToolsView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
+  @ObservedObject var advisor: LocalModelAdvisor
+  @ObservedObject var chat: LocalChatViewModel
   @State private var isExpanded = false
 
   var body: some View {
     DisclosureGroup(isExpanded: $isExpanded) {
       VStack(alignment: .leading, spacing: 10) {
+        Button("Detect Mac Capabilities") { Task { await advisor.detectHardware() } }
+          .disabled(advisor.isDetecting || chat.isBusy)
+        Button("Test First-Run Model Selection") { Task { await advisor.replayOnboarding() } }
+          .disabled(advisor.isDetecting || chat.isBusy)
+        if let hardware = advisor.hardware {
+          Text("\(hardware.chip) · \(hardware.cpuCount) CPUs")
+          Text("Inference budget: \(hardware.inferenceMemoryBudget, format: .byteCount(style: .memory))")
+          Text("Free disk: \(hardware.availableDiskBytes, format: .byteCount(style: .file))")
+          Text(hardware.hasMetal ? "Metal available" : "CPU inference")
+          if let limit = hardware.metalRecommendedWorkingSet {
+            Text("Metal working set: \(limit, format: .byteCount(style: .memory))")
+          }
+        }
+        Divider()
         Toggle("Liquid Glass", isOn: $glassAppearance.isEnabled)
 
         if glassAppearance.isEnabled {
@@ -870,6 +882,18 @@ struct SettingsView: View {
   }
 
   var body: some View {
+    TabView {
+      Form { LocalModelManagerSection() }
+        .formStyle(.grouped)
+        .tabItem { Label("Local Models", systemImage: "desktopcomputer") }
+      cloudForm
+        .tabItem { Label("Cloud & Search", systemImage: "cloud") }
+    }
+    .padding(.top, 8)
+    .frame(width: 560, height: 740)
+  }
+
+  private var cloudForm: some View {
     Form {
       Section("ChatGPT Subscription") {
         if let account = settings.chatGPTAccount {
@@ -1023,7 +1047,6 @@ struct SettingsView: View {
       }
     }
     .formStyle(.grouped)
-    .frame(width: 560, height: 740)
     .navigationTitle("AI Spotlight Settings")
     .task {
       await settings.refreshChatGPTAccount()

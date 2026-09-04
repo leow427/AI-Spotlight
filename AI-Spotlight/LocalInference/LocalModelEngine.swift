@@ -4,6 +4,7 @@ struct LocalModel: Codable, Sendable, Equatable, Identifiable {
   let id: String
   let displayName: String
   let fileURL: URL
+  var catalogDescriptor: LocalModelDescriptor? = nil
 }
 
 struct LocalModelRequest: Sendable, Equatable {
@@ -45,6 +46,7 @@ protocol LocalModelEngine: Sendable {
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error>
   func unload() async
+  func benchmark() async throws -> LocalBenchmarkMetrics?
 }
 
 enum LocalInferenceError: LocalizedError, Equatable {
@@ -68,6 +70,8 @@ enum LocalInferenceError: LocalizedError, Equatable {
 }
 
 extension LocalModelEngine {
+  func benchmark() async throws -> LocalBenchmarkMetrics? { nil }
+
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
     try ChatContextPreparer.prepare(
       request.messages,

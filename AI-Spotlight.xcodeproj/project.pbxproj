@@ -54,6 +54,14 @@
 		B60000000000000000000104 /* WebSearchControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000004 /* WebSearchControls.swift */; };
 		B60000000000000000000202 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000201 /* Assets.xcassets */; };
 		B60000000000000000000402 /* WebSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000401 /* WebSearchTests.swift */; };
+		AB0200000000000000000001 /* LocalHardwareProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000001 /* LocalHardwareProfile.swift */; };
+		AB0200000000000000000002 /* LocalModelSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000002 /* LocalModelSelection.swift */; };
+		AB0200000000000000000003 /* LocalModelBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000003 /* LocalModelBenchmark.swift */; };
+		AB0200000000000000000004 /* LocalCatalogUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000004 /* LocalCatalogUpdates.swift */; };
+		AB0200000000000000000005 /* LocalModelAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000005 /* LocalModelAdvisor.swift */; };
+		AB0200000000000000000006 /* BundledLocalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000006 /* BundledLocalModels.swift */; };
+		AB0200000000000000000007 /* LocalModelManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000007 /* LocalModelManagerView.swift */; };
+		AB0300000000000000000002 /* LocalModelSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0300000000000000000001 /* LocalModelSelectionTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -116,6 +124,14 @@
 		B60000000000000000000004 /* WebSearchControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchControls.swift; sourceTree = "<group>"; };
 		B60000000000000000000201 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B60000000000000000000401 /* WebSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchTests.swift; sourceTree = "<group>"; };
+		AB0100000000000000000001 /* LocalHardwareProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalHardwareProfile.swift; sourceTree = "<group>"; };
+		AB0100000000000000000002 /* LocalModelSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelSelection.swift; sourceTree = "<group>"; };
+		AB0100000000000000000003 /* LocalModelBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelBenchmark.swift; sourceTree = "<group>"; };
+		AB0100000000000000000004 /* LocalCatalogUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCatalogUpdates.swift; sourceTree = "<group>"; };
+		AB0100000000000000000005 /* LocalModelAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelAdvisor.swift; sourceTree = "<group>"; };
+		AB0100000000000000000006 /* BundledLocalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledLocalModels.swift; sourceTree = "<group>"; };
+		AB0100000000000000000007 /* LocalModelManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManagerView.swift; sourceTree = "<group>"; };
+		AB0300000000000000000001 /* LocalModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelSelectionTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -192,6 +208,7 @@
 				B60000000000000000000401 /* WebSearchTests.swift */,
 				C20000000000000000000001 /* ChatContextTests.swift */,
 				A20000000000000000000007 /* AppCommandTests.swift */,
+				AB0300000000000000000001 /* LocalModelSelectionTests.swift */,
 				D20000000000000000000005 /* LocalInferenceTests.swift */,
 				C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */,
 				C40000000000000000000001 /* CloudStreamingTransportTests.swift */,
@@ -220,6 +237,13 @@
 				D20000000000000000000003 /* LlamaCPPModelEngine.swift */,
 				D20000000000000000000002 /* LocalModelInstallationStore.swift */,
 				D20000000000000000000001 /* LocalModelEngine.swift */,
+				AB0100000000000000000001 /* LocalHardwareProfile.swift */,
+				AB0100000000000000000002 /* LocalModelSelection.swift */,
+				AB0100000000000000000003 /* LocalModelBenchmark.swift */,
+				AB0100000000000000000004 /* LocalCatalogUpdates.swift */,
+				AB0100000000000000000005 /* LocalModelAdvisor.swift */,
+				AB0100000000000000000006 /* BundledLocalModels.swift */,
+				AB0100000000000000000007 /* LocalModelManagerView.swift */,
 				E20000000000000000000003 /* LocalModelManifest.swift */,
 			);
 			path = LocalInference;
@@ -382,6 +406,13 @@
 				D10000000000000000000004 /* LocalChatViewModel.swift in Sources */,
 				E10000000000000000000001 /* ChatDomain.swift in Sources */,
 				E10000000000000000000002 /* ChatSessionStore.swift in Sources */,
+				AB0200000000000000000001 /* LocalHardwareProfile.swift in Sources */,
+				AB0200000000000000000002 /* LocalModelSelection.swift in Sources */,
+				AB0200000000000000000003 /* LocalModelBenchmark.swift in Sources */,
+				AB0200000000000000000004 /* LocalCatalogUpdates.swift in Sources */,
+				AB0200000000000000000005 /* LocalModelAdvisor.swift in Sources */,
+				AB0200000000000000000006 /* BundledLocalModels.swift in Sources */,
+				AB0200000000000000000007 /* LocalModelManagerView.swift in Sources */,
 				E10000000000000000000003 /* LocalModelManifest.swift in Sources */,
 				E10000000000000000000005 /* AutoRouter.swift in Sources */,
 				F10000000000000000000001 /* CloudDomain.swift in Sources */,
@@ -405,6 +436,7 @@
 				B60000000000000000000402 /* WebSearchTests.swift in Sources */,
 				C20000000000000000000002 /* ChatContextTests.swift in Sources */,
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
+				AB0300000000000000000002 /* LocalModelSelectionTests.swift in Sources */,
 				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
 				C30000000000000000000002 /* LocalModelInstallationStoreTests.swift in Sources */,
 				C40000000000000000000002 /* CloudStreamingTransportTests.swift in Sources */,
