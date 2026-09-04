@@ -123,6 +123,55 @@ final class ScreenPipelineTests: XCTestCase {
     XCTAssertNil(fixture.chat.activeRequest)
   }
 
+  func testStoppedScreenRequestCannotAcceptOrFinishItsReplacement() async throws {
+    let first = AsyncThrowingStream<ChatEvent, Error>.makeStream()
+    let second = AsyncThrowingStream<ChatEvent, Error>.makeStream()
+    let firstStarted = expectation(description: "First Screen producer")
+    let secondStarted = expectation(description: "Replacement Screen producer")
+    let cloud = PipelineCloud(controlledStreams: [first.stream, second.stream], onStarted: { index in
+      (index == 0 ? firstStarted : secondStarted).fulfill()
+    })
+    let fixture = try makeFixture(cloud: cloud)
+    let model = CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
+    let firstAttachment = try attachment()
+    let secondAttachment = try attachment()
+    var draft = "first diagram"
+    var pending: ScreenAttachment? = firstAttachment
+    fixture.chat.submitScreen(draft, attachment: pending, decision: .vision(model), selectedMode: .auto,
+      cloudUploadAllowed: { true }) { draft = ""; pending = nil }
+    await fulfillment(of: [firstStarted], timeout: 3)
+    // Queue the old events without giving its MainActor consumer a chance to
+    // process them until the replacement owns the request and composer.
+    first.continuation.yield(.token("stale first answer"))
+    first.continuation.yield(.completed)
+    first.continuation.finish()
+    let oldTask = try XCTUnwrap(fixture.chat.stopStreaming())
+    draft = "second diagram"
+    pending = secondAttachment
+    fixture.chat.submitScreen(draft, attachment: pending, decision: .vision(model), selectedMode: .auto,
+      cloudUploadAllowed: { true }) { draft = ""; pending = nil }
+    let replacement = fixture.chat.activeRequest
+    await oldTask.value
+    await fulfillment(of: [secondStarted], timeout: 3)
+    XCTAssertEqual(draft, "second diagram")
+    XCTAssertEqual(pending?.id, secondAttachment.id)
+    XCTAssertEqual(fixture.chat.activeRequest, replacement)
+    XCTAssertTrue(fixture.chat.isBusy)
+    XCTAssertTrue(fixture.chat.messages.isEmpty)
+    let done = finished(fixture.chat)
+    second.continuation.yield(.token("second answer"))
+    second.continuation.yield(.completed)
+    second.continuation.finish()
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    XCTAssertEqual(cloud.requests.count, 2)
+    XCTAssertEqual(fixture.chat.messages.map(\.content), ["second diagram", "second answer"])
+    XCTAssertEqual(draft, "")
+    XCTAssertNil(pending)
+    XCTAssertNil(fixture.chat.activeRequest)
+    XCTAssertFalse(fixture.chat.isBusy)
+  }
+
   private func finished(_ chat: LocalChatViewModel) -> (expectation: XCTestExpectation, token: AnyCancellable) {
     let expectation = expectation(description: "Generation finished")
     let token = chat.$state.dropFirst().filter { state in
@@ -198,13 +247,19 @@ private final class PipelineCloud: ChatProvider, @unchecked Sendable {
   let error: CloudProviderError?
   let controlled: AsyncThrowingStream<ChatEvent, Error>?
   let started: (@Sendable () -> Void)?
+  let controlledStreams: [AsyncThrowingStream<ChatEvent, Error>]
+  let onStarted: (@Sendable (Int) -> Void)?
   var requests: [ChatRequest] { lock.withLock { captured } }
-  init(error: CloudProviderError? = nil, controlled: AsyncThrowingStream<ChatEvent, Error>? = nil, started: (@Sendable () -> Void)? = nil) {
+  init(error: CloudProviderError? = nil, controlled: AsyncThrowingStream<ChatEvent, Error>? = nil, started: (@Sendable () -> Void)? = nil,
+       controlledStreams: [AsyncThrowingStream<ChatEvent, Error>] = [], onStarted: (@Sendable (Int) -> Void)? = nil) {
     self.error = error; self.controlled = controlled; self.started = started
+    self.controlledStreams = controlledStreams; self.onStarted = onStarted
   }
   func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
-    lock.withLock { captured.append(request) }
+    let index = lock.withLock { captured.append(request); return captured.count - 1 }
     started?()
+    onStarted?(index)
+    if controlledStreams.indices.contains(index) { return controlledStreams[index] }
     if let controlled { return controlled }
     return AsyncThrowingStream {
       if let error { $0.finish(throwing: error) }

@@ -97,50 +97,55 @@ struct AppShellView: View {
         .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
         .navigationTitle("Recent")
       } detail: {
-        VStack(spacing: 0) {
-          conversation
+        // The native split view measures its columns with an unconstrained
+        // proposal. Wrapped composer notices must not become the panel's
+        // minimum height and move its controls outside the visible window.
+        GeometryReader { _ in
+          VStack(spacing: 0) {
+            conversation
 
-          VStack(alignment: .trailing, spacing: 8) {
-            routeStatus
-            if let notice = localChat.contextNotice {
-              Text(notice)
+            VStack(alignment: .trailing, spacing: 8) {
+              routeStatus
+              if let notice = localChat.contextNotice {
+                Text(notice)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+              if let decision = localChat.screenRouteDecision {
+                Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              if isSearchEnabled && !(screen.isEnabled && screen.attachment != nil) {
+                HStack(spacing: 6) {
+                  Text(searchSettings.hasAPIKey
+                    ? "Web Search · Your question is sent to Brave."
+                    : "Add a Brave Search API key to search the web.")
+                  if !searchSettings.hasAPIKey {
+                    Button("Settings", action: openSettings).buttonStyle(.plain)
+                  }
+                }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            if let decision = localChat.screenRouteDecision {
-              Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            if isSearchEnabled && !(screen.isEnabled && screen.attachment != nil) {
-              HStack(spacing: 6) {
-                Text(searchSettings.hasAPIKey
-                  ? "Web Search · Your question is sent to Brave."
-                  : "Add a Brave Search API key to search the web.")
-                if !searchSettings.hasAPIKey {
-                  Button("Settings", action: openSettings).buttonStyle(.plain)
-                }
               }
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              if isSearchEnabled && screen.isEnabled && screen.attachment != nil {
+                Text("Web Search is paused for this Screen request.")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              compactModeControls
+              if let attachment = screen.attachment {
+                ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
+                                     isBusy: localChat.isBusy || screen.isBusy,
+                                     remove: screen.removeAttachment, retake: captureScreen)
+              }
+              if let error = screen.error {
+                Text(error).font(.caption).foregroundStyle(.orange)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+              composer
             }
-            if isSearchEnabled && screen.isEnabled && screen.attachment != nil {
-              Text("Web Search is paused for this Screen request.")
-                .font(.caption).foregroundStyle(.secondary)
-            }
-            compactModeControls
-            if let attachment = screen.attachment {
-              ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
-                                   isBusy: localChat.isBusy || screen.isBusy,
-                                   remove: screen.removeAttachment, retake: captureScreen)
-            }
-            if let error = screen.error {
-              Text(error).font(.caption).foregroundStyle(.orange)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            composer
+            .padding(20)
           }
-          .padding(20)
         }
       }
 
@@ -201,6 +206,11 @@ struct AppShellView: View {
         screen.error = "Screenshot kept on this Mac. Use a local vision model, or enable uploads in Screen settings."
       }
     } message: { Text(ScreenSettings.permissionExplanation) }
+    .onChange(of: localChat.isBusy) { _, busy in
+      // A disabled TextField cannot take focus at first-token acceptance.
+      // Restore its editor only after the owning request has finished.
+      isComposerFocused = !busy
+    }
     .onChange(of: localChat.selectedSessionID) { _, _ in
       if localChat.activeRequest == nil { screen.removeAttachment() }
     }

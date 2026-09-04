@@ -97,6 +97,152 @@ final class ScreenViewTests: XCTestCase {
     XCTAssertFalse(chat.isBusy)
   }
 
+  func testRepeatedScreenSubmissionsKeepFullPanelInsideWindow() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("RepeatedScreenPanel-\(UUID())")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    let suite = "RepeatedScreenPanel-\(UUID())"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defaults.set(true, forKey: "localModelOnboardingDismissed")
+    addTeardownBlock {
+      try? FileManager.default.removeItem(at: directory)
+      UserDefaults().removePersistentDomain(forName: suite)
+    }
+    let model = LocalModel(id: "text", displayName: "Text", fileURL: directory.appendingPathComponent("text.gguf"))
+    let engine = RepeatedPanelEngine(model: model)
+    let store = ChatSessionStore(applicationSupportDirectory: directory)
+    let chat = LocalChatViewModel(engine: engine, sessionStore: store)
+    await chat.refreshInstalledModel()
+    chat.newChat()
+    let session = chat.selectedSessionID
+    let screen = ScreenComposerCoordinator(captureService: PreviewCapture(), ocrService: PreviewOCR())
+    let credentials = ScreenTestCredentialStore()
+    let cloud = CloudSettingsModel(credentialStore: credentials,
+      catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport(), cacheDirectory: directory),
+      preferences: CloudPreferencesStore(defaults: defaults), codexAvailable: { false })
+    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, defaults: defaults, trust: nil)
+    await advisor.start(installedModels: [model])
+    let appearance = GlassAppearanceSettings(defaults: defaults)
+    let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, cloudSettings: cloud,
+      localChat: chat, screen: screen, modelAdvisor: advisor,
+      searchSettings: WebSearchSettings(credentials: PanelSearchCredentials())))
+    let sizes = PanelSizeStore(defaults: defaults)
+    sizes.save(NSSize(width: 752, height: 462))
+    let controller = SpotlightPanelController(glassAppearance: appearance, sizeStore: sizes, contentView: view)
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(view.window)
+
+    // The layout failure is also reachable on a first blocked request; it
+    // depends on the detail's measurement, not a global submission counter.
+    screen.draft = "Describe the colors in this diagram."
+    _ = await screen.capture()
+    try await assertPanelControls(view, phase: "fresh attachment")
+    try submitComposer(in: view)
+    try await assertPanelControls(view, phase: "first blocked request")
+    XCTAssertNotNil(screen.error)
+    XCTAssertTrue(chat.messages.isEmpty)
+    XCTAssertTrue(engine.requests.isEmpty)
+    screen.removeAttachment()
+
+    for cycle in 1...2 {
+      screen.draft = "Explain the code in capture \(cycle)."
+      if cycle == 1 {
+        _ = await screen.capture()
+        let original = screen.attachment?.id
+        _ = await screen.capture() // Two captures without two submissions.
+        XCTAssertNotEqual(screen.attachment?.id, original)
+        XCTAssertTrue(engine.requests.isEmpty)
+      } else {
+        screen.draft = "/screen " + screen.draft
+      }
+      try await assertPanelControls(view, phase: "before request \(cycle)")
+      let completed = expectation(description: "Request \(cycle) completed")
+      let token = chat.$state.dropFirst().filter { $0 == .idle }.prefix(1).sink { _ in completed.fulfill() }
+      try submitComposer(in: view)
+      await fulfillment(of: [completed], timeout: 5)
+      token.cancel()
+      try await assertPanelControls(view, phase: "submission \(cycle)")
+      XCTAssertEqual(chat.selectedSessionID, session)
+      XCTAssertEqual(chat.messages.filter { $0.role == .user }.count, cycle)
+      XCTAssertEqual(engine.requests.count, cycle)
+      XCTAssertNil(screen.attachment)
+      XCTAssertEqual(screen.draft, "")
+      XCTAssertFalse(screen.isEnabled)
+      XCTAssertFalse(screen.isBusy)
+      XCTAssertNil(chat.activeRequest)
+      XCTAssertEqual(chat.state, .idle)
+      XCTAssertFalse(chat.isBusy)
+      XCTAssertTrue(controller.isVisible)
+      XCTAssertTrue(window.isKeyWindow)
+      XCTAssertNotNil(try composerField(in: view).currentEditor(), "The completed request must return keyboard focus to the composer")
+      XCTAssertFalse(window.ignoresMouseEvents)
+    }
+    XCTAssertEqual(store.load().first?.messages.filter { $0.role == .user }.map(\.content),
+      ["Explain the code in capture 1.", "Explain the code in capture 2."])
+
+    // A blocked vision route adds a wrapped error without starting a producer.
+    // This was the exact second-send reflow observed in the signed app.
+    _ = await screen.capture()
+    screen.draft = "Describe the image."
+    screen.error = "Visual analysis requires a local vision model or screenshot-upload permission in Screen settings."
+    try await assertPanelControls(view, phase: "blocked vision")
+    XCTAssertEqual(engine.requests.count, 2)
+    XCTAssertNotNil(screen.attachment)
+    screen.removeAttachment()
+    try await assertPanelControls(view, phase: "removed attachment")
+  }
+
+  private func submitComposer(in view: NSView) throws {
+    let window = try XCTUnwrap(view.window)
+    XCTAssertTrue(window.makeFirstResponder(try composerField(in: view)))
+    let editor = try XCTUnwrap(window.firstResponder as? NSTextView)
+    editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
+  }
+
+  private func composerField(in view: NSView) throws -> NSTextField {
+    try XCTUnwrap(descendants(view).compactMap { $0 as? NSTextField }
+      .first { $0.placeholderString == "Ask anything" })
+  }
+
+  private func descendants(_ view: NSView) -> [NSView] {
+    [view] + view.subviews.flatMap(descendants)
+  }
+
+  private func assertPanelControls(_ view: NSView, phase: String) async throws {
+    await Task.yield()
+    view.layoutSubtreeIfNeeded()
+    view.window?.displayIfNeeded()
+    let split = try XCTUnwrap(descendants(view).compactMap { $0 as? NSSplitView }.first)
+    let splitFrame = view.convert(split.bounds, from: split)
+    XCTAssertEqual(splitFrame.minY, 0, accuracy: 1, "Split offset during \(phase): \(splitFrame)")
+    XCTAssertEqual(splitFrame.height, view.bounds.height, accuracy: 1, "Split overflow during \(phase): \(splitFrame)")
+    let field = try composerField(in: view)
+    let fieldFrame = view.convert(field.bounds, from: field)
+    XCTAssertTrue(view.bounds.contains(fieldFrame), "Composer outside panel during \(phase): \(fieldFrame)")
+    XCTAssertFalse(field.isHiddenOrHasHiddenAncestor)
+    XCTAssertTrue(field.isEnabled)
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    let rendered = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    rendered.name = "Repeated Screen · \(phase)"
+    rendered.lifetime = .keepAlways
+    add(rendered)
+    let text = try await ScreenOCRService().recognize(try XCTUnwrap(bitmap.cgImage)).text.lowercased()
+    // Native glass renders on a separate surface from cacheDisplay. Verify
+    // the actual sidebar, its scroll content, and its position in the panel.
+    let sidebar = try XCTUnwrap(split.arrangedSubviews.min { $0.frame.width < $1.frame.width })
+    XCTAssertFalse(split.isSubviewCollapsed(sidebar))
+    XCTAssertFalse(sidebar.isHiddenOrHasHiddenAncestor)
+    XCTAssertGreaterThan(sidebar.frame.width, 180)
+    XCTAssertLessThan(sidebar.frame.width, 270)
+    XCTAssertTrue(view.bounds.contains(view.convert(sidebar.bounds, from: sidebar)),
+      "History sidebar outside panel during \(phase)")
+    let history = try XCTUnwrap(descendants(sidebar).compactMap { $0 as? NSScrollView }.first)
+    XCTAssertGreaterThan(try XCTUnwrap(history.documentView).frame.height, 0)
+    XCTAssertTrue(text.contains("auto"), "Composer mode missing during \(phase): \(text)")
+  }
+
   private func renderPanel(_ view: NSView, state: String) async throws {
     await Task.yield()
     view.layoutSubtreeIfNeeded()
@@ -229,4 +375,22 @@ private struct PreviewOCR: ScreenOCRReading {
   func recognize(_ image: CGImage) async throws -> ScreenOCRResult {
     ScreenOCRResult(text: "let answer = values.count\nprint(answer)\n// explain this code", confidence: 0.95)
   }
+}
+
+private final class RepeatedPanelEngine: LocalModelEngine, @unchecked Sendable {
+  let model: LocalModel
+  private let lock = NSLock()
+  private var captured: [LocalModelRequest] = []
+  var requests: [LocalModelRequest] { lock.withLock { captured } }
+  init(model: LocalModel) { self.model = model }
+  func installedModel() async -> LocalModel? { model }
+  func installedModels() async -> [LocalModel] { [model] }
+  func install(_ model: LocalModel) async throws {}
+  func selectModel(id: String) async throws {}
+  func download(_ model: LocalModelDescriptor, progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel { self.model }
+  func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> {
+    lock.withLock { captured.append(request) }
+    return AsyncThrowingStream { $0.yield("The answer is values.count."); $0.finish() }
+  }
+  func unload() async {}
 }
