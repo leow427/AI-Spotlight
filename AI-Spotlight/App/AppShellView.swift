@@ -7,7 +7,14 @@ struct AppShellView: View {
   @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
   @ObservedObject private var modelAdvisor = LocalModelAdvisor.shared
-  @State private var draft = ""
+  @StateObject private var screen = ScreenComposerCoordinator()
+  @ObservedObject private var screenSettings = ScreenSettings.shared
+  @ObservedObject private var connectivity = ScreenConnectivity.shared
+  @State private var isScreenPermissionPresented = false
+  private var draft: String {
+    get { screen.draft }
+    nonmutating set { screen.draft = newValue }
+  }
   @State private var isSearchEnabled = false
   @State private var isSearchPresented = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -94,7 +101,11 @@ struct AppShellView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
-            if isSearchEnabled {
+            if let decision = localChat.screenRouteDecision {
+              Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
+                .font(.caption).foregroundStyle(.secondary)
+            }
+            if isSearchEnabled && !(screen.isEnabled && screen.attachment != nil) {
               HStack(spacing: 6) {
                 Text(searchSettings.hasAPIKey
                   ? "Web Search · Your question is sent to Brave."
@@ -106,7 +117,20 @@ struct AppShellView: View {
               .font(.caption)
               .foregroundStyle(.secondary)
             }
+            if isSearchEnabled && screen.isEnabled && screen.attachment != nil {
+              Text("Web Search is paused for this Screen request.")
+                .font(.caption).foregroundStyle(.secondary)
+            }
             compactModeControls
+            if let attachment = screen.attachment {
+              ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
+                                   isBusy: localChat.isBusy || screen.isBusy,
+                                   remove: screen.removeAttachment, retake: captureScreen)
+            }
+            if let error = screen.error {
+              Text(error).font(.caption).foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            }
             composer
           }
           .padding(20)
@@ -124,7 +148,7 @@ struct AppShellView: View {
         .stroke(.white.opacity(0.14), lineWidth: 0.5)
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
-      draft = ""
+      screen.clearDraft()
       isSearchEnabled = false
       isSearchPresented = false
       localChat.newChat()
@@ -159,6 +183,24 @@ struct AppShellView: View {
     }
     .sheet(isPresented: $modelAdvisor.isOnboardingPresented, onDismiss: { modelAdvisor.dismissOnboarding() }) {
       LocalModelOnboardingView(advisor: modelAdvisor, chat: localChat)
+    }
+    .alert("Allow screenshot uploads?", isPresented: $isScreenPermissionPresented) {
+      Button("Allow & Send") {
+        screenSettings.answerCloudPermission(allow: true)
+        submitDraft()
+      }
+      Button("Keep Screenshots Local", role: .cancel) {
+        screenSettings.answerCloudPermission(allow: false)
+        screen.error = "Screenshot kept on this Mac. Use a local vision model, or enable uploads in Screen settings."
+      }
+    } message: { Text(ScreenSettings.permissionExplanation) }
+    .onChange(of: localChat.selectedSessionID) { _, _ in
+      if localChat.activeRequest == nil { screen.removeAttachment() }
+    }
+    .onChange(of: screenSettings.allowCloudScreenshots) { _, allowed in
+      if !allowed, localChat.screenRouteDecision?.sendsImage == true, localChat.activeRequest?.route.mode == .cloud {
+        localChat.stopStreaming()
+      }
     }
     .sheet(isPresented: $isHelpPresented) {
       KeyboardShortcutsHelpView()
@@ -214,16 +256,19 @@ struct AppShellView: View {
 
   private var composer: some View {
     HStack(spacing: 10) {
-      WebSearchControls(
-        isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
-        isBusy: localChat.isBusy, openSettings: openSettings
-      )
+      HStack(spacing: 0) {
+        WebSearchControls(
+          isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
+          isBusy: localChat.isBusy || screen.isBusy, openSettings: openSettings, captureScreen: captureScreen
+        )
+        ScreenToolButton(coordinator: screen, isBusy: localChat.isBusy, capture: captureScreen)
+      }
 
-      TextField("Ask anything", text: $draft, axis: .vertical)
+      TextField("Ask anything", text: $screen.draft, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($isComposerFocused)
-        .disabled(!canSubmit)
+        .disabled(localChat.isBusy || screen.isBusy)
         .onSubmit(submitDraft)
 
       Menu {
@@ -242,6 +287,7 @@ struct AppShellView: View {
       .fixedSize()
     }
     .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: isSearchPresented)
+    .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: screen.isPresented)
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
     .background {
@@ -648,7 +694,28 @@ struct AppShellView: View {
     .disabled(localChat.isBusy)
   }
 
+  private func captureScreen() {
+    guard !localChat.isBusy else { return }
+    Task {
+      _ = await screen.capture()
+      isComposerFocused = true
+    }
+  }
+
   private func submitDraft() {
+    guard !localChat.isBusy, !screen.isBusy else { return }
+    if ScreenCommand.remainder(in: draft) != nil {
+      Task {
+        let automaticPrompt = await screen.capture(submittedCommand: true)
+        isComposerFocused = true
+        if automaticPrompt != nil { submitDraft() }
+      }
+      return
+    }
+    if screen.isEnabled, let attachment = screen.attachment {
+      submitScreenAttachment(attachment)
+      return
+    }
     guard canSubmit else { return }
     let prompt = draft
     let accepted: @MainActor () -> Void = {
@@ -667,6 +734,39 @@ struct AppShellView: View {
       )
     case .auto:
       localChat.submitAuto(prompt, cloud: autoCloudConfiguration, searchEnabled: isSearchEnabled, onAccepted: accepted)
+    }
+  }
+
+  private func submitScreenAttachment(_ attachment: ScreenAttachment) {
+    guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    let cloudText = cloudSettings.isConfigured
+      ? CloudModel(id: cloudSettings.preferredModelID, displayName: cloudSettings.preferredModelID,
+                   provider: cloudSettings.preferredProvider).screenModel : nil
+    let visionModel = screenSettings.configuredVisionModel
+    let cloudVision = cloudSettings.hasCloudAccess(for: visionModel.provider) ? visionModel.screenModel : nil
+    let request = ScreenRoutingPolicy.Request(
+      prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText, confidence: attachment.ocrConfidence),
+      mode: selectedMode, localText: localChat.installedModel?.screenModel, cloudText: cloudText,
+      localVision: localChat.installedModels.filter(\.supportsVision).map(\.screenModel), cloudVision: cloudVision,
+      allowCloudScreenshots: screenSettings.allowCloudScreenshots,
+      hasExplainedCloudPermission: screenSettings.hasExplainedCloudPermission, isOffline: connectivity.isOffline
+    )
+    let decision = ScreenRoutingPolicy.decide(request)
+    screen.updateDecision(decision)
+    screen.error = nil
+    switch decision {
+    case .needsCloudPermission:
+      isScreenPermissionPresented = true
+    case .blocked(let reason):
+      screen.error = reason
+    case .text, .vision:
+      let prompt = draft
+      localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
+        cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
+          if draft == prompt { draft = "" }
+          if screen.attachment?.id == attachment.id { screen.removeAttachment() }
+          isComposerFocused = true
+        }
     }
   }
 
@@ -770,6 +870,9 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Open Settings", keys: "⌘ ,")
           shortcut("Send from the message field", keys: "Return")
           shortcut("Enable Web Search", keys: "/search")
+          shortcut("Capture a screen region", keys: "/screen")
+          Text("/screen with a question captures and sends. /screen alone attaches a screenshot and waits for a question.")
+            .font(.caption).foregroundStyle(.secondary)
 
           Divider()
 
@@ -875,6 +978,7 @@ struct SettingsView: View {
   @ObservedObject private var settings: CloudSettingsModel
   @State private var openAIAPIKey = ""
   @State private var anthropicAPIKey = ""
+  @State private var geminiAPIKey = ""
   @State private var formError: String?
 
   init(settings: CloudSettingsModel = .shared) {
@@ -883,7 +987,10 @@ struct SettingsView: View {
 
   var body: some View {
     TabView {
-      Form { LocalModelManagerSection() }
+      Form {
+        LocalVisionSettingsView(chat: .shared)
+        LocalModelManagerSection()
+      }
         .formStyle(.grouped)
         .tabItem { Label("Local Models", systemImage: "desktopcomputer") }
       cloudForm
@@ -947,6 +1054,8 @@ struct SettingsView: View {
           Text(accountError).font(.caption).foregroundStyle(.red)
         }
       }
+
+      ScreenSettingsSection(settings: .shared)
 
       WebSearchSettingsSection(settings: .shared)
 
@@ -1038,6 +1147,13 @@ struct SettingsView: View {
 
         credentialButtons(provider: .anthropic, apiKey: $anthropicAPIKey)
         connectionStatus(for: .anthropic)
+      }
+
+      Section("Gemini API Key") {
+        SecureField(settings.hasAPIKey(for: .gemini) ? "Replace stored API key" : "API key", text: $geminiAPIKey)
+          .textFieldStyle(.roundedBorder)
+        credentialButtons(provider: .gemini, apiKey: $geminiAPIKey)
+        connectionStatus(for: .gemini)
       }
 
       if let formError {

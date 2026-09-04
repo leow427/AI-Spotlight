@@ -193,6 +193,9 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     guard let installedModel = installationStore.installedModel() else {
       throw LocalInferenceError.noModelInstalled
     }
+    guard !installedModel.supportsVision else {
+      throw LocalInferenceError.bridgeFailure("This vision profile uses llama-server instead of the embedded text engine.")
+    }
     if let engineHandle, loadedModelURL == installedModel.fileURL {
       return engineHandle
     }

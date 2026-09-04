@@ -5,11 +5,16 @@ struct WebSearchControls: View {
   @Binding var isPresented: Bool
   var isBusy: Bool
   var openSettings: () -> Void
+  var captureScreen: (() -> Void)? = nil
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     HStack(spacing: 0) {
       Menu {
+        if let captureScreen {
+          Button(action: captureScreen) { Label("Screen", image: "ScreenCapture") }
+            .disabled(isBusy)
+        }
         Button {
           isPresented.toggle()
           isEnabled = isPresented
@@ -27,7 +32,7 @@ struct WebSearchControls: View {
       .menuIndicator(.hidden)
       .fixedSize()
       .accessibilityLabel("Add tools")
-      .help("Add tools, including Web Search")
+      .help("Add tools, including Screen and Web Search")
 
       ZStack(alignment: .leading) {
         if isPresented {

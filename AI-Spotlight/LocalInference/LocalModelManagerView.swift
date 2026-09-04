@@ -177,7 +177,7 @@ struct LocalModelManagerSection: View {
           }
         }
         Button("Check Performance") { chat.runModelBenchmark() }
-          .disabled(chat.installedModel == nil)
+          .disabled(chat.installedModel == nil || chat.installedModel?.supportsVision == true)
       }
       .disabled(chat.isBusy || advisor.isDetecting)
       ForEach(recommendations.assessments.sorted { lhs, rhs in
@@ -223,7 +223,7 @@ struct LocalModelManagerSection: View {
         HStack {
           VStack(alignment: .leading) {
             Text(model.displayName)
-            Text("Imported GGUF · Compatibility checked when loaded").font(.caption).foregroundStyle(.secondary)
+            Text(model.supportsVision ? "Local vision · GGUF + mmproj" : "Imported GGUF · Compatibility checked when loaded").font(.caption).foregroundStyle(.secondary)
           }
           Spacer()
           Button(chat.installedModel?.id == model.id ? "Selected" : "Use") { chat.selectModel(id: model.id) }

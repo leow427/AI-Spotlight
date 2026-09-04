@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 
@@ -37,6 +38,7 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var contextNotice: String?
   @Published private(set) var activeRequest: ActiveRequest?
   @Published private(set) var autoRouteDecision: AutoRouter.Decision?
+  @Published private(set) var screenRouteDecision: ScreenRoutingPolicy.Decision?
   @Published private(set) var state: State = .idle
   @Published private(set) var benchmarkNotice: String?
   private let modelAdvisor: LocalModelAdvisor?
@@ -58,6 +60,7 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   private let engine: any LocalModelEngine
+  private let visionEngine: any LocalVisionServing
   private let webSearch: any WebSearchProvider
   private let cloudProviders: CloudProviderRegistry
   private let sessionStore: ChatSessionStore
@@ -69,6 +72,7 @@ final class LocalChatViewModel: ObservableObject {
 
   init(
     engine: any LocalModelEngine,
+    visionEngine: any LocalVisionServing = LlamaServerVisionEngine(),
     modelAdvisor: LocalModelAdvisor? = nil,
     cloudProviders: CloudProviderRegistry = .live,
     webSearch: any WebSearchProvider = BraveSearchClient(),
@@ -77,6 +81,7 @@ final class LocalChatViewModel: ObservableObject {
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
   ) {
     self.engine = engine
+    self.visionEngine = visionEngine
     self.modelAdvisor = modelAdvisor
     self.webSearch = webSearch
     self.cloudProviders = cloudProviders
@@ -92,7 +97,7 @@ final class LocalChatViewModel: ObservableObject {
     installedModels = await engine.installedModels()
   }
 
-  func installModel(from sourceURL: URL) {
+  func installModel(from sourceURL: URL, vision: LocalVisionConfiguration? = nil) {
     guard !isBusy else { return }
     stopStreaming()
     installationTask?.cancel()
@@ -100,18 +105,20 @@ final class LocalChatViewModel: ObservableObject {
     state = .installing
     let didAccessSecurityScope = sourceURL.startAccessingSecurityScopedResource()
     let modelName = sourceURL.deletingPathExtension().lastPathComponent
-    let model = LocalModel(id: modelName.lowercased(), displayName: modelName, fileURL: sourceURL)
+    let accessedProjector = vision?.projectorURL.startAccessingSecurityScopedResource() ?? false
+    let model = LocalModel(id: modelName.lowercased() + (vision == nil ? "" : ":vision"), displayName: modelName, fileURL: sourceURL, visionConfiguration: vision)
 
     installationTask = Task { [weak self, engine] in
       defer {
         if didAccessSecurityScope { sourceURL.stopAccessingSecurityScopedResource() }
+        if accessedProjector { vision?.projectorURL.stopAccessingSecurityScopedResource() }
       }
       do {
         try await engine.install(model)
         guard let self else { return }
         await self.refreshInstalledModel()
         try Task.checkCancellation()
-        await self.benchmarkInstalledModel(prediction: nil)
+        if vision == nil { await self.benchmarkInstalledModel(prediction: nil) }
         self.state = .idle
         self.installationTask = nil
       } catch is CancellationError {
@@ -207,6 +214,11 @@ final class LocalChatViewModel: ObservableObject {
   func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedPrompt.isEmpty, !isBusy else { return }
+    if let model = installedModel, model.supportsVision {
+      submitScreen(trimmedPrompt, attachment: nil, decision: .text(model.screenModel), selectedMode: .local, cloudUploadAllowed: { false }, onAccepted: onAccepted)
+      return
+    }
+    screenRouteDecision = nil
     idleUnloadTask?.cancel()
     let responseID = UUID()
     let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
@@ -278,6 +290,126 @@ final class LocalChatViewModel: ObservableObject {
     }
   }
 
+  func submitScreen(
+    _ prompt: String,
+    attachment: ScreenAttachment?,
+    decision: ScreenRoutingPolicy.Decision,
+    selectedMode: ChatMode,
+    cloudUploadAllowed: @escaping @MainActor () -> Bool,
+    onAccepted: @escaping @MainActor () -> Void = {}
+  ) {
+    let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !prompt.isEmpty, !isBusy, let model = decision.model else { return }
+    guard selectedMode != .local || model.isLocal else {
+      state = .failed(ScreenRequestError.cloudUploadNotAllowed.localizedDescription)
+      return
+    }
+    if decision.sendsImage && !model.canUseVision {
+      state = .failed(ScreenRequestError.textOnlyModel.localizedDescription)
+      return
+    }
+    let userMessage = ChatMessage(role: .user, content: prompt)
+    let requestText = attachment.map { ScreenPromptContext.text(userPrompt: prompt, ocr: $0.ocrText) } ?? prompt
+    var current = userMessage
+    current.content = requestText
+    let history = messages + [current]
+    let pixels = decision.sendsImage ? attachment?.originalImage.cgImage(forProposedRect: nil, context: nil, hints: nil) : nil
+    if decision.sendsImage && pixels == nil { state = .failed(ScreenCaptureError.invalidImage.localizedDescription); return }
+    idleUnloadTask?.cancel()
+    let active = beginGeneration(route: model.route, modelDisplayName: model.id)
+    state = .preparing
+    contextNotice = nil
+    screenRouteDecision = attachment == nil ? nil : decision
+    generationTask = Task { [weak self, engine, visionEngine] in
+      guard let owner = self else { return }
+      var acceptedSession: UUID?
+      let responseID = UUID()
+      do {
+        let image: PreparedScreenImage?
+        if let pixels {
+          image = try await Task.detached(priority: .userInitiated) { try ScreenImagePreprocessor.prepare(pixels) }.value
+        } else { image = nil }
+        try Task.checkCancellation()
+        guard owner.activeRequest?.id == active.id else { return }
+        var target = model
+        while true {
+          do {
+            let prepared: PreparedConversation
+            let output: AsyncThrowingStream<String, Error>
+            if target.isLocal {
+              let installed = await engine.installedModels()
+              try Task.checkCancellation()
+              guard let localModel = installed.first(where: { $0.id == target.id }) else { throw LocalInferenceError.noModelInstalled }
+              if localModel.supportsVision {
+                // Release the normal text model before loading the separate vision profile.
+                await engine.unload()
+                try LocalVisionModelValidation.validate(localModel)
+                prepared = try LlamaServerVisionEngine.prepare(messages: history, image: image, model: localModel)
+                output = visionEngine.stream(messages: prepared.messages, image: image, model: localModel)
+              } else {
+                guard image == nil else { throw ScreenRequestError.textOnlyModel }
+                guard await engine.installedModel()?.id == target.id else {
+                  throw LocalInferenceError.bridgeFailure("The selected local model changed. Please send your draft again.")
+                }
+                prepared = try await engine.prepare(LocalModelRequest(messages: history))
+                output = engine.stream(LocalModelRequest(messages: prepared.messages))
+              }
+            } else {
+              guard let providerID = CloudProviderID(rawValue: target.provider) else { throw CloudProviderError.invalidResponse }
+              let allowed = image == nil || cloudUploadAllowed()
+              var request = ChatRequest(sessionID: owner.selectedSessionID ?? UUID(), messages: history,
+                                        route: target.route, image: image, allowsCloudImages: allowed)
+              prepared = try CloudContext.prepare(request)
+              request = ChatRequest(sessionID: request.sessionID, messages: prepared.messages,
+                                    route: target.route, image: image, allowsCloudImages: image != nil && cloudUploadAllowed())
+              try ScreenRequestGuard.validateCloud(request)
+              output = owner.cloudProviders.provider(for: providerID).textStream(request)
+            }
+            try Task.checkCancellation()
+            guard owner.activeRequest?.id == active.id else { return }
+            owner.contextNotice = prepared.notice
+            owner.activeRequest = ActiveRequest(id: active.id, route: target.route, modelDisplayName: target.id)
+            for try await fragment in output {
+              try Task.checkCancellation()
+              guard owner.activeRequest?.id == active.id else { return }
+              guard !fragment.isEmpty else { continue }
+              if acceptedSession == nil {
+                let session = owner.ensureSelectedSession()
+                acceptedSession = session
+                // Only the user's actual question is saved, never OCR or image bytes.
+                owner.append(userMessage, to: session)
+                owner.append(ChatMessage(id: responseID, role: .assistant, content: ""), to: session)
+                onAccepted()
+                try Task.checkCancellation()
+                guard owner.activeRequest?.id == active.id else { return }
+              }
+              owner.state = .streaming
+              owner.append(fragment, to: responseID, in: acceptedSession!)
+            }
+            guard acceptedSession != nil else { throw CloudProviderError.streamEndedUnexpectedly }
+            break
+          } catch {
+            // A genuinely offline cloud attempt can fall back before any reply is accepted.
+            if !target.isLocal, image != nil, acceptedSession == nil,
+               normalizedCloudError(error) as? CloudProviderError == .offline,
+               let fallback = (await engine.installedModels()).first(where: \.supportsVision) {
+              try Task.checkCancellation()
+              target = fallback.screenModel
+              owner.screenRouteDecision = .vision(target)
+              continue
+            }
+            throw error
+          }
+        }
+        owner.finishGeneration(id: active.id)
+      } catch is CancellationError {
+        owner.finishGeneration(id: active.id)
+      } catch {
+        owner.finishGeneration(id: active.id, error: error)
+      }
+    }
+  }
+
   func submitCloud(
     _ prompt: String,
     provider providerID: CloudProviderID,
@@ -287,6 +419,7 @@ final class LocalChatViewModel: ObservableObject {
   ) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+    screenRouteDecision = nil
     guard !trimmedPrompt.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
     idleUnloadTask?.cancel()
     let route = Route(
@@ -444,6 +577,7 @@ final class LocalChatViewModel: ObservableObject {
     stopStreaming()
     contextNotice = nil
     autoRouteDecision = nil
+    screenRouteDecision = nil
     let session = ChatSession()
     sessions.append(session)
     selectedSessionID = session.id

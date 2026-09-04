@@ -30,6 +30,7 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
   case chatGPT = "chatgpt-codex"
   case openAI = "openai"
   case anthropic
+  case gemini
 
   var id: Self { self }
 
@@ -38,6 +39,7 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
     case .chatGPT: "ChatGPT via Codex"
     case .openAI: "OpenAI"
     case .anthropic: "Anthropic"
+    case .gemini: "Gemini"
     }
   }
 }

@@ -53,6 +53,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   private let panel: SpotlightPanel
   private let sizeStore: PanelSizeStore
 
+  private(set) var isCapturingScreen = false
+  private var captureHiddenWindows: [NSWindow] = []
   var isVisible: Bool { panel.isVisible }
 
   init(
@@ -88,6 +90,9 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       rootView: AppShellView(glassAppearance: glassAppearance)
     )
 
+    NotificationCenter.default.addObserver(self, selector: #selector(beginScreenCapture), name: .screenCaptureBegan, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(endScreenCapture), name: .screenCaptureEnded, object: nil)
+
     panel.onHide = { [weak self] in
       self?.hide()
     }
@@ -97,7 +102,25 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func show() {
+    guard !isCapturingScreen else { return }
     centerOnActiveDisplay()
+    panel.orderFrontRegardless()
+    panel.makeKey()
+    NotificationCenter.default.post(name: .panelPresented, object: nil)
+  }
+
+  @objc private func beginScreenCapture() {
+    isCapturingScreen = true
+    captureHiddenWindows = NSApp.windows.filter { $0 !== panel && $0.isVisible }
+    captureHiddenWindows.forEach { $0.orderOut(nil) }
+    panel.orderOut(nil)
+  }
+
+  @objc private func endScreenCapture() {
+    guard isCapturingScreen else { return }
+    isCapturingScreen = false
+    captureHiddenWindows.forEach { $0.orderFrontRegardless() }
+    captureHiddenWindows = []
     panel.orderFrontRegardless()
     panel.makeKey()
     NotificationCenter.default.post(name: .panelPresented, object: nil)

@@ -21,6 +21,8 @@ struct ChatRequest: Sendable, Equatable {
   let sessionID: UUID
   let messages: [ChatMessage]
   let route: Route
+  var image: PreparedScreenImage? = nil
+  var allowsCloudImages = false
 }
 
 enum ChatEvent: Sendable, Equatable {

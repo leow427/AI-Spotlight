@@ -142,6 +142,7 @@ enum CloudContext {
   }
 
   static func prepare(_ request: ChatRequest) throws -> PreparedConversation {
+    try ScreenRequestGuard.validateCloud(request)
     guard let provider = CloudProviderID(rawValue: request.route.providerID) else {
       throw CloudProviderError.invalidResponse
     }
@@ -151,7 +152,7 @@ enum CloudContext {
     return try ChatContextPreparer.prepare(
       request.messages,
       budget: ModelContextPolicy.cloud(provider: provider, modelID: request.route.modelID),
-      countTokens: { try inputTokenCount($0, provider: provider) }
+      countTokens: { try inputTokenCount($0, provider: provider) + (request.image == nil ? 0 : 4096) }
     )
   }
 }

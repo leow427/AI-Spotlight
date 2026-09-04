@@ -28,3 +28,5 @@ Created by Gregor Cresnar from the Noun Project (noun_WebSearch_199704.svg).
 Supplied by the project owner. Original attribution is preserved in Icons/;
 the green variant retains the original geometry and includes attribution metadata.
 https://thenounproject.com/
+
+Screen Capture icon: Adrien Coquet, The Noun Project (noun_ScreenCapture_3967429). Supplied by the project owner.

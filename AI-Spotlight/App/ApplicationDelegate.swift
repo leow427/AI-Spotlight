@@ -74,6 +74,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
   }
 
   @objc func openSettings() {
+    guard panelController?.isCapturingScreen != true else { return }
     if settingsWindowController == nil {
       settingsWindowController = SettingsWindowController()
     }
