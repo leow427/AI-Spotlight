@@ -1,4 +1,5 @@
 import AppKit
+@preconcurrency import Carbon
 import XCTest
 @testable import PrimaryAgent
 
@@ -55,6 +56,13 @@ final class AppCommandTests: XCTestCase {
       .newChat
     )
     XCTAssertNil(PanelShortcut.resolve(characters: "n", modifiers: []))
+  }
+
+  func testGlobalHotKeysUseOptionSpaceAndOptionS() {
+    XCTAssertEqual(GlobalHotKey.togglePanel.keyCode, UInt32(kVK_Space))
+    XCTAssertEqual(GlobalHotKey.togglePanel.modifiers, UInt32(optionKey))
+    XCTAssertEqual(GlobalHotKey.openSettings.keyCode, UInt32(kVK_ANSI_S))
+    XCTAssertEqual(GlobalHotKey.openSettings.modifiers, UInt32(optionKey))
   }
 
   func testPanelSizeStoreUsesDefaultAndPersistsOnlySize() {

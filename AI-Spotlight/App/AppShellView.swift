@@ -760,6 +760,7 @@ private struct KeyboardShortcutsHelpView: View {
           Text("Anywhere on your Mac")
             .font(.headline)
           shortcut("Show or hide AI Spotlight", keys: "⌥ Space")
+          shortcut("Open Advanced Settings", keys: "⌥ S")
 
           Divider()
 

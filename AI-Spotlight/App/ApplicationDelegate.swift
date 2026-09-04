@@ -4,7 +4,7 @@ import AppKit
 final class ApplicationDelegate: NSObject, NSApplicationDelegate {
   private var menuBarController: MenuBarController?
   private var panelController: SpotlightPanelController?
-  private var globalHotKeyMonitor: GlobalHotKeyMonitor?
+  private var globalHotKeyMonitors: [GlobalHotKeyMonitor] = []
   private var settingsWindowController: SettingsWindowController?
 
   override init() {
@@ -35,25 +35,36 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     let menuBarController = MenuBarController(panelController: panelController)
     menuBarController.install()
 
-    let globalHotKeyMonitor = GlobalHotKeyMonitor {
+    let togglePanelHotKeyMonitor = GlobalHotKeyMonitor(hotKey: .togglePanel) {
       panelController.toggle()
     }
     do {
-      try globalHotKeyMonitor.start()
+      try togglePanelHotKeyMonitor.start()
+      globalHotKeyMonitors.append(togglePanelHotKeyMonitor)
     } catch {
       NSLog("Unable to register the AI Spotlight shortcut: %@", error.localizedDescription)
     }
 
+    let openSettingsHotKeyMonitor = GlobalHotKeyMonitor(hotKey: .openSettings) { [weak self] in
+      self?.openSettings()
+    }
+    do {
+      try openSettingsHotKeyMonitor.start()
+      globalHotKeyMonitors.append(openSettingsHotKeyMonitor)
+    } catch {
+      NSLog("Unable to register the AI Spotlight settings shortcut: %@", error.localizedDescription)
+    }
+
     self.panelController = panelController
     self.menuBarController = menuBarController
-    self.globalHotKeyMonitor = globalHotKeyMonitor
 
     panelController.show()
   }
 
   func applicationWillTerminate(_ notification: Notification) {
     NotificationCenter.default.removeObserver(self)
-    globalHotKeyMonitor?.stop()
+    globalHotKeyMonitors.forEach { $0.stop() }
+    globalHotKeyMonitors.removeAll()
   }
 
   @objc func openSettings() {

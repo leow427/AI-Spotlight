@@ -1,16 +1,44 @@
 @preconcurrency import Carbon
 import Foundation
 
+enum GlobalHotKey: CaseIterable {
+  case togglePanel
+  case openSettings
+
+  var keyCode: UInt32 {
+    switch self {
+    case .togglePanel: UInt32(kVK_Space)
+    case .openSettings: UInt32(kVK_ANSI_S)
+    }
+  }
+
+  var modifiers: UInt32 { UInt32(optionKey) }
+
+  fileprivate var identifier: UInt32 {
+    switch self {
+    case .togglePanel: 1
+    case .openSettings: 2
+    }
+  }
+
+  fileprivate var displayName: String {
+    switch self {
+    case .togglePanel: "Option-Space"
+    case .openSettings: "Option-S"
+    }
+  }
+}
+
 enum GlobalHotKeyError: LocalizedError {
   case eventHandlerInstallationFailed(OSStatus)
-  case registrationFailed(OSStatus)
+  case registrationFailed(GlobalHotKey, OSStatus)
 
   var errorDescription: String? {
     switch self {
     case .eventHandlerInstallationFailed(let status):
       "The keyboard event handler could not be installed (status \(status))."
-    case .registrationFailed(let status):
-      "Option-Space could not be registered (status \(status))."
+    case .registrationFailed(let hotKey, let status):
+      "\(hotKey.displayName) could not be registered (status \(status))."
     }
   }
 }
@@ -19,13 +47,17 @@ enum GlobalHotKeyError: LocalizedError {
 // The unchecked conformance documents that the mutable registration references stay there.
 final class GlobalHotKeyMonitor: @unchecked Sendable {
   private static let signature: OSType = 0x4149_5350 // AISP
-  private static let identifier: UInt32 = 1
 
+  private let hotKeyDefinition: GlobalHotKey
   private let handler: @MainActor () -> Void
   private var eventHandler: EventHandlerRef?
   private var hotKey: EventHotKeyRef?
 
-  init(handler: @escaping @MainActor () -> Void) {
+  init(
+    hotKey: GlobalHotKey,
+    handler: @escaping @MainActor () -> Void
+  ) {
+    self.hotKeyDefinition = hotKey
     self.handler = handler
   }
 
@@ -50,11 +82,11 @@ final class GlobalHotKeyMonitor: @unchecked Sendable {
 
     let hotKeyID = EventHotKeyID(
       signature: Self.signature,
-      id: Self.identifier
+      id: hotKeyDefinition.identifier
     )
     let registrationStatus = RegisterEventHotKey(
-      UInt32(kVK_Space),
-      UInt32(optionKey),
+      hotKeyDefinition.keyCode,
+      hotKeyDefinition.modifiers,
       hotKeyID,
       GetApplicationEventTarget(),
       0,
@@ -62,7 +94,7 @@ final class GlobalHotKeyMonitor: @unchecked Sendable {
     )
     guard registrationStatus == noErr else {
       stop()
-      throw GlobalHotKeyError.registrationFailed(registrationStatus)
+      throw GlobalHotKeyError.registrationFailed(hotKeyDefinition, registrationStatus)
     }
   }
 
@@ -90,7 +122,7 @@ final class GlobalHotKeyMonitor: @unchecked Sendable {
     )
     guard status == noErr,
           hotKeyID.signature == Self.signature,
-          hotKeyID.id == Self.identifier else {
+          hotKeyID.id == hotKeyDefinition.identifier else {
       return OSStatus(eventNotHandledErr)
     }
 
