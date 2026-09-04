@@ -18,18 +18,21 @@ final class LocalInferenceTests: XCTestCase {
     )
 
     XCTAssertEqual(installed.displayName, "Fixture")
-    XCTAssertEqual(installed.fileURL.lastPathComponent, "Fixture-Model.gguf")
+    XCTAssertEqual(installed.fileURL.pathExtension, "gguf")
+    XCTAssertEqual(installed.fileURL.deletingLastPathComponent(), modelsURL)
     XCTAssertEqual(try Data(contentsOf: installed.fileURL), Data("GGUF fixture".utf8))
     XCTAssertEqual(store.installedModel(), installed)
 
     try Data("replacement fixture".utf8).write(to: sourceURL)
-    _ = try store.install(
+    let replacement = try store.install(
       LocalModel(id: "Fixture Model", displayName: "Replacement", fileURL: sourceURL)
     )
     XCTAssertEqual(
-      try Data(contentsOf: installed.fileURL),
+      try Data(contentsOf: replacement.fileURL),
       Data("replacement fixture".utf8)
     )
+    XCTAssertNotEqual(replacement.fileURL, installed.fileURL)
+    XCTAssertEqual(store.installedModels().count, 1)
     XCTAssertEqual(store.installedModel()?.displayName, "Replacement")
 
     let secondSourceURL = root.appending(path: "second.gguf")
