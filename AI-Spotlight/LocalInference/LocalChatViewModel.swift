@@ -12,6 +12,18 @@ final class LocalChatViewModel: ObservableObject {
     case failed(String)
   }
 
+  struct ActiveRequest: Equatable {
+    let id: UUID
+    let route: Route
+    let modelDisplayName: String
+
+    var displayName: String {
+      if route.mode == .local { return "Local · \(modelDisplayName)" }
+      let provider = CloudProviderID(rawValue: route.providerID)?.displayName ?? route.providerID
+      return "Cloud · \(provider) · \(modelDisplayName)"
+    }
+  }
+
   typealias Sleep = @Sendable (Duration) async throws -> Void
 
   @Published private(set) var sessions: [ChatSession]
@@ -19,6 +31,8 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var installedModel: LocalModel?
   @Published private(set) var installedModels: [LocalModel] = []
   @Published private(set) var contextNotice: String?
+  @Published private(set) var activeRequest: ActiveRequest?
+  @Published private(set) var autoRouteDecision: AutoRouter.Decision?
   @Published private(set) var state: State = .idle
 
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
@@ -29,9 +43,11 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   var isBusy: Bool {
+    // A persistence error must not make a live request accept another submission.
+    if activeRequest != nil || generationTask != nil { return true }
     switch state {
-    case .installing, .downloading, .preparing, .streaming: true
-    case .idle, .failed: false
+    case .installing, .downloading, .preparing, .streaming: return true
+    case .idle, .failed: return false
     }
   }
 
@@ -116,11 +132,14 @@ final class LocalChatViewModel: ObservableObject {
 
   func selectModel(id: String) {
     guard !isBusy else { return }
+    // Keep submission blocked until the engine and the displayed selection agree.
+    state = .preparing
     Task { [weak self, engine] in
       do {
         try await engine.selectModel(id: id)
         guard let self else { return }
         await self.refreshInstalledModel()
+        self.state = .idle
       } catch {
         self?.state = .failed(error.localizedDescription)
       }
@@ -134,19 +153,37 @@ final class LocalChatViewModel: ObservableObject {
     let responseID = UUID()
     let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
     let request = LocalModelRequest(messages: messages + [userMessage])
+    let active = beginGeneration(
+      route: Route(mode: .local, providerID: "local", modelID: installedModel?.id ?? "", usesNetwork: false),
+      modelDisplayName: installedModel?.displayName ?? "Local model"
+    )
     contextNotice = nil
     state = .preparing
 
     generationTask = Task { [weak self, engine] in
       do {
+        try Task.checkCancellation()
+        let model = await engine.installedModel()
+        try Task.checkCancellation()
+        guard let owner = self, owner.activeRequest?.id == active.id else { return }
+        guard let model else { throw LocalInferenceError.noModelInstalled }
+        // Resolve the engine's selection before preparation, including when the
+        // initial model-library refresh has not finished yet.
+        owner.activeRequest = ActiveRequest(
+          id: active.id,
+          route: Route(mode: .local, providerID: "local", modelID: model.id, usesNetwork: false),
+          modelDisplayName: model.displayName
+        )
         let prepared = try await engine.prepare(request)
         try Task.checkCancellation()
-        guard let owner = self else { return }
+        guard owner.activeRequest?.id == active.id else { return }
         let sessionID = owner.ensureSelectedSession()
         owner.contextNotice = prepared.notice
         owner.append(userMessage, to: sessionID)
         owner.append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
         onAccepted()
+        try Task.checkCancellation()
+        guard owner.activeRequest?.id == active.id else { return }
         let boundedRequest = LocalModelRequest(
           messages: prepared.messages,
           maximumTokenCount: request.maximumTokenCount,
@@ -154,19 +191,16 @@ final class LocalChatViewModel: ObservableObject {
         )
         for try await fragment in engine.stream(boundedRequest) {
           try Task.checkCancellation()
-          guard let self else { return }
+          guard let self, self.activeRequest?.id == active.id else { return }
           self.state = .streaming
           self.append(fragment, to: responseID, in: sessionID)
         }
-        guard !Task.isCancelled, let self else { return }
-        self.state = .idle
-        self.generationTask = nil
+        try Task.checkCancellation()
+        self?.finishGeneration(id: active.id)
       } catch is CancellationError {
-        self?.finishGeneration()
+        self?.finishGeneration(id: active.id)
       } catch {
-        guard let self else { return }
-        self.state = .failed(error.localizedDescription)
-        self.generationTask = nil
+        self?.finishGeneration(id: active.id, error: error)
       }
     }
   }
@@ -200,18 +234,20 @@ final class LocalChatViewModel: ObservableObject {
     }
     let sessionID = ensureSelectedSession()
     let responseID = UUID()
+    let active = beginGeneration(route: route, modelDisplayName: trimmedModelID)
     append(userMessage, to: sessionID)
     append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
     contextNotice = prepared.notice
     state = .preparing
-    onAccepted()
     let provider = cloudProviders.provider(for: providerID)
     let request = ChatRequest(sessionID: sessionID, messages: prepared.messages, route: route)
     generationTask = Task { [weak self] in
       do {
+        try Task.checkCancellation()
+        guard self?.activeRequest?.id == active.id else { return }
         for try await event in provider.stream(request) {
           try Task.checkCancellation()
-          guard let self else { return }
+          guard let self, self.activeRequest?.id == active.id else { return }
           switch event {
           case .token(let fragment):
             self.state = .streaming
@@ -220,29 +256,65 @@ final class LocalChatViewModel: ObservableObject {
             break
           }
         }
-        guard !Task.isCancelled, let self else { return }
-        self.state = .idle
-        self.generationTask = nil
+        try Task.checkCancellation()
+        self?.finishGeneration(id: active.id)
       } catch is CancellationError {
-        self?.finishGeneration()
+        self?.finishGeneration(id: active.id)
       } catch {
-        guard let self else { return }
-        self.state = .failed(error.localizedDescription)
-        self.generationTask = nil
+        self?.finishGeneration(id: active.id, error: error)
       }
+    }
+    // Install the handle before calling out: acceptance may synchronously Stop or start a new chat.
+    onAccepted()
+  }
+
+  func submitAuto(
+    _ prompt: String,
+    cloud: AutoRouter.CloudConfiguration?,
+    onAccepted: @escaping @MainActor () -> Void = {}
+  ) {
+    guard !isBusy, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    state = .idle
+    contextNotice = nil
+    let decision = AutoRouter.shouldRun(for: .auto, cloud: cloud)
+      ? AutoRouter.decide(AutoRouter.Request(
+        selectedMode: .auto, prompt: prompt, contextMessages: messages,
+        localModel: installedModel, cloud: cloud
+      ))
+      : AutoRouter.localFallback(localModel: installedModel)
+    autoRouteDecision = decision
+    guard let route = decision.route else { return }
+    switch route.mode {
+    case .local:
+      submit(prompt, onAccepted: onAccepted)
+    case .cloud:
+      guard let provider = CloudProviderID(rawValue: route.providerID) else { return }
+      submitCloud(prompt, provider: provider, modelID: route.modelID, onAccepted: onAccepted)
+    case .auto:
+      break
     }
   }
 
-  func stopStreaming() {
-    guard state == .preparing || state == .streaming else { return }
-    generationTask?.cancel()
+  func clearAutoRouteDecision() {
+    autoRouteDecision = nil
+  }
+
+  /// The returned consumer task can be awaited to observe its shutdown.
+  @discardableResult
+  func stopStreaming() -> Task<Void, Never>? {
+    guard let task = generationTask else { return nil }
+    // Revoke ownership before cancellation can release any queued events or cleanup.
+    activeRequest = nil
     generationTask = nil
     state = .idle
+    task.cancel()
+    return task
   }
 
   func newChat() {
     stopStreaming()
     contextNotice = nil
+    autoRouteDecision = nil
     let session = ChatSession()
     sessions.append(session)
     selectedSessionID = session.id
@@ -332,8 +404,16 @@ final class LocalChatViewModel: ObservableObject {
     installationTask = nil
   }
 
-  private func finishGeneration() {
-    state = .idle
+  private func beginGeneration(route: Route, modelDisplayName: String) -> ActiveRequest {
+    let request = ActiveRequest(id: UUID(), route: route, modelDisplayName: modelDisplayName)
+    activeRequest = request
+    return request
+  }
+
+  private func finishGeneration(id: UUID, error: Error? = nil) {
+    guard activeRequest?.id == id else { return }
+    activeRequest = nil
     generationTask = nil
+    state = error.map { .failed($0.localizedDescription) } ?? .idle
   }
 }

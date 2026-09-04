@@ -11,7 +11,6 @@ struct AppShellView: View {
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
   @State private var selectedMode = ChatMode.auto
-  @State private var autoRouteDecision: AutoRouter.Decision?
   @FocusState private var isComposerFocused: Bool
 
   init(
@@ -158,7 +157,7 @@ struct AppShellView: View {
       await localChat.refreshInstalledModel()
     }
     .onChange(of: selectedMode, initial: true) { _, mode in
-      autoRouteDecision = nil
+      localChat.clearAutoRouteDecision()
       guard mode == .cloud || mode == .auto else { return }
       Task {
         if cloudSettings.preferredProvider == .chatGPT {
@@ -212,6 +211,7 @@ struct AppShellView: View {
         Label(selectedMode.displayName, systemImage: selectedMode.systemImage)
       }
       .menuStyle(.borderlessButton)
+      .help("Mode changes apply to your next request.")
       .fixedSize()
     }
     .padding(.horizontal, 14)
@@ -275,6 +275,25 @@ struct AppShellView: View {
 
   @ViewBuilder
   private var routeStatus: some View {
+    if let request = localChat.activeRequest {
+      HStack(spacing: 8) {
+        ProgressView()
+          .controlSize(.small)
+        Text("\(localChat.state == .streaming ? "Streaming" : "Preparing") · \(request.displayName)")
+          .lineLimit(2)
+        Button("Stop") { localChat.stopStreaming() }
+          .buttonStyle(.plain)
+      }
+      .font(.caption)
+      .foregroundStyle(.secondary)
+      .frame(maxWidth: .infinity, alignment: .trailing)
+    } else {
+      inactiveRouteStatus
+    }
+  }
+
+  @ViewBuilder
+  private var inactiveRouteStatus: some View {
     switch selectedMode {
     case .local:
       HStack(spacing: 8) {
@@ -368,7 +387,7 @@ struct AppShellView: View {
         Image(systemName: "exclamationmark.triangle")
         Text(message)
           .lineLimit(2)
-      } else if let decision = autoRouteDecision {
+      } else if let decision = localChat.autoRouteDecision {
         if let route = decision.route {
           Image(systemName: route.mode == .local ? "laptopcomputer" : "cloud")
           Text("Auto · \(route.mode.displayName) · \(decision.modelDisplayName ?? route.modelID)")
@@ -409,6 +428,7 @@ struct AppShellView: View {
       }
     }
     .pickerStyle(.segmented)
+    .help("Mode changes apply to your next request.")
     .labelsHidden()
     .controlSize(.small)
     .frame(width: 190)
@@ -424,7 +444,7 @@ struct AppShellView: View {
         }
 
       VStack(alignment: .leading, spacing: 8) {
-        Text("Mode & Model")
+        Text(localChat.activeRequest == nil ? "Mode & Model" : "Next request · Mode & Model")
           .font(.headline)
           .padding(.bottom, 2)
 
@@ -606,31 +626,7 @@ struct AppShellView: View {
         onAccepted: accepted
       )
     case .auto:
-      let request = AutoRouter.Request(
-        selectedMode: .auto,
-        prompt: prompt,
-        contextMessages: localChat.messages,
-        localModel: localChat.installedModel,
-        cloud: autoCloudConfiguration
-      )
-      let decision: AutoRouter.Decision
-      if AutoRouter.shouldRun(for: .auto, cloud: autoCloudConfiguration) {
-        decision = AutoRouter.decide(request)
-      } else {
-        decision = AutoRouter.localFallback(localModel: localChat.installedModel)
-      }
-      autoRouteDecision = decision
-
-      guard let route = decision.route else { return }
-      switch route.mode {
-      case .local:
-        localChat.submit(prompt, onAccepted: accepted)
-      case .cloud:
-        guard let cloud = autoCloudConfiguration else { return }
-        localChat.submitCloud(prompt, provider: cloud.provider, modelID: cloud.modelID, onAccepted: accepted)
-      case .auto:
-        break
-      }
+      localChat.submitAuto(prompt, cloud: autoCloudConfiguration, onAccepted: accepted)
     }
   }
 

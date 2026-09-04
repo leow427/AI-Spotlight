@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B30000000000000000000002 /* RequestLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000001 /* RequestLifecycleTests.swift */; };
 		A10000000000000000000001 /* AI_SpotlightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* AI_SpotlightApp.swift */; };
 		A10000000000000000000002 /* ApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ApplicationDelegate.swift */; };
 		A10000000000000000000003 /* AppCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* AppCommand.swift */; };
@@ -56,6 +57,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		B30000000000000000000001 /* RequestLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestLifecycleTests.swift; sourceTree = "<group>"; };
 		A20000000000000000000001 /* AI_SpotlightApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_SpotlightApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationDelegate.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* AppCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommand.swift; sourceTree = "<group>"; };
@@ -164,6 +166,7 @@
 		A70000000000000000000005 /* AI-SpotlightTests */ = {
 			isa = PBXGroup;
 			children = (
+				B30000000000000000000001 /* RequestLifecycleTests.swift */,
 				C20000000000000000000001 /* ChatContextTests.swift */,
 				A20000000000000000000007 /* AppCommandTests.swift */,
 				D20000000000000000000005 /* LocalInferenceTests.swift */,
@@ -354,6 +357,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B30000000000000000000002 /* RequestLifecycleTests.swift in Sources */,
 				C20000000000000000000002 /* ChatContextTests.swift in Sources */,
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
 				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
