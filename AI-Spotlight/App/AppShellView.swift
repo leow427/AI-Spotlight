@@ -7,6 +7,8 @@ struct AppShellView: View {
   @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
   @State private var draft = ""
+  @State private var isSearchEnabled = false
+  @ObservedObject private var searchSettings = WebSearchSettings.shared
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
@@ -92,6 +94,18 @@ struct AppShellView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
             }
+            if isSearchEnabled {
+              HStack(spacing: 6) {
+                Text(searchSettings.hasAPIKey
+                  ? "Web Search · Your question is sent to Brave."
+                  : "Add a Brave Search API key to search the web.")
+                if !searchSettings.hasAPIKey {
+                  Button("Settings", action: openSettings).buttonStyle(.plain)
+                }
+              }
+              .font(.caption)
+              .foregroundStyle(.secondary)
+            }
             compactModeControls
             composer
           }
@@ -111,6 +125,7 @@ struct AppShellView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       draft = ""
+      isSearchEnabled = false
       localChat.newChat()
       isModePalettePresented = false
       isComposerFocused = true
@@ -156,6 +171,11 @@ struct AppShellView: View {
     .task {
       await localChat.refreshInstalledModel()
     }
+    .onChange(of: draft) { _, value in
+      guard let remainder = SearchCommand.remainder(in: value) else { return }
+      isSearchEnabled = true
+      draft = remainder
+    }
     .onChange(of: selectedMode, initial: true) { _, mode in
       localChat.clearAutoRouteDecision()
       guard mode == .cloud || mode == .auto else { return }
@@ -184,13 +204,7 @@ struct AppShellView: View {
 
   private var composer: some View {
     HStack(spacing: 10) {
-      Button {
-      } label: {
-        Image(systemName: "plus")
-      }
-      .buttonStyle(.plain)
-      .accessibilityLabel("Add attachment")
-      .disabled(true)
+      WebSearchControls(isEnabled: $isSearchEnabled, isBusy: localChat.isBusy, openSettings: openSettings)
 
       TextField("Ask anything", text: $draft, axis: .vertical)
         .textFieldStyle(.plain)
@@ -279,7 +293,7 @@ struct AppShellView: View {
       HStack(spacing: 8) {
         ProgressView()
           .controlSize(.small)
-        Text("\(localChat.state == .streaming ? "Streaming" : "Preparing") · \(request.displayName)")
+        Text("\(requestPhase) · \(request.displayName)")
           .lineLimit(2)
         Button("Stop") { localChat.stopStreaming() }
           .buttonStyle(.plain)
@@ -289,6 +303,14 @@ struct AppShellView: View {
       .frame(maxWidth: .infinity, alignment: .trailing)
     } else {
       inactiveRouteStatus
+    }
+  }
+
+  private var requestPhase: String {
+    switch localChat.state {
+    case .searching: "Searching with Brave"
+    case .streaming: "Streaming"
+    default: "Preparing"
     }
   }
 
@@ -306,7 +328,7 @@ struct AppShellView: View {
           ProgressView(value: progress.fractionCompleted)
             .frame(width: 72)
           Text("Downloading \(progress.fractionCompleted, format: .percent.precision(.fractionLength(0)))")
-        case .preparing:
+        case .preparing, .searching:
           ProgressView()
             .controlSize(.small)
           Text("Loading local model…")
@@ -350,7 +372,7 @@ struct AppShellView: View {
           Button("Advanced Settings", action: openSettings)
         } else {
           switch localChat.state {
-          case .preparing:
+          case .preparing, .searching:
             ProgressView()
               .controlSize(.small)
             Text("Connecting to \(cloudSettings.preferredProvider.displayName)…")
@@ -515,6 +537,11 @@ struct AppShellView: View {
   }
 
   private var welcomeSubtitle: String {
+    if isSearchEnabled {
+      return selectedMode == .local
+        ? "Brave finds web sources. Your local model writes the answer on this Mac."
+        : "Brave finds web sources for your selected model to answer with citations."
+    }
     if selectedMode == .local {
       return localChat.installedModel == nil
         ? "Choose a GGUF model once, then chat completely offline."
@@ -622,16 +649,17 @@ struct AppShellView: View {
     }
     switch selectedMode {
     case .local:
-      localChat.submit(prompt, onAccepted: accepted)
+      localChat.submit(prompt, searchEnabled: isSearchEnabled, onAccepted: accepted)
     case .cloud:
       localChat.submitCloud(
         prompt,
         provider: cloudSettings.preferredProvider,
         modelID: cloudSettings.preferredModelID,
+        searchEnabled: isSearchEnabled,
         onAccepted: accepted
       )
     case .auto:
-      localChat.submitAuto(prompt, cloud: autoCloudConfiguration, onAccepted: accepted)
+      localChat.submitAuto(prompt, cloud: autoCloudConfiguration, searchEnabled: isSearchEnabled, onAccepted: accepted)
     }
   }
 
@@ -671,6 +699,23 @@ private struct LocalMessageView: View {
       } else {
         Text(verbatim: message.content)
           .textSelection(.enabled)
+      }
+      if let sources = message.searchSources, !sources.isEmpty {
+        VStack(alignment: .leading, spacing: 5) {
+          Text("Sources · Brave Search")
+            .font(.caption.weight(.medium))
+            .foregroundStyle(.secondary)
+          ForEach(sources) { source in
+            Link(destination: source.url) {
+              Label(source.title.isEmpty ? (source.url.host ?? source.url.absoluteString) : source.title,
+                    systemImage: "arrow.up.right")
+                .lineLimit(1)
+            }
+            .help(source.url.absoluteString)
+          }
+        }
+        .font(.caption)
+        .padding(.top, 6)
       }
     }
     .frame(maxWidth: .infinity, alignment: .leading)
@@ -716,6 +761,7 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Next recent chat", keys: "⌃ Tab")
           shortcut("Open Settings", keys: "⌘ ,")
           shortcut("Send from the message field", keys: "Return")
+          shortcut("Enable Web Search", keys: "/search")
 
           Divider()
 
@@ -865,6 +911,8 @@ struct SettingsView: View {
           Text(accountError).font(.caption).foregroundStyle(.red)
         }
       }
+
+      WebSearchSettingsSection(settings: .shared)
 
       Section("Advanced Cloud Settings") {
         Picker("Preferred provider", selection: $settings.preferredProvider) {

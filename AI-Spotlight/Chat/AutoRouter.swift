@@ -29,7 +29,7 @@ struct AutoRouter: Sendable {
       case .noLocalModel:
         "Choose a local model or connect Cloud before using Auto."
       case .unavailableCapability(.webSearch):
-        "This request needs a web-capable cloud model, which is not configured."
+        "Enable Web Search with the search icon or /search to look this up with Brave."
       case .unavailableCapability(.coding):
         "No available model is configured for this coding request."
       case .unavailableCapability(.advancedReasoning):
@@ -87,6 +87,7 @@ struct AutoRouter: Sendable {
 
   struct Request: Equatable, Sendable {
     let selectedMode: ChatMode
+    let webSearchEnabled: Bool
     let prompt: String
     let contextMessages: [ChatMessage]
     let localModel: LocalModel?
@@ -95,6 +96,7 @@ struct AutoRouter: Sendable {
 
     init(
       selectedMode: ChatMode,
+      webSearchEnabled: Bool = false,
       prompt: String,
       contextMessages: [ChatMessage],
       localModel: LocalModel?,
@@ -102,6 +104,7 @@ struct AutoRouter: Sendable {
       cloud: CloudConfiguration?
     ) {
       self.selectedMode = selectedMode
+      self.webSearchEnabled = webSearchEnabled
       self.prompt = prompt
       self.contextMessages = contextMessages
       self.localModel = localModel
@@ -136,6 +139,15 @@ struct AutoRouter: Sendable {
   }
 
   static func decide(_ request: Request) -> Decision {
+    let decision = decideModel(request)
+    guard request.webSearchEnabled, let route = decision.route else { return decision }
+    return Decision(
+      route: Route(mode: route.mode, providerID: route.providerID, modelID: route.modelID, usesNetwork: true),
+      modelDisplayName: decision.modelDisplayName, reason: decision.reason, limitation: decision.limitation
+    )
+  }
+
+  private static func decideModel(_ request: Request) -> Decision {
     switch request.selectedMode {
     case .local:
       guard let localModel = request.localModel else {
@@ -173,7 +185,7 @@ struct AutoRouter: Sendable {
   ) -> Decision {
     let prompt = request.prompt.lowercased()
 
-    if requiresWebSearch(prompt) {
+    if requiresWebSearch(prompt), !request.webSearchEnabled {
       guard cloud.capabilities.supportsWebSearch else {
         return Decision(
           route: nil,

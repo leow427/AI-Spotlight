@@ -10,6 +10,12 @@ struct CloudProviderRegistry: Sendable {
   let anthropic: any ChatProvider
   let chatGPT: any ChatProvider
 
+  init(openAI: any ChatProvider, anthropic: any ChatProvider, chatGPT: any ChatProvider) {
+    self.openAI = openAI
+    self.anthropic = anthropic
+    self.chatGPT = chatGPT
+  }
+
   init(
     credentialStore: any CloudCredentialStore,
     transport: any CloudNetworkTransport,
@@ -117,7 +123,10 @@ struct OpenAIResponsesClient: ChatProvider {
     var didComplete = false
 
     for try await networkEvent in transport.stream(for: request) {
-      try Task.checkCancellation()
+      // If cancellation races a buffered event, advance the cancelled iterator
+      // once more so AsyncThrowingStream terminates its underlying producer.
+      // Throwing here could leave a retained network stream running.
+      if Task.isCancelled { continue }
       switch networkEvent {
       case .response(let responseStatusCode):
         statusCode = responseStatusCode
@@ -133,6 +142,7 @@ struct OpenAIResponsesClient: ChatProvider {
       }
     }
 
+    try Task.checkCancellation()
     guard let statusCode else { throw CloudProviderError.invalidResponse }
     guard (200...299).contains(statusCode) else {
       throw cloudHTTPError(provider: .openAI, statusCode: statusCode, data: errorBody)
@@ -272,7 +282,10 @@ struct AnthropicMessagesClient: ChatProvider {
     var didComplete = false
 
     for try await networkEvent in transport.stream(for: request) {
-      try Task.checkCancellation()
+      // If cancellation races a buffered event, advance the cancelled iterator
+      // once more so AsyncThrowingStream terminates its underlying producer.
+      // Throwing here could leave a retained network stream running.
+      if Task.isCancelled { continue }
       switch networkEvent {
       case .response(let responseStatusCode):
         statusCode = responseStatusCode
@@ -288,6 +301,7 @@ struct AnthropicMessagesClient: ChatProvider {
       }
     }
 
+    try Task.checkCancellation()
     guard let statusCode else { throw CloudProviderError.invalidResponse }
     guard (200...299).contains(statusCode) else {
       throw cloudHTTPError(provider: .anthropic, statusCode: statusCode, data: errorBody)

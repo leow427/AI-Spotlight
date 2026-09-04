@@ -8,6 +8,7 @@ final class LocalChatViewModel: ObservableObject {
     case installing
     case downloading(ModelDownloadProgress)
     case preparing
+    case searching
     case streaming
     case failed(String)
   }
@@ -46,12 +47,13 @@ final class LocalChatViewModel: ObservableObject {
     // A persistence error must not make a live request accept another submission.
     if activeRequest != nil || generationTask != nil { return true }
     switch state {
-    case .installing, .downloading, .preparing, .streaming: return true
+    case .installing, .downloading, .preparing, .searching, .streaming: return true
     case .idle, .failed: return false
     }
   }
 
   private let engine: any LocalModelEngine
+  private let webSearch: any WebSearchProvider
   private let cloudProviders: CloudProviderRegistry
   private let sessionStore: ChatSessionStore
   private let idleUnloadDelay: Duration
@@ -63,11 +65,13 @@ final class LocalChatViewModel: ObservableObject {
   init(
     engine: any LocalModelEngine,
     cloudProviders: CloudProviderRegistry = .live,
+    webSearch: any WebSearchProvider = BraveSearchClient(),
     sessionStore: ChatSessionStore = ChatSessionStore(),
     idleUnloadDelay: Duration = .seconds(300),
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
   ) {
     self.engine = engine
+    self.webSearch = webSearch
     self.cloudProviders = cloudProviders
     self.sessionStore = sessionStore
     self.idleUnloadDelay = idleUnloadDelay
@@ -146,7 +150,7 @@ final class LocalChatViewModel: ObservableObject {
     }
   }
 
-  func submit(_ prompt: String, onAccepted: @escaping @MainActor () -> Void = {}) {
+  func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !trimmedPrompt.isEmpty, !isBusy else { return }
     idleUnloadTask?.cancel()
@@ -154,7 +158,7 @@ final class LocalChatViewModel: ObservableObject {
     let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
     let request = LocalModelRequest(messages: messages + [userMessage])
     let active = beginGeneration(
-      route: Route(mode: .local, providerID: "local", modelID: installedModel?.id ?? "", usesNetwork: false),
+      route: Route(mode: .local, providerID: "local", modelID: installedModel?.id ?? "", usesNetwork: searchEnabled),
       modelDisplayName: installedModel?.displayName ?? "Local model"
     )
     contextNotice = nil
@@ -171,16 +175,31 @@ final class LocalChatViewModel: ObservableObject {
         // initial model-library refresh has not finished yet.
         owner.activeRequest = ActiveRequest(
           id: active.id,
-          route: Route(mode: .local, providerID: "local", modelID: model.id, usesNetwork: false),
+          route: Route(mode: .local, providerID: "local", modelID: model.id, usesNetwork: searchEnabled),
           modelDisplayName: model.displayName
         )
-        let prepared = try await engine.prepare(request)
+        var prepared = try await engine.prepare(request)
+        var sources: [WebSearchSource]?
+        if searchEnabled {
+          try Task.checkCancellation()
+          guard owner.activeRequest?.id == active.id else { return }
+          owner.state = .searching
+          let results = try await owner.webSearch.search(trimmedPrompt, maximumTokens: 1_024)
+          try Task.checkCancellation()
+          guard owner.activeRequest?.id == active.id else { return }
+          owner.state = .preparing
+          let grounded = try await WebSearchContext.prepare(messages: request.messages, results: results) {
+            try await engine.prepare(LocalModelRequest(messages: $0))
+          }
+          prepared = grounded.prepared
+          sources = grounded.sources
+        }
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
         let sessionID = owner.ensureSelectedSession()
         owner.contextNotice = prepared.notice
         owner.append(userMessage, to: sessionID)
-        owner.append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
+        owner.append(ChatMessage(id: responseID, role: .assistant, content: "", searchSources: sources), to: sessionID)
         onAccepted()
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
@@ -209,6 +228,7 @@ final class LocalChatViewModel: ObservableObject {
     _ prompt: String,
     provider providerID: CloudProviderID,
     modelID: String,
+    searchEnabled: Bool = false,
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -230,6 +250,12 @@ final class LocalChatViewModel: ObservableObject {
       ))
     } catch {
       state = .failed(error.localizedDescription)
+      return
+    }
+    if searchEnabled {
+      submitCloudWithSearch(
+        userMessage, route: route, onAccepted: onAccepted
+      )
       return
     }
     let sessionID = ensureSelectedSession()
@@ -268,17 +294,66 @@ final class LocalChatViewModel: ObservableObject {
     onAccepted()
   }
 
+  private func submitCloudWithSearch(
+    _ userMessage: ChatMessage, route: Route, onAccepted: @escaping @MainActor () -> Void
+  ) {
+    let history = messages + [userMessage]
+    let active = beginGeneration(route: route, modelDisplayName: route.modelID)
+    state = .searching
+    generationTask = Task { [weak self] in
+      do {
+        try Task.checkCancellation()
+        guard let owner = self, owner.activeRequest?.id == active.id else { return }
+        let results = try await owner.webSearch.search(userMessage.content, maximumTokens: 4_096)
+        try Task.checkCancellation()
+        guard owner.activeRequest?.id == active.id else { return }
+        let grounded = try await WebSearchContext.prepare(messages: history, results: results) {
+          try CloudContext.prepare(ChatRequest(sessionID: UUID(), messages: $0, route: route))
+        }
+        try Task.checkCancellation()
+        guard owner.activeRequest?.id == active.id,
+              let providerID = CloudProviderID(rawValue: route.providerID) else { return }
+        let sessionID = owner.ensureSelectedSession()
+        let responseID = UUID()
+        owner.contextNotice = grounded.prepared.notice
+        owner.state = .preparing
+        owner.append(userMessage, to: sessionID)
+        owner.append(ChatMessage(id: responseID, role: .assistant, content: "", searchSources: grounded.sources), to: sessionID)
+        onAccepted()
+        try Task.checkCancellation()
+        guard owner.activeRequest?.id == active.id else { return }
+        let request = ChatRequest(sessionID: sessionID, messages: grounded.prepared.messages, route: route)
+        let provider = owner.cloudProviders.provider(for: providerID)
+        for try await event in provider.stream(request) {
+          try Task.checkCancellation()
+          guard owner.activeRequest?.id == active.id else { return }
+          if case .token(let fragment) = event {
+            owner.state = .streaming
+            owner.append(fragment, to: responseID, in: sessionID)
+          }
+        }
+        try Task.checkCancellation()
+        owner.finishGeneration(id: active.id)
+      } catch is CancellationError {
+        self?.finishGeneration(id: active.id)
+      } catch {
+        self?.finishGeneration(id: active.id, error: error)
+      }
+    }
+  }
+
   func submitAuto(
     _ prompt: String,
     cloud: AutoRouter.CloudConfiguration?,
+    searchEnabled: Bool = false,
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
     guard !isBusy, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     state = .idle
     contextNotice = nil
-    let decision = AutoRouter.shouldRun(for: .auto, cloud: cloud)
+    let decision = (searchEnabled || AutoRouter.shouldRun(for: .auto, cloud: cloud))
       ? AutoRouter.decide(AutoRouter.Request(
-        selectedMode: .auto, prompt: prompt, contextMessages: messages,
+        selectedMode: .auto, webSearchEnabled: searchEnabled, prompt: prompt, contextMessages: messages,
         localModel: installedModel, cloud: cloud
       ))
       : AutoRouter.localFallback(localModel: installedModel)
@@ -286,10 +361,10 @@ final class LocalChatViewModel: ObservableObject {
     guard let route = decision.route else { return }
     switch route.mode {
     case .local:
-      submit(prompt, onAccepted: onAccepted)
+      submit(prompt, searchEnabled: searchEnabled, onAccepted: onAccepted)
     case .cloud:
       guard let provider = CloudProviderID(rawValue: route.providerID) else { return }
-      submitCloud(prompt, provider: provider, modelID: route.modelID, onAccepted: onAccepted)
+      submitCloud(prompt, provider: provider, modelID: route.modelID, searchEnabled: searchEnabled, onAccepted: onAccepted)
     case .auto:
       break
     }

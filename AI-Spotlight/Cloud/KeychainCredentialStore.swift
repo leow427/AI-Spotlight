@@ -9,7 +9,11 @@ struct KeychainCredentialStore: CloudCredentialStore {
   }
 
   func apiKey(for provider: CloudProviderID) throws -> String? {
-    var query = baseQuery(for: provider)
+    try apiKey(account: provider.rawValue)
+  }
+
+  func apiKey(account: String) throws -> String? {
+    var query = baseQuery(account: account)
     query[kSecReturnData] = true
     query[kSecMatchLimit] = kSecMatchLimitOne
 
@@ -25,8 +29,12 @@ struct KeychainCredentialStore: CloudCredentialStore {
   }
 
   func setAPIKey(_ apiKey: String, for provider: CloudProviderID) throws {
+    try setAPIKey(apiKey, account: provider.rawValue)
+  }
+
+  func setAPIKey(_ apiKey: String, account: String) throws {
     let data = Data(apiKey.utf8)
-    let query = baseQuery(for: provider)
+    let query = baseQuery(account: account)
     let status = SecItemUpdate(
       query as CFDictionary,
       [kSecValueData: data] as CFDictionary
@@ -46,17 +54,21 @@ struct KeychainCredentialStore: CloudCredentialStore {
   }
 
   func removeAPIKey(for provider: CloudProviderID) throws {
-    let status = SecItemDelete(baseQuery(for: provider) as CFDictionary)
+    try removeAPIKey(account: provider.rawValue)
+  }
+
+  func removeAPIKey(account: String) throws {
+    let status = SecItemDelete(baseQuery(account: account) as CFDictionary)
     guard status == errSecSuccess || status == errSecItemNotFound else {
       throw KeychainError(status: status)
     }
   }
 
-  private func baseQuery(for provider: CloudProviderID) -> [CFString: Any] {
+  private func baseQuery(account: String) -> [CFString: Any] {
     [
       kSecClass: kSecClassGenericPassword,
       kSecAttrService: service,
-      kSecAttrAccount: provider.rawValue,
+      kSecAttrAccount: account,
     ]
   }
 }

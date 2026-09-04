@@ -41,12 +41,14 @@ struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   let id: UUID
   let role: Role
   var content: String
+  var searchSources: [WebSearchSource]?
   let createdAt: Date
 
-  init(id: UUID = UUID(), role: Role, content: String, createdAt: Date = .now) {
+  init(id: UUID = UUID(), role: Role, content: String, createdAt: Date = .now, searchSources: [WebSearchSource]? = nil) {
     self.id = id
     self.role = role
     self.content = content
+    self.searchSources = searchSources
     self.createdAt = createdAt
   }
 }
