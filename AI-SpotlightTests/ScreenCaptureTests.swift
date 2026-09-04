@@ -110,26 +110,28 @@ final class ScreenCaptureTests: XCTestCase {
     }
   }
 
-  func testPanelRemainsHiddenDuringCaptureAndRestoresItsFrame() throws {
+  func testPanelIsRemovedDuringCaptureAndRestoresItsContentAndFrame() throws {
     let view = NSTextField(string: "draft")
     let panel = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: view)
     panel.show()
     let window = try XCTUnwrap(view.window)
     let frame = window.frame
     defer { panel.hide() }
-    NotificationCenter.default.post(name: .screenCaptureBegan, object: nil)
-    XCTAssertFalse(panel.isVisible)
-    XCTAssertTrue(window.isVisible, "Keep the compositor surface alive while the transparent panel is hidden")
-    XCTAssertEqual(window.alphaValue, 0)
-    XCTAssertTrue(window.ignoresMouseEvents)
-    panel.toggle()
-    XCTAssertFalse(panel.isVisible)
-    NotificationCenter.default.post(name: .screenCaptureEnded, object: nil)
-    XCTAssertTrue(panel.isVisible)
-    XCTAssertEqual(window.alphaValue, 1)
-    XCTAssertFalse(window.ignoresMouseEvents)
-    XCTAssertEqual(window.frame, frame)
-    XCTAssertEqual(view.stringValue, "draft")
+    for _ in 0..<3 {
+      NotificationCenter.default.post(name: .screenCaptureBegan, object: nil)
+      XCTAssertFalse(panel.isVisible)
+      XCTAssertFalse(window.isVisible, "The panel must leave the window server while the user selects a region")
+      XCTAssertEqual(window.alphaValue, 1)
+      XCTAssertFalse(window.ignoresMouseEvents)
+      panel.toggle()
+      XCTAssertFalse(panel.isVisible)
+      NotificationCenter.default.post(name: .screenCaptureEnded, object: nil)
+      XCTAssertTrue(panel.isVisible)
+      XCTAssertEqual(window.alphaValue, 1)
+      XCTAssertFalse(window.ignoresMouseEvents)
+      XCTAssertEqual(window.frame, frame)
+      XCTAssertEqual(view.stringValue, "draft")
+    }
   }
 
   static func png() throws -> Data {

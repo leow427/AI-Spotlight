@@ -55,8 +55,6 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
   private(set) var isCapturingScreen = false
   private var captureHiddenWindows: [NSWindow] = []
-  private var capturePanelAlpha: CGFloat?
-  private var capturePanelIgnoredMouseEvents: Bool?
   var isVisible: Bool { panel.isVisible && !isCapturingScreen }
 
   init(
@@ -116,29 +114,22 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     isCapturingScreen = true
     captureHiddenWindows = NSApp.windows.filter { $0 !== panel && $0.isVisible }
     captureHiddenWindows.forEach { $0.orderOut(nil) }
-    // Keeping the panel ordered preserves SwiftUI's compositor surface. At zero
-    // alpha it contributes no screenshot pixels, and click-through lets the
-    // system selection tool receive every event.
-    capturePanelAlpha = panel.alphaValue
-    capturePanelIgnoredMouseEvents = panel.ignoresMouseEvents
-    panel.ignoresMouseEvents = true
-    panel.alphaValue = 0
+    // Removing the panel from the window server avoids capturing it and gives
+    // SwiftUI a fresh compositor surface when the panel is restored. Keeping an
+    // ordered window at zero alpha can leave that surface transparent after the
+    // system screenshot picker disconnects on macOS 26.
+    panel.orderOut(nil)
   }
 
   @objc private func endScreenCapture() {
     guard isCapturingScreen else { return }
     captureHiddenWindows.forEach { $0.orderFrontRegardless() }
     captureHiddenWindows = []
-    panel.ignoresMouseEvents = capturePanelIgnoredMouseEvents ?? false
-    panel.alphaValue = capturePanelAlpha ?? 1
-    capturePanelAlpha = nil
-    capturePanelIgnoredMouseEvents = nil
     isCapturingScreen = false
     panel.orderFrontRegardless()
     panel.makeKey()
+    panel.contentView?.needsLayout = true
     panel.contentView?.needsDisplay = true
-    panel.displayIfNeeded()
-    panel.invalidateShadow()
     NotificationCenter.default.post(name: .panelPresented, object: nil)
   }
 
