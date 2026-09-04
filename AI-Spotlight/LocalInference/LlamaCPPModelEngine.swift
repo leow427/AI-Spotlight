@@ -78,6 +78,70 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     releaseEngine()
   }
 
+  func benchmark() async throws -> LocalBenchmarkMetrics? {
+    try Task.checkCancellation()
+    releaseEngine()
+    defer { releaseEngine() }
+    let clock = { ProcessInfo.processInfo.systemUptime }
+    let loadStart = clock()
+    let handle = try loadEngineIfNeeded()
+    let loadSeconds = clock() - loadStart
+    // Version 1: fixed public prompt, greedy decoding, up to 64 output tokens.
+    // No user conversation is used, saved, or transmitted.
+    let request = LocalModelRequest(prompt: """
+      Write a detailed numbered list of twenty practical ways to organize a home office.
+      Explain each suggestion in one full sentence. Cover the desk, chair, lighting,
+      documents, cables, storage, daily routines, and keeping the workspace tidy.
+      Continue until you have explained all twenty suggestions. Start with item one.
+      Here is the office: a small room with one window, a desk, a laptop, two monitors,
+      a bookshelf, a printer, several notebooks, and a collection of charging cables.
+      The room is used for reading, writing, video meetings, and planning projects.
+      The owner wants a quiet, comfortable place to focus and an easy cleanup routine.
+      """, maximumTokenCount: 64, temperature: 0)
+    let promptTokens = try LocalChatBridge.withMessages(request.messages) {
+      AISLlamaEngineCountChatTokens(handle, $0, $1)
+    }
+    guard promptTokens > 0 else { throw bridgeError() }
+    var peak = AISLlamaProcessMemoryBytes()
+    let start = clock()
+    try beginCompletion(request, with: handle)
+    let promptSeconds = clock() - start
+    peak = max(peak, AISLlamaProcessMemoryBytes())
+    var generationSeconds = 0.0
+    var firstTokenSeconds = 0.0
+    var count = 0
+    var buffer = [UInt8](repeating: 0, count: 4_096)
+    while count < 64 {
+      try Task.checkCancellation()
+      guard clock() - start < 60 else {
+        throw LocalInferenceError.bridgeFailure("The performance check took too long. You can retry it in Settings.")
+      }
+      var byteCount: Int32 = 0
+      let tokenStart = clock()
+      let result = buffer.withUnsafeMutableBufferPointer {
+        AISLlamaEngineNextToken(handle, $0.baseAddress, Int32($0.count), &byteCount)
+      }
+      let tokenSeconds = clock() - tokenStart
+      if result < 0 { throw bridgeError() }
+      if result == 0 { break }
+      count += 1
+      generationSeconds += tokenSeconds
+      if count == 1 { firstTokenSeconds = clock() - start }
+      peak = max(peak, AISLlamaProcessMemoryBytes())
+    }
+    let metrics = LocalBenchmarkMetrics(
+      timeToFirstToken: firstTokenSeconds,
+      generationTokensPerSecond: Double(count) / max(0.000_001, generationSeconds),
+      promptTokensPerSecond: Double(promptTokens) / max(0.000_001, promptSeconds),
+      peakMemoryBytes: Int64(clamping: peak), promptTokenCount: Int(promptTokens),
+      generatedTokenCount: count, modelLoadSeconds: loadSeconds
+    )
+    guard metrics.isValid else {
+      throw LocalInferenceError.bridgeFailure("The model returned too few tokens to measure reliably. You can retry in Settings.")
+    }
+    return metrics
+  }
+
   private func generate(
     _ request: LocalModelRequest,
     continuation: AsyncThrowingStream<String, Error>.Continuation
@@ -134,8 +198,15 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     }
 
     releaseEngine()
+    var requestedContext = contextSize
+    if let descriptor = installedModel.catalogDescriptor {
+      let hardware = LocalHardwareProfile.detect(modelsDirectory: installationStore.modelsDirectoryURL)
+      let assessment = LocalModelSelector.assess(descriptor, hardware: hardware, installed: true)
+      guard assessment.fit.canRun else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
+      requestedContext = Int32(descriptor.recommendedContextSize)
+    }
     let newHandle = installedModel.fileURL.path.withCString { path in
-      AISLlamaEngineCreate(path, contextSize)
+      AISLlamaEngineCreate(path, requestedContext)
     }
     guard let newHandle else {
       throw bridgeError()

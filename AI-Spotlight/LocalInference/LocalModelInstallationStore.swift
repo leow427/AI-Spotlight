@@ -20,6 +20,7 @@ struct LocalModelInstallationStore: Sendable {
     let id: String
     let displayName: String
     let fileName: String
+    var catalogDescriptor: LocalModelDescriptor? = nil
   }
 
   private struct Library: Codable {
@@ -77,7 +78,7 @@ struct LocalModelInstallationStore: Sendable {
     try fileOperations.copyItem(sourceURL, temporaryURL)
     try fileOperations.moveItem(temporaryURL, destinationURL)
 
-    let record = Record(id: model.id, displayName: model.displayName, fileName: fileName)
+    let record = Record(id: model.id, displayName: model.displayName, fileName: fileName, catalogDescriptor: model.catalogDescriptor)
     do {
       library.models.removeAll { $0.id == record.id }
       library.models.append(record)
@@ -99,7 +100,7 @@ struct LocalModelInstallationStore: Sendable {
             }) else { continue }
       try? fileOperations.removeItem(previousURL)
     }
-    return LocalModel(id: record.id, displayName: record.displayName, fileURL: destinationURL)
+    return LocalModel(id: record.id, displayName: record.displayName, fileURL: destinationURL, catalogDescriptor: record.catalogDescriptor)
   }
 
   func installedModel() -> LocalModel? {
@@ -167,7 +168,8 @@ struct LocalModelInstallationStore: Sendable {
     return LocalModel(
       id: record.id,
       displayName: record.displayName,
-      fileURL: fileURL
+      fileURL: fileURL,
+      catalogDescriptor: record.catalogDescriptor
     )
   }
 }

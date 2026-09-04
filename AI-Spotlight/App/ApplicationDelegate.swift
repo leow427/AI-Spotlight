@@ -21,6 +21,12 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
   }
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    // Hosted unit tests create their own controllers and credential fixtures.
+    // Starting the real panel here can prompt for personal Keychain entries and
+    // show first-run onboarding before XCTest has started executing tests.
+    #if DEBUG
+    if NSClassFromString("XCTestCase") != nil { return }
+    #endif
     NSApp.setActivationPolicy(.accessory)
     NotificationCenter.default.addObserver(
       self,

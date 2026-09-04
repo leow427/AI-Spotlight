@@ -58,6 +58,9 @@ int32_t AISLlamaEngineNextToken(
   int32_t * token_byte_count
 );
 
+// Total current process memory, including mapped weights and Metal allocations.
+uint64_t AISLlamaProcessMemoryBytes(void);
+
 const char * AISLlamaBridgeLastError(void);
 
 #ifdef __cplusplus

@@ -3,9 +3,12 @@ import Foundation
 
 @MainActor
 final class LocalChatViewModel: ObservableObject {
+  static let shared = LocalChatViewModel(engine: LlamaCPPModelEngine(), modelAdvisor: .shared)
+
   enum State: Equatable {
     case idle
     case installing
+    case benchmarking
     case downloading(ModelDownloadProgress)
     case preparing
     case searching
@@ -35,6 +38,8 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var activeRequest: ActiveRequest?
   @Published private(set) var autoRouteDecision: AutoRouter.Decision?
   @Published private(set) var state: State = .idle
+  @Published private(set) var benchmarkNotice: String?
+  private let modelAdvisor: LocalModelAdvisor?
 
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
 
@@ -45,9 +50,9 @@ final class LocalChatViewModel: ObservableObject {
 
   var isBusy: Bool {
     // A persistence error must not make a live request accept another submission.
-    if activeRequest != nil || generationTask != nil { return true }
+    if activeRequest != nil || generationTask != nil || installationTask != nil { return true }
     switch state {
-    case .installing, .downloading, .preparing, .searching, .streaming: return true
+    case .installing, .downloading, .benchmarking, .preparing, .searching, .streaming: return true
     case .idle, .failed: return false
     }
   }
@@ -64,6 +69,7 @@ final class LocalChatViewModel: ObservableObject {
 
   init(
     engine: any LocalModelEngine,
+    modelAdvisor: LocalModelAdvisor? = nil,
     cloudProviders: CloudProviderRegistry = .live,
     webSearch: any WebSearchProvider = BraveSearchClient(),
     sessionStore: ChatSessionStore = ChatSessionStore(),
@@ -71,6 +77,7 @@ final class LocalChatViewModel: ObservableObject {
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
   ) {
     self.engine = engine
+    self.modelAdvisor = modelAdvisor
     self.webSearch = webSearch
     self.cloudProviders = cloudProviders
     self.sessionStore = sessionStore
@@ -86,6 +93,7 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   func installModel(from sourceURL: URL) {
+    guard !isBusy else { return }
     stopStreaming()
     installationTask?.cancel()
     idleUnloadTask?.cancel()
@@ -100,8 +108,10 @@ final class LocalChatViewModel: ObservableObject {
       }
       do {
         try await engine.install(model)
-        guard !Task.isCancelled, let self else { return }
+        guard let self else { return }
         await self.refreshInstalledModel()
+        try Task.checkCancellation()
+        await self.benchmarkInstalledModel(prediction: nil)
         self.state = .idle
         self.installationTask = nil
       } catch is CancellationError {
@@ -113,17 +123,22 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   func downloadModel(_ descriptor: LocalModelDescriptor) {
+    guard !isBusy else { return }
     stopStreaming()
     installationTask?.cancel()
     idleUnloadTask?.cancel()
     state = .downloading(ModelDownloadProgress(receivedByteCount: 0, expectedByteCount: descriptor.expectedByteCount))
     installationTask = Task { [weak self, engine] in
       do {
+        let prediction = try await self?.modelAdvisor?.confirmDownload(descriptor, installedModels: self?.installedModels ?? [])
+        try Task.checkCancellation()
         _ = try await engine.download(descriptor) { [weak self] progress in
           await self?.updateDownloadProgress(progress)
         }
-        guard !Task.isCancelled, let self else { return }
+        guard let self else { return }
         await self.refreshInstalledModel()
+        try Task.checkCancellation()
+        await self.benchmarkInstalledModel(prediction: prediction)
         self.state = .idle
         self.installationTask = nil
       } catch is CancellationError {
@@ -131,6 +146,45 @@ final class LocalChatViewModel: ObservableObject {
       } catch {
         self?.failInstallation(error)
       }
+    }
+  }
+
+  func cancelInstallation() {
+    // Keep submission blocked until the downloader/benchmark acknowledges cancellation.
+    installationTask?.cancel()
+  }
+
+  func runModelBenchmark() {
+    guard !isBusy, installedModel != nil else { return }
+    idleUnloadTask?.cancel()
+    state = .benchmarking
+    installationTask = Task { [weak self] in
+      guard let self else { return }
+      await modelAdvisor?.detectHardware()
+      let prediction = modelAdvisor?.recommendations(installedModels: installedModels)
+        .assessments.first { $0.id == installedModel?.id }
+      await benchmarkInstalledModel(prediction: prediction)
+      finishInstallation()
+    }
+  }
+
+  private func benchmarkInstalledModel(prediction: LocalModelAssessment?) async {
+    guard let modelAdvisor, let model = installedModel else { return }
+    state = .benchmarking
+    benchmarkNotice = nil
+    do {
+      try Task.checkCancellation()
+      if modelAdvisor.hardware == nil { await modelAdvisor.detectHardware() }
+      if let metrics = try await engine.benchmark() {
+        try Task.checkCancellation()
+        modelAdvisor.record(metrics, model: model, prediction: prediction)
+        benchmarkNotice = "Performance check complete. Results are saved on this Mac."
+      }
+    } catch is CancellationError {
+      benchmarkNotice = "Performance check cancelled. The installed model is ready to use."
+    } catch {
+      // An optional benchmark failure must not undo a verified installation.
+      benchmarkNotice = "Model installed. Performance check: \(error.localizedDescription)"
     }
   }
 

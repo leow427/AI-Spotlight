@@ -1,6 +1,7 @@
 #include "AISLlamaBridge.h"
 
 #include <llama/llama.h>
+#include <mach/mach.h>
 
 #include <algorithm>
 #include <cstring>
@@ -132,10 +133,19 @@ AISLlamaEngineHandle AISLlamaEngineCreate(
 
   auto * engine = new Engine();
   auto model_parameters = llama_model_default_params();
-  model_parameters.n_gpu_layers = 99;
+  model_parameters.n_gpu_layers = llama_supports_gpu_offload() ? 99 : 0;
   engine->model = llama_model_load_from_file(model_path, model_parameters);
   if (engine->model == nullptr) {
     set_error("llama.cpp could not load the selected GGUF model.");
+    delete engine;
+    return nullptr;
+  }
+
+  // Reject unusable templates before allocating an inference context.
+  std::string probe;
+  const AISLlamaChatMessage message = {"user", "Hello"};
+  if (!format_prompt(llama_model_chat_template(engine->model, nullptr), &message, 1, probe)) {
+    llama_model_free(engine->model);
     delete engine;
     return nullptr;
   }
@@ -355,6 +365,17 @@ int32_t AISLlamaEngineNextToken(
   *token_byte_count = written;
   engine->generated_token_count += 1;
   return 1;
+}
+
+uint64_t AISLlamaProcessMemoryBytes(void) {
+  task_vm_info_data_t info = {};
+  mach_msg_type_number_t count = TASK_VM_INFO_COUNT;
+  if (task_info(mach_task_self(), TASK_VM_INFO, reinterpret_cast<task_info_t>(&info), &count) != KERN_SUCCESS) {
+    return 0;
+  }
+  // Footprint includes driver-accounted allocations; resident size includes
+  // clean, file-backed GGUF pages. Do not add them and double-count memory.
+  return std::max(static_cast<uint64_t>(info.phys_footprint), static_cast<uint64_t>(info.resident_size));
 }
 
 const char * AISLlamaBridgeLastError(void) {
