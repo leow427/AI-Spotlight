@@ -31,7 +31,7 @@ final class ScreenViewTests: XCTestCase {
     }
     .font(.system(size: 13)).padding(12).frame(width: 240)
     .background(Color(nsColor: .windowBackgroundColor))
-    let renderer = ImageRenderer(content: preview)
+    let renderer = ImageRenderer(content: preview.environment(\.colorScheme, .dark))
     renderer.scale = 2
     let image = try XCTUnwrap(renderer.cgImage)
     let png = try XCTUnwrap(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))

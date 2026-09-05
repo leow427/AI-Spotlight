@@ -88,6 +88,8 @@ struct ToolMenuLabel: View {
       Text(title)
     } icon: {
       Image(nsImage: Self.menuImage(named: imageName))
+        .renderingMode(.template)
+        .foregroundStyle(.primary)
     }
   }
 
