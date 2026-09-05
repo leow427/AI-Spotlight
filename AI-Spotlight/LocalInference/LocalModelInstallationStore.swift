@@ -100,7 +100,7 @@ struct LocalModelInstallationStore: Sendable {
       movedProjector = true
       installedVision = LocalVisionConfiguration(projectorURL: projectorDestination,
         serverExecutableURL: vision.serverExecutableURL, contextWindow: vision.contextWindow,
-        managedRuntimeDirectory: vision.managedRuntimeDirectory)
+        managedRuntimeDirectory: vision.managedRuntimeDirectory, packageRevision: vision.packageRevision)
     }
 
     let record = Record(id: model.id, displayName: model.displayName, fileName: fileName,

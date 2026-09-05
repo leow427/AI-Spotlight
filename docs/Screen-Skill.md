@@ -152,7 +152,7 @@ terminal command, or separate executable download is needed for these choices:
 | Model | Package size on Apple silicon | Intended use |
 | --- | --- | --- |
 | SmolVLM 500M Q8_0 | 556.7 MB | Small starter for simple photos and objects |
-| SmolVLM 2.2B Q4_K_M | 1.72 GB | Larger option for image descriptions |
+| SmolVLM2 2.2B Q4_K_M | 1.72 GB | Larger option for image descriptions |
 
 Both models use their matching Q8_0 projector. Sizes include the runtime. These
 are small models, and answers on dense screenshots may be unreliable.
@@ -167,12 +167,26 @@ vision profile. Installing a model does not enable cloud screenshot uploads.
 
 The built-in packages pin model/projector revisions and SHA-256 checksums from
 [the publisher's 500M repository](https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/tree/72e986006ef53e37cdd3f6d4241c90b0f01df376) and
-[2.2B repository](https://huggingface.co/ggml-org/SmolVLM-Instruct-GGUF/tree/e75618fdae83145c487f1b4d8115bb02a5b58ecc).
+[2.2B repository](https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/tree/1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91).
+Existing installations of the original **SmolVLM 2.2B** show **Update**.
+That older package is affected by a [missing image-token compatibility bug](https://github.com/ggml-org/llama.cpp/issues/27190).
+Updating downloads the compatible **SmolVLM2 2.2B** model and matching projector.
+The installed ID stays the same, preserving both the main model selection and
+Screen's image-model preference. The old files remain usable until the verified
+replacement is committed; a failed or cancelled transfer keeps the existing library.
+Image requests using the old package show the Settings path to update it and retain the draft.
+OCR-only and text requests remain available before updating.
+500M installations and advanced imports do not require this migration.
+
 The runtime pins the official [llama.cpp b10797 release](https://github.com/ggml-org/llama.cpp/releases/tag/b10797),
 including separate arm64/x64 archive sizes and publisher SHA-256 digests.
 
-Text and vision downloads share a file-based URLSession transfer with progress,
-size bounds, and SHA-256 verification. Memory and disk checks run before a vision
+Text and vision downloads share a delegate-backed, file-based URLSession transfer with progress,
+size bounds, and SHA-256 verification. Progress and cancellation are exercised
+while a fixture server is paused halfway through its response. The async download
+convenience API did not deliver progress callbacks on the tested macOS release;
+the delegate-backed task reports live bytes and rejects oversized transfers before
+completion. Memory and disk checks run before a vision
 download, and disk space is checked again before installation. The verified
 runtime is unpacked in a private staging directory; archive paths and resolved
 links are checked, and `llama-server --help` must successfully advertise image
@@ -294,6 +308,25 @@ Run the shared scheme with
 fixture the optional native smoke test is reported skipped; ordinary CI never
 downloads a model. The normal deterministic tests cover both image protocols and
 local vision routing without external services.
+
+For the 2.2B compatibility regression, use the SmolVLM2 model and matching
+projector, and add the following optional fields to the same configuration.
+Each prompt starts a fresh production runtime and must identify both shapes
+and colors. This checks the image-token path and basic semantic output. The
+optional semantic assertions can still fail on incomplete model answers; they
+are deliberately kept separate from deterministic transport coverage. See the
+[verification report](Screen-Search-Verification.md) for observed quality failures.
+
+```json
+{
+  "prompts": [
+    "Describe the shapes and colors in this image in one sentence.",
+    "What colors and shapes are shown?",
+    "Identify both objects from left to right."
+  ],
+  "expectedAnswerTerms": ["red", "circle", "blue", "square"]
+}
+```
 
 ### Real Screen/Search model matrix
 

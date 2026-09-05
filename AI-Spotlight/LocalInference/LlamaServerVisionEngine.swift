@@ -38,6 +38,9 @@ struct LlamaServerVisionEngine: LocalVisionServing {
 
   static func prepare(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) throws -> PreparedConversation {
     guard model.supportsVision, let config = model.visionConfiguration else { throw ScreenRequestError.textOnlyModel }
+    if image != nil, let descriptor = LocalVisionModelDescriptor.bundled.first(where: { $0.requiresUpdate(model) }) {
+      throw LocalInferenceError.bridgeFailure("Update \(descriptor.displayName) in Settings → Local Models → Image understanding. The installed package is incompatible with the image runtime. Your draft has been kept.")
+    }
     if let image { try ScreenRequestGuard.validateImage(image) }
     return try ChatContextPreparer.prepare(messages,
       budget: ContextBudget(contextWindow: config.contextWindow, outputTokens: 512, overheadTokens: 256),
@@ -81,6 +84,12 @@ struct LlamaServerVisionEngine: LocalVisionServing {
           while ContinuousClock.now < deadline {
             try Task.checkCancellation()
             guard process.isRunning else { throw LocalInferenceError.bridgeFailure("llama-server could not load the vision model. Check that the model and projector match and that llama-server is up to date.") }
+            // Startup normally precedes the HTTP listener. Avoid issuing doomed
+            // URLSession requests (and CFNetwork -1004 logs) until it is listening.
+            guard LocalOnlyNetworking.isListening(on: port) else {
+              try await Task.sleep(for: .milliseconds(150))
+              continue
+            }
             var check = URLRequest(url: base.appendingPathComponent("v1/models"), timeoutInterval: 1)
             check.setValue("Bearer \(key)", forHTTPHeaderField: "Authorization")
             if let response = try? await transport.data(for: check), response.statusCode == 200,
@@ -138,6 +147,32 @@ final class LocalOnlyRedirectDelegate: NSObject, URLSessionTaskDelegate, Sendabl
 }
 
 enum LocalOnlyNetworking {
+  static func isListening(on port: UInt16) -> Bool {
+    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+    guard descriptor >= 0 else { return false }
+    defer { close(descriptor) }
+    // Even loopback connect can wait for TCP retries. Keep readiness polling
+    // bounded so startup and cancellation cannot stall on a half-open listener.
+    guard fcntl(descriptor, F_SETFL, O_NONBLOCK) == 0 else { return false }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    address.sin_port = port.bigEndian
+    let connected = withUnsafePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        Darwin.connect(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+      }
+    }
+    if connected == 0 { return true }
+    guard errno == EINPROGRESS else { return false }
+    var pending = pollfd(fd: descriptor, events: Int16(POLLOUT), revents: 0)
+    guard Darwin.poll(&pending, 1, 50) > 0 else { return false }
+    var socketError: Int32 = 0
+    var size = socklen_t(MemoryLayout<Int32>.size)
+    return getsockopt(descriptor, SOL_SOCKET, SO_ERROR, &socketError, &size) == 0 && socketError == 0
+  }
+
   static func makeSession() -> URLSession {
     let config = URLSessionConfiguration.ephemeral
     config.connectionProxyDictionary = [:]

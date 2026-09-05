@@ -14,20 +14,28 @@ struct LocalVisionSettingsView: View {
       Text("Give Screen a model that can see photos, colors, and layouts. Everything runs on this Mac.")
         .font(.caption).foregroundStyle(.secondary)
       ForEach(LocalVisionModelDescriptor.bundled) { descriptor in
+        let installed = chat.installedModels.first { $0.id == descriptor.id }
+        let needsUpdate = installed.map(descriptor.requiresUpdate) ?? false
         VStack(alignment: .leading, spacing: 6) {
           HStack(alignment: .top) {
             Label(descriptor.displayName, systemImage: "eye").font(.subheadline.weight(.medium))
             Spacer(minLength: 8)
-            if let model = chat.installedModels.first(where: { $0.id == descriptor.id }),
+            if let model = installed, !needsUpdate,
                FileManager.default.isExecutableFile(atPath: model.visionConfiguration?.serverExecutableURL.path ?? "") {
               useButton(model)
             } else {
-              Button("Download") {
-                chat.downloadVisionModel(descriptor) { settings.localVisionModelID = $0.id }
+              Button(needsUpdate ? "Update" : "Download") {
+                chat.downloadVisionModel(descriptor) { model in
+                  if !needsUpdate { settings.localVisionModelID = model.id }
+                }
               }
               .disabled(chat.isBusy)
-              .accessibilityLabel("Download \(descriptor.displayName) for images")
+              .accessibilityLabel("\(needsUpdate ? "Update" : "Download") \(descriptor.displayName) for images")
             }
+          }
+          if needsUpdate {
+            Text("Update the installed package to fix image requests. Your model selections are preserved.")
+              .font(.caption).foregroundStyle(.secondary)
           }
           Text(descriptor.summary).font(.caption).foregroundStyle(.secondary)
           Text("\(descriptor.downloadByteCount, format: .byteCount(style: .file)) total · All required files included")

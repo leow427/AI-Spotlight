@@ -60,18 +60,81 @@ resolve every issue; the opt-in report makes the same cases repeatable.
 
 ## Native UI and regression coverage
 
-Final local verification passed: shared-scheme build and static analyzer, plus
-259 discovered tests with zero failures (258 passed; the opt-in model matrix was
-skipped after its separate real runs). All 12 native panel tests passed, with the
-animated long-history regression also repeated three times.
-Build products and reports remain outside the repository. GitHub CI status is
-recorded on the pull request.
+The prior routing/scroll revision (`da0b3bc`) passed the shared-scheme build and
+static analyzer, plus 259 discovered tests with zero failures (258 passed; the
+opt-in model matrix was skipped after its separate real runs). All 12 native
+panel tests passed, with the animated long-history regression also repeated
+three times.
 
-After the owner installed SmolVLM 2.2B, another opt-in run passed its initial
-dictionary and RAM OCR cases but failed on the visual color request with a local
-vision runtime error before query refinement. The remaining cases did not run.
-This vision runtime failure remains unresolved; the owner requested focusing on
-OCR/routing and leaving model issues for the upgrade.
+For the compatibility/download repair below, the shared-scheme build and static
+analyzer passed, and all 18 focused `LocalVisionTests` passed. The latest full
+local run discovered 265 tests: 263 passed, one optional model matrix skipped,
+and one failure in the unchanged
+`CodexSubscriptionTests.testAppServerEOFAndTimeoutDoNotLeaveRequestsHanging`.
+That test received `timedOut` instead of `disconnected` after its fake subprocess
+exited; it also failed in isolation. An isolated executable using the same
+production server code observed EOF and passed, so the hosted-test discrepancy
+remains unresolved. No assertion was changed to hide it. Build products and
+reports remain outside the repository; the pull request records GitHub CI.
+
+## SmolVLM 2.2B compatibility repair
+
+The owner's shapes request reproduced a model/runtime compatibility failure.
+The original SmolVLM-Instruct Q4_K_M package started successfully with the pinned
+b10797 server, then rejected the image request with HTTP 400, `Invalid token`.
+The reported CFNetwork `-1004` lines came from `/v1/models` readiness checks
+before the localhost listener was ready; they were not the final inference error.
+The same request with the installed 500M package succeeded.
+
+This matches the upstream [missing image-token report](https://github.com/ggml-org/llama.cpp/issues/27190).
+The catalog now pins the official **SmolVLM2-2.2B-Instruct** Q4_K_M model and its
+matching Q8_0 projector at revision `1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91`.
+Both downloaded files were verified against publisher byte counts and SHA-256
+hashes before testing. The official b10797 runtime remains pinned.
+
+Existing 2.2B installations offer **Update**. Package revision metadata preserves
+the installed ID and both model selections. Replacement remains atomic, and
+failed or cancelled installation retains the old library. Image requests on the
+older package show the update location and keep the draft. OCR/text requests
+still work before updating. The 500M package and advanced imports remain usable.
+Readiness uses a nonblocking loopback probe with a bounded wait before HTTP,
+avoiding normal startup connection-refused logs and TCP retry stalls.
+
+![Update an existing 2.2B installation](images/vision-package-update.png)
+
+Physical installer testing also found that the async URLSession download helper
+did not deliver progress callbacks: a live transfer remained at 0% despite
+receiving data. A separate native public-file probe confirmed zero callbacks for
+the convenience API and 36 for a delegate-backed 1 MB transfer. The downloader
+now uses the latter, with tests that pause the server halfway through to verify
+live progress, cancellation, and early rejection of oversized bodies.
+
+### Real replacement-model results
+
+The direct native shapes request returned HTTP 200 and correctly described a
+red circle and blue square. Three further requests through the production Swift
+vision engine all completed without runtime errors:
+
+| Prompt | Observed result |
+| --- | --- |
+| Describe the shapes and colors in this image in one sentence. | Correct red circle on the left and blue square on the right. |
+| What colors and shapes are shown? | Correctly described both shapes and colors. |
+| Identify both objects from left to right. | Returned only `red circle`; the semantic checks for blue/square failed. |
+
+The seven-case Screen/Search matrix was rerun with real OCR, SmolVLM2 2.2B for
+vision, Qwen 2.5 3B for text, and fixed public search evidence in isolated metadata.
+All seven completed reading/query/search/answer stages, each with one search
+request containing the intended subject and rendered source links. The visual
+color-and-dictionary case now identified the black text and reached search.
+Its answer reused an unsupported definition from the vision notes rather than
+the supplied dictionary excerpt, so its existing answer-quality assertion failed.
+The optional model tests are therefore **not reported as entirely passing**.
+No semantic assertion was removed or weakened. These remaining model-quality
+limitations are distinct from the repaired runtime failure.
+
+An initial matrix attempt used a temporary directory URL without a trailing
+slash and could not load its vision profile. Correcting that test configuration
+allowed the complete matrix above; the user's library was not changed by the test.
 
 Hosted native panel tests submit through the actual composer, including Return
 before the draft-change callback, and verify one search, clean saved questions,
@@ -86,12 +149,25 @@ composer. The final native scroll implementation was also checked in the signed
 app with a live lookup for `ubiquitous`: a definition, two example sentences and
 five source links appeared, the scroll bar reached the bottom, the composer cleared
 and regained focus, and neither per-frame warning appeared in the fresh Xcode log.
-The older build's actual capture flow also exposed the literal `/search`
-command and uncleared draft. Automated dragging of macOS's region selector was
-unreliable, so a complete physical capture-to-answer run on the corrected build
-is **not verified**. Native injected capture tests and real synthetic-image
-OCR/model/Brave tests cover those boundaries separately. No unsigned verification
-app was launched interactively for capture.
+The owner subsequently confirmed that manual Screen + Search capture of
+`serendipity` produced a successful dictionary lookup. This verifies the basic
+physical OCR capture-to-search path.
+
+The owner's installed 2.2B package was then replaced with the verified SmolVLM2
+model/projector through the production atomic installation store. The model ID,
+model count, main selection and Screen selection were preserved. The existing
+official b10797 runtime was reused with shared ownership recorded. The signed
+app showed **SmolVLM2 2.2B — Ready for Screen**.
+
+Physical region selection subsequently succeeded on a public shapes fixture.
+The attached region reached the vision model and the app answered
+`Shapes and colors are: Circle Square`, then cleared the composer. This verifies
+capture-to-inference without the former runtime error, but the answer omitted
+the requested colors. A subsequent combined visual/search attempt displayed the
+focused-query error and retained the draft and image; that attempt is not a
+successful end-to-end search check. The owner requested taking over further
+physical testing, and computer control stopped. No unsigned verification app
+was launched interactively for capture.
 
 Reproduction instructions and opt-in configuration are in
 [Screen setup](Screen-Skill.md#real-screensearch-model-matrix). Remove the optional

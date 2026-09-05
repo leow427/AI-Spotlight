@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import CryptoKit
+import Darwin
 import SwiftUI
 import XCTest
 @testable import PrimaryAgent
@@ -92,6 +93,96 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertThrowsError(try mismatched.validate())
   }
 
+  func testLegacyPackageOffersUpdateWithoutInvalidatingOtherModels() throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = try fixture(in: directory)
+    let descriptor = LocalVisionModelDescriptor.bundled[1]
+    var legacy = LocalModel(id: descriptor.id, displayName: "SmolVLM 2.2B", fileURL: source.fileURL,
+      visionConfiguration: source.visionConfiguration)
+    // Exercise decoding metadata written before packageRevision existed.
+    legacy = try JSONDecoder().decode(LocalModel.self, from: JSONEncoder().encode(legacy))
+    XCTAssertNil(legacy.visionConfiguration?.packageRevision)
+    XCTAssertTrue(descriptor.requiresUpdate(legacy))
+    let image = PreparedScreenImage(data: Data([0xff, 0xd8, 0xff, 0xd9]), mimeType: "image/jpeg", pixelWidth: 10, pixelHeight: 10)
+    XCTAssertNoThrow(try LlamaServerVisionEngine.prepare(
+      messages: [ChatMessage(role: .user, content: "Define serendipity.")], image: nil, model: legacy),
+      "Text/OCR requests do not use the missing image token")
+    XCTAssertThrowsError(try LlamaServerVisionEngine.prepare(
+      messages: [ChatMessage(role: .user, content: "Describe these shapes.")], image: image, model: legacy)) { error in
+      XCTAssertTrue(error.localizedDescription.contains("Update SmolVLM2 2.2B"))
+      XCTAssertTrue(error.localizedDescription.contains("Settings → Local Models → Image understanding"))
+      XCTAssertTrue(error.localizedDescription.contains("draft has been kept"))
+    }
+    var current = legacy
+    current.visionConfiguration?.packageRevision = descriptor.packageRevision
+    XCTAssertFalse(descriptor.requiresUpdate(current))
+    XCTAssertNoThrow(try LlamaServerVisionEngine.prepare(
+      messages: [ChatMessage(role: .user, content: "Describe these shapes.")], image: image, model: current))
+    let small = LocalVisionModelDescriptor.bundled[0]
+    let oldSmall = LocalModel(id: small.id, displayName: small.displayName, fileURL: source.fileURL,
+      visionConfiguration: source.visionConfiguration)
+    XCTAssertFalse(small.requiresUpdate(oldSmall))
+    XCTAssertFalse(descriptor.requiresUpdate(source), "Manually imported models retain their own compatibility contract")
+    XCTAssertTrue(descriptor.model.url.path.contains("/SmolVLM2-2.2B-Instruct-GGUF/"))
+    XCTAssertTrue(descriptor.projector.url.path.contains("/SmolVLM2-2.2B-Instruct-GGUF/"))
+  }
+
+  func testPackageReplacementPreservesSelectedVisionAndRollsBackOnFailure() throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let library = directory.appending(path: "library")
+    let store = LocalModelInstallationStore(modelsDirectory: library)
+    let source = try fixture(in: directory)
+    let descriptor = LocalVisionModelDescriptor.bundled[1]
+    let legacy = LocalModel(id: descriptor.id, displayName: "SmolVLM 2.2B", fileURL: source.fileURL,
+      visionConfiguration: source.visionConfiguration)
+    let original = try store.install(legacy)
+    try store.selectModel(id: original.id)
+    var updated = LocalModel(id: descriptor.id, displayName: descriptor.displayName, fileURL: source.fileURL,
+      visionConfiguration: source.visionConfiguration)
+    updated.visionConfiguration?.packageRevision = descriptor.packageRevision
+    var operations = LocalModelInstallationStore.FileOperations()
+    operations.writeMetadata = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+    XCTAssertThrowsError(try LocalModelInstallationStore(modelsDirectory: library, fileOperations: operations).install(updated))
+    XCTAssertEqual(store.installedModel(), original)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: original.fileURL.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: original.visionConfiguration!.projectorURL.path))
+    let replacement = try store.install(updated)
+    let restored = LocalModelInstallationStore(modelsDirectory: library)
+    XCTAssertEqual(restored.installedModel(), replacement)
+    XCTAssertEqual(restored.installedModels().count, 1)
+    XCTAssertEqual(replacement.id, original.id, "Keep both the primary selection and persisted Screen model ID valid")
+    XCTAssertEqual(replacement.visionConfiguration?.packageRevision, descriptor.packageRevision)
+    XCTAssertFalse(descriptor.requiresUpdate(replacement))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: original.fileURL.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: original.visionConfiguration!.projectorURL.path))
+  }
+
+  func testReadinessProbeDistinguishesBoundAndListeningLoopbackPort() throws {
+    let descriptor = socket(AF_INET, SOCK_STREAM, 0)
+    XCTAssertGreaterThanOrEqual(descriptor, 0)
+    guard descriptor >= 0 else { return }
+    defer { close(descriptor) }
+    var address = sockaddr_in()
+    address.sin_len = UInt8(MemoryLayout<sockaddr_in>.size)
+    address.sin_family = sa_family_t(AF_INET)
+    address.sin_addr.s_addr = inet_addr("127.0.0.1")
+    withUnsafeMutablePointer(to: &address) { pointer in
+      pointer.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+        XCTAssertEqual(Darwin.bind(descriptor, $0, socklen_t(MemoryLayout<sockaddr_in>.size)), 0)
+        var size = socklen_t(MemoryLayout<sockaddr_in>.size)
+        XCTAssertEqual(getsockname(descriptor, $0, &size), 0)
+      }
+    }
+    let port = UInt16(bigEndian: address.sin_port)
+    let start = ContinuousClock.now
+    XCTAssertFalse(LocalOnlyNetworking.isListening(on: port))
+    XCTAssertLessThan(start.duration(to: .now), .seconds(1), "A non-listening port must not stall startup on TCP retries")
+    XCTAssertEqual(listen(descriptor, 1), 0)
+    XCTAssertTrue(LocalOnlyNetworking.isListening(on: port))
+  }
+
   func testGuidedDownloadInstallsAllPartsAndPreservesTextModel() async throws {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -107,6 +198,7 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertEqual(store.installedModels().count, 2)
     XCTAssertTrue(installed.supportsVision)
     let config = try XCTUnwrap(installed.visionConfiguration)
+    XCTAssertEqual(config.packageRevision, package.descriptor.packageRevision)
     let managed = try XCTUnwrap(config.managedRuntimeDirectory)
     XCTAssertTrue(config.serverExecutableURL.path.hasPrefix(managed.path + "/"))
     XCTAssertTrue(FileManager.default.isExecutableFile(atPath: config.serverExecutableURL.path))
@@ -123,6 +215,78 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertNotEqual(replacement.visionConfiguration?.managedRuntimeDirectory, managed)
     XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path))
     XCTAssertEqual(store.installedModel(), original)
+  }
+
+  func testArtifactReportsProgressBeforeCompletionAndCanCancelMidTransfer() async throws {
+    for cancel in [false, true] {
+      let directory = try temporaryDirectory()
+      defer { try? FileManager.default.removeItem(at: directory) }
+      let bytes = Data(repeating: 42, count: 512 * 1024)
+      let url = URL(string: "https://example.test/\(UUID()).gguf")!
+      let gate = VisionDownloadGate()
+      StreamingArtifactProtocol.set(url, data: bytes, gate: gate)
+      let configuration = URLSessionConfiguration.ephemeral
+      configuration.protocolClasses = [StreamingArtifactProtocol.self]
+      let session = URLSession(configuration: configuration)
+      defer { session.invalidateAndCancel() }
+      let artifact = VerifiedModelArtifact(url: url, expectedByteCount: Int64(bytes.count),
+        checksumSHA256: SHA256.hash(data: bytes).map { String(format: "%02x", $0) }.joined())
+      let received = expectation(description: "Progress before the server sends its second half")
+      received.assertForOverFulfill = false
+      let finished = expectation(description: "Download finishes")
+      let output = directory.appending(path: "model.gguf")
+      let task = Task {
+        defer { finished.fulfill() }
+        try await artifact.download(to: output, session: session) { update in
+          if update.receivedByteCount > 0 && update.receivedByteCount < update.expectedByteCount { received.fulfill() }
+        }
+      }
+      await fulfillment(of: [received], timeout: 3)
+      if cancel {
+        task.cancel()
+        await fulfillment(of: [finished], timeout: 3)
+      }
+      await gate.release()
+      if !cancel { await fulfillment(of: [finished], timeout: 3) }
+      do {
+        try await task.value
+        XCTAssertFalse(cancel, "A cancelled transfer must not complete successfully")
+        XCTAssertEqual(try Data(contentsOf: output), bytes)
+      } catch {
+        XCTAssertTrue(cancel, error.localizedDescription)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
+      }
+    }
+  }
+
+  func testOversizedArtifactStopsBeforeTheServerFinishesSending() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let url = URL(string: "https://example.test/\(UUID()).gguf")!
+    let gate = VisionDownloadGate()
+    StreamingArtifactProtocol.set(url, data: Data(repeating: 42, count: 512 * 1024), gate: gate)
+    let configuration = URLSessionConfiguration.ephemeral
+    configuration.protocolClasses = [StreamingArtifactProtocol.self]
+    let session = URLSession(configuration: configuration)
+    defer { session.invalidateAndCancel() }
+    let artifact = VerifiedModelArtifact(url: url, expectedByteCount: 65_536, checksumSHA256: String(repeating: "a", count: 64))
+    let finished = expectation(description: "Size limit terminates the transfer while the server is paused")
+    let output = directory.appending(path: "model.gguf")
+    let task = Task {
+      defer { finished.fulfill() }
+      try await artifact.download(to: output, session: session) { _ in }
+    }
+    await fulfillment(of: [finished], timeout: 3)
+    await gate.release()
+    do { try await task.value; XCTFail("Expected the in-flight byte limit") }
+    catch {
+      guard case .unexpectedDownloadSize(let expected, let actual) = error as? LocalModelCatalogError else {
+        return XCTFail("Wrong download error: \(error)")
+      }
+      XCTAssertEqual(expected, 65_536)
+      XCTAssertGreaterThan(actual, expected)
+    }
+    XCTAssertFalse(FileManager.default.fileExists(atPath: output.path))
   }
 
   func testEachDownloadFailureRollsBackAndKeepsExistingSelection() async throws {
@@ -256,6 +420,39 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertFalse(text.contains("Choose a file"), text)
   }
 
+  @MainActor
+  func testLegacyPackageViewOffersAnUpdateInsteadOfReady() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let source = try fixture(in: directory)
+    let descriptor = LocalVisionModelDescriptor.bundled[1]
+    let store = LocalModelInstallationStore(modelsDirectory: directory.appending(path: "library"))
+    _ = try store.install(LocalModel(id: descriptor.id, displayName: "SmolVLM 2.2B", fileURL: source.fileURL,
+      visionConfiguration: source.visionConfiguration))
+    let chat = LocalChatViewModel(engine: LlamaCPPModelEngine(installationStore: store),
+      sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
+    await chat.refreshInstalledModel()
+    let view = NSHostingView(rootView: Form { LocalVisionSettingsView(chat: chat) }.formStyle(.grouped))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 550),
+      styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = view
+    view.frame = NSRect(x: 0, y: 0, width: 600, height: 550)
+    await Task.yield()
+    view.layoutSubtreeIfNeeded()
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let text = try await ScreenOCRService().recognize(try XCTUnwrap(bitmap.cgImage)).text
+    XCTAssertTrue(text.contains("Update"), text)
+    XCTAssertTrue(text.contains("SmolVLM2 2.2B"), text)
+    XCTAssertFalse(text.contains("Ready for Screen"), text)
+    let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Update the incompatible 2.2B package"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+    try png.write(to: URL(fileURLWithPath: "/tmp/ai-spotlight-vision-update-preview.png"))
+  }
+
   private func downloadSession() -> URLSession {
     let configuration = URLSessionConfiguration.ephemeral
     configuration.protocolClasses = [VisionDownloadProtocol.self]
@@ -373,4 +570,33 @@ private actor VisionDownloadEngineFixture: LocalModelEngine {
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel { model }
   nonisolated func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> { AsyncThrowingStream { $0.finish() } }
   func unload() async { }
+}
+
+/// A paused response proves that progress, cancellation, and byte limits work
+/// before download completion, without timing sleeps or external networking.
+private final class StreamingArtifactProtocol: URLProtocol, @unchecked Sendable {
+  private static let lock = NSLock()
+  nonisolated(unsafe) private static var responses: [URL: (Data, VisionDownloadGate)] = [:]
+  private let producerLock = NSLock()
+  private var producer: Task<Void, Never>?
+  static func set(_ url: URL, data: Data, gate: VisionDownloadGate) { lock.withLock { responses[url] = (data, gate) } }
+  override class func canInit(with request: URLRequest) -> Bool { true }
+  override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+  override func startLoading() {
+    guard let url = request.url, let (data, gate) = Self.lock.withLock({ Self.responses.removeValue(forKey: url) }) else {
+      client?.urlProtocol(self, didFailWithError: URLError(.resourceUnavailable)); return
+    }
+    client?.urlProtocol(self, didReceive: HTTPURLResponse(url: url, statusCode: 200, httpVersion: nil,
+      headerFields: ["Content-Length": String(data.count)])!, cacheStoragePolicy: .notAllowed)
+    client?.urlProtocol(self, didLoad: Data(data.prefix(data.count / 2)))
+    producerLock.withLock {
+      producer = Task { @Sendable [self, data, gate] in
+        await gate.wait(onReady: {})
+        guard !Task.isCancelled else { return }
+        client?.urlProtocol(self, didLoad: Data(data.suffix(data.count - data.count / 2)))
+        client?.urlProtocolDidFinishLoading(self)
+      }
+    }
+  }
+  override func stopLoading() { producerLock.withLock { producer?.cancel() } }
 }

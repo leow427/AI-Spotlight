@@ -12,7 +12,11 @@ final class ScreenNativeSmokeTests: XCTestCase {
     guard FileManager.default.fileExists(atPath: configURL.path) else {
       throw XCTSkip("Optional real-model test: provide /tmp/AI-Spotlight-Vision-Smoke.json as documented in docs/Screen-Skill.md.")
     }
-    struct Config: Decodable { let model: URL; let projector: URL; let server: URL }
+    struct Config: Decodable {
+      let model: URL; let projector: URL; let server: URL
+      let prompts: [String]?
+      let expectedAnswerTerms: [String]?
+    }
     let config = try JSONDecoder().decode(Config.self, from: Data(contentsOf: configURL))
     let libraryURL = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenNativeSmoke-\(UUID())")
     defer { try? FileManager.default.removeItem(at: libraryURL) }
@@ -28,14 +32,23 @@ final class ScreenNativeSmokeTests: XCTestCase {
     NSColor.blue.setFill(); NSRect(x: 350, y: 100, width: 160, height: 160).fill()
     NSGraphicsContext.restoreGraphicsState()
     let image = try ScreenImagePreprocessor.prepare(XCTUnwrap(bitmap.cgImage))
-    var answer = ""
-    let start = Date()
-    for try await text in LlamaServerVisionEngine().stream(
-      messages: [ChatMessage(role: .user, content: "Describe the shapes and colors in this image in one sentence.")], image: image, model: installed) {
-      answer += text
+    let prompts = config.prompts ?? ["Describe the shapes and colors in this image in one sentence."]
+    XCTAssertFalse(prompts.isEmpty)
+    var reports: [String] = []
+    for prompt in prompts {
+      var answer = ""
+      let start = Date()
+      for try await text in LlamaServerVisionEngine().stream(
+        messages: [ChatMessage(role: .user, content: prompt)], image: image, model: installed) {
+        answer += text
+      }
+      XCTAssertFalse(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+      for term in config.expectedAnswerTerms ?? [] {
+        XCTAssertTrue(answer.localizedCaseInsensitiveContains(term), "Missing \(term): \(answer)")
+      }
+      reports.append("Question: \(prompt)\nElapsed: \(Date().timeIntervalSince(start)) s\nAnswer: \(answer)\n")
     }
-    XCTAssertFalse(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-    let report = "Production llama-server vision smoke test\nElapsed: \(Date().timeIntervalSince(start)) s\nAnswer: \(answer)\n"
+    let report = "Production llama-server vision smoke test\n" + reports.joined(separator: "\n")
     try report.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Vision-Smoke-Result.txt"), atomically: true, encoding: .utf8)
     let attachment = XCTAttachment(string: report)
     attachment.lifetime = .keepAlways

@@ -193,7 +193,7 @@ struct LocalModelCatalog: Sendable {
     let installed = try installationStore.install(LocalModel(id: descriptor.id, displayName: descriptor.displayName,
       fileURL: staging.appending(path: "model.gguf"),
       visionConfiguration: LocalVisionConfiguration(projectorURL: staging.appending(path: "mmproj.gguf"),
-        serverExecutableURL: server, managedRuntimeDirectory: runtimeDirectory)))
+        serverExecutableURL: server, managedRuntimeDirectory: runtimeDirectory, packageRevision: descriptor.packageRevision)))
     committed = true
     return installed
   }
@@ -224,13 +224,23 @@ struct VerifiedModelArtifact: Sendable, Equatable {
       for await update in updates.stream { await progress(update) }
     }
     do {
-      let (downloaded, response) = try await session.download(from: url, delegate: delegate)
-      defer { try? FileManager.default.removeItem(at: downloaded) }
+      // The async URLSession download convenience does not deliver download
+      // progress callbacks. A delegate-backed task also enforces the size limit
+      // while bytes arrive, instead of waiting for an oversized file to finish.
+      let downloadSession = URLSession(configuration: session.configuration, delegate: delegate, delegateQueue: nil)
+      defer { downloadSession.invalidateAndCancel() }
+      let task = downloadSession.downloadTask(with: url)
+      let response = try await withTaskCancellationHandler {
+        try Task.checkCancellation()
+        return try await withCheckedThrowingContinuation { continuation in
+          delegate.start(task, destination: temporaryURL, continuation: continuation)
+        }
+      } onCancel: { delegate.cancel() }
       guard let response = response as? HTTPURLResponse,
             response.statusCode == 200, response.url?.scheme == "https" else {
         throw LocalModelCatalogError.invalidResponse
       }
-      let size = try downloaded.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
+      let size = try temporaryURL.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0
       guard Int64(size) == expectedByteCount else {
         throw LocalModelCatalogError.unexpectedDownloadSize(expected: expectedByteCount, actual: Int64(size))
       }
@@ -238,7 +248,6 @@ struct VerifiedModelArtifact: Sendable, Equatable {
       updates.continuation.finish()
       await reporter.value
       try Task.checkCancellation()
-      try FileManager.default.moveItem(at: downloaded, to: temporaryURL)
       guard try sha256(of: temporaryURL).caseInsensitiveCompare(checksumSHA256) == .orderedSame else {
         throw LocalModelCatalogError.checksumMismatch
       }
@@ -271,12 +280,57 @@ private final class ModelArtifactDownloadDelegate: NSObject, URLSessionDownloadD
   let updates: AsyncStream<ModelDownloadProgress>.Continuation
   private let lock = NSLock()
   private var oversized: Int64?
+  private var task: URLSessionDownloadTask?
+  private var destination: URL?
+  private var continuation: CheckedContinuation<URLResponse, Error>?
+  private var result: Result<URLResponse, Error>?
+  private var cancelled = false
   var oversizedByteCount: Int64? { lock.withLock { oversized } }
   init(expectedByteCount: Int64, updates: AsyncStream<ModelDownloadProgress>.Continuation) {
     self.expectedByteCount = expectedByteCount
     self.updates = updates
   }
-  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) { }
+  func start(_ task: URLSessionDownloadTask, destination: URL,
+             continuation: CheckedContinuation<URLResponse, Error>) {
+    let shouldCancel = lock.withLock {
+      self.task = task
+      self.destination = destination
+      self.continuation = continuation
+      return cancelled
+    }
+    // Cancellation can arrive before the continuation/task has been registered.
+    if shouldCancel { task.cancel() }
+    task.resume()
+  }
+
+  func cancel() {
+    let active = lock.withLock { cancelled = true; return task }
+    active?.cancel()
+  }
+
+  func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didFinishDownloadingTo location: URL) {
+    let outcome = Result<URLResponse, Error> {
+      guard let destination = lock.withLock({ self.destination }), let response = downloadTask.response else {
+        throw LocalModelCatalogError.invalidResponse
+      }
+      // URLSession deletes this temporary file when the delegate returns.
+      try FileManager.default.moveItem(at: location, to: destination)
+      return response
+    }
+    lock.withLock { result = outcome }
+  }
+
+  func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    let completion = lock.withLock {
+      let outcome: Result<URLResponse, Error> = error.map { .failure($0) }
+        ?? result ?? .failure(LocalModelCatalogError.invalidResponse)
+      let waiting = continuation
+      continuation = nil
+      self.task = nil
+      return (waiting, outcome)
+    }
+    completion.0?.resume(with: completion.1)
+  }
   func urlSession(_ session: URLSession, downloadTask: URLSessionDownloadTask, didWriteData bytesWritten: Int64,
                   totalBytesWritten: Int64, totalBytesExpectedToWrite: Int64) {
     guard totalBytesWritten <= expectedByteCount else {
@@ -299,6 +353,16 @@ struct LocalVisionModelDescriptor: Sendable, Equatable, Identifiable {
     model.expectedByteCount + projector.expectedByteCount + LocalVisionRuntime.bundled.archive.expectedByteCount
   }
   var modelCardURL: URL { model.url.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent() }
+
+  var packageRevision: String { model.url.deletingLastPathComponent().lastPathComponent }
+
+  func requiresUpdate(_ installed: LocalModel) -> Bool {
+    guard installed.id == id, let configuration = installed.visionConfiguration else { return false }
+    if let revision = configuration.packageRevision { return revision != packageRevision }
+    // Keep the installed ID/selection when replacing original SmolVLM with
+    // SmolVLM2. Only this unversioned package has the missing image token.
+    return id == "smolvlm-2b-q4:vision"
+  }
 
   func validate() throws {
     guard !id.isEmpty, !displayName.isEmpty, estimatedRuntimeMemory > model.expectedByteCount + projector.expectedByteCount,
@@ -323,12 +387,12 @@ struct LocalVisionModelDescriptor: Sendable, Equatable, Identifiable {
       projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/72e986006ef53e37cdd3f6d4241c90b0f01df376/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")!,
         expectedByteCount: 108783360, checksumSHA256: "d1eb8b6b23979205fdf63703ed10f788131a3f812c7b1f72e0119d5d81295150"),
       estimatedRuntimeMemory: 2 * LocalHardwareProfile.gib),
-    LocalVisionModelDescriptor(id: "smolvlm-2b-q4:vision", displayName: "SmolVLM 2.2B",
+    LocalVisionModelDescriptor(id: "smolvlm-2b-q4:vision", displayName: "SmolVLM2 2.2B",
       summary: "Larger model · For more detailed image descriptions.",
-      model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM-Instruct-GGUF/resolve/e75618fdae83145c487f1b4d8115bb02a5b58ecc/SmolVLM-Instruct-Q4_K_M.gguf")!,
-        expectedByteCount: 1112242368, checksumSHA256: "dc80966bd84789de64115f07888939c03abb1714d431c477dfb405517a554af5"),
-      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM-Instruct-GGUF/resolve/e75618fdae83145c487f1b4d8115bb02a5b58ecc/mmproj-SmolVLM-Instruct-Q8_0.gguf")!,
-        expectedByteCount: 592521344, checksumSHA256: "86b84aa7babf1ab51a6366d973b9d380354e92c105afaa4f172cc76d044da739"),
+      model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91/SmolVLM2-2.2B-Instruct-Q4_K_M.gguf")!,
+        expectedByteCount: 1112602656, checksumSHA256: "0cf76814555b8665149075b74ab6b5c1d428ea1d3d01c1918c12012e8d7c9f58"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91/mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf")!,
+        expectedByteCount: 592523200, checksumSHA256: "ae07ea1facd07dd3230c4483b63e8cda96c6944ad2481f33d531f79e892dd024"),
       estimatedRuntimeMemory: 4 * LocalHardwareProfile.gib)
   ]
 }
