@@ -26,11 +26,18 @@ capture does not move the panel between displays; macOS owns region selection.
 
 `ScreenAttachment` owns the original `NSImage`, pixel dimensions, MIME type,
 UUID, source, timestamp, OCR text/confidence, processing status, and routing
-decision. It is deliberately not Codable. The existing chat/session types never
-contain image bytes. OCR context is used for the request and is also excluded
-from saved history. A submitted screenshot is released from the composer when
-the first response text arrives; a preparation, connection, or permission failure
-before that point retains the draft and attachment.
+decision. It is deliberately not Codable. When the first response text arrives,
+the user message retains a small in-memory PNG preview and the composer releases
+the submitted screenshot. The preview appears immediately above that message's
+text, fits within 120 × 96 points without cropping, and uses up to 240 × 192
+pixels for Retina displays. It remains attached when switching chats during the
+current app session. `ChatMessage.CodingKeys` excludes the preview from all
+serialization: saved history still contains no screenshot pixels, and previews
+do not reappear after restarting the app. OCR context is also excluded from
+saved history. A preparation, connection, or permission failure before the first
+response text retains the draft and attachment.
+
+![Sent image previews above message text](images/sent-image-previews.png)
 
 Apple Vision runs locally, on a background task, against the original pixels.
 Recognition is accurate, language correction is off, and automatic language

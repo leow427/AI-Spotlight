@@ -805,7 +805,7 @@ struct AppShellView: View {
   }
 }
 
-private struct LocalMessageView: View {
+struct LocalMessageView: View {
   let message: ChatMessage
 
   var body: some View {
@@ -813,6 +813,10 @@ private struct LocalMessageView: View {
       Text(message.role == .user ? "You" : "AI Spotlight")
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
+
+      if message.role == .user, let data = message.imagePreview, let image = NSImage(data: data) {
+        SentImagePreview(image: image)
+      }
 
       if message.content.isEmpty {
         ProgressView()
@@ -847,6 +851,21 @@ private struct LocalMessageView: View {
 
   private var renderedMarkdown: AttributedString {
     (try? AttributedString(markdown: message.content)) ?? AttributedString(message.content)
+  }
+}
+
+struct SentImagePreview: View {
+  let image: NSImage
+
+  var body: some View {
+    let scale = min(1, 120 / max(1, image.size.width), 96 / max(1, image.size.height))
+    Image(nsImage: image)
+      .resizable()
+      .scaledToFit()
+      .frame(width: image.size.width * scale, height: image.size.height * scale)
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+      .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.1)))
+      .accessibilityLabel("Image attached to your message")
   }
 }
 

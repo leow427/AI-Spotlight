@@ -28,6 +28,14 @@ final class ScreenPipelineTests: XCTestCase {
     XCTAssertFalse(fixture.store.load().flatMap(\.messages).contains { $0.content.contains("Text extracted locally") })
     XCTAssertNil(screen.attachment)
     XCTAssertEqual(screen.draft, "")
+    XCTAssertNotNil(fixture.chat.messages.first?.imagePreview)
+    XCTAssertNil(fixture.chat.messages.last?.imagePreview)
+    XCTAssertNil(fixture.store.load().first?.messages.first?.imagePreview)
+    let preview = fixture.chat.messages.first?.imagePreview
+    let sessionID = try XCTUnwrap(fixture.chat.selectedSessionID)
+    fixture.chat.newChat()
+    fixture.chat.selectSession(id: sessionID)
+    XCTAssertEqual(fixture.chat.messages.first?.imagePreview, preview)
   }
 
   func testCloudOCRDoesNotAttachPixelsWhenUploadsAreDisabled() async throws {
@@ -59,6 +67,12 @@ final class ScreenPipelineTests: XCTestCase {
     XCTAssertEqual(request.image?.pixelWidth, 1568)
     XCTAssertEqual(request.image?.pixelHeight, 784)
     XCTAssertEqual(fixture.chat.messages.first?.content, "describe the diagram")
+    let preview = try XCTUnwrap(fixture.chat.messages.first?.imagePreview)
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(data: preview))
+    XCTAssertEqual(bitmap.pixelsWide, 240)
+    XCTAssertEqual(bitmap.pixelsHigh, 120)
+    XCTAssertNil(request.messages.last?.imagePreview)
+    XCTAssertNil(fixture.store.load().first?.messages.first?.imagePreview)
   }
 
   func testRevokedPermissionPreservesDraftAndNeverCallsProvider() async throws {

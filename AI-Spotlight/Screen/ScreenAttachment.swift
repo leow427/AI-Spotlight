@@ -1,6 +1,6 @@
 import AppKit
 
-/// Draft-only data. Deliberately not Codable: screenshot pixels never enter chat storage.
+/// Full-resolution draft data. Neither originals nor sent-message previews enter chat storage.
 @MainActor
 struct ScreenAttachment: Identifiable {
   enum Source: String { case screenRegion }
@@ -23,6 +23,21 @@ struct ScreenAttachment: Identifiable {
     originalImage = image
     pixelWidth = pixels.width
     pixelHeight = pixels.height
+  }
+
+  /// A bounded Retina preview retained only for the current app session.
+  func makeMessagePreview() -> Data? {
+    guard let pixels = originalImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
+    let scale = min(1, 240.0 / Double(pixels.width), 192.0 / Double(pixels.height))
+    let width = max(1, Int((Double(pixels.width) * scale).rounded()))
+    let height = max(1, Int((Double(pixels.height) * scale).rounded()))
+    guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+      bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    context.interpolationQuality = .high
+    context.draw(pixels, in: CGRect(x: 0, y: 0, width: width, height: height))
+    guard let thumbnail = context.makeImage() else { return nil }
+    return NSBitmapImageRep(cgImage: thumbnail).representation(using: .png, properties: [:])
   }
 }
 

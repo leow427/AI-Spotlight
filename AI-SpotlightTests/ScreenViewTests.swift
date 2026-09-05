@@ -8,6 +8,57 @@ import XCTest
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testSentImagesStaySmallAndPreserveTheirProportions() throws {
+    let sizes: [NSSize] = [
+      NSSize(width: 1600, height: 800),
+      NSSize(width: 800, height: 1600),
+      NSSize(width: 1000, height: 1000),
+    ]
+    let expected: [NSSize] = [
+      NSSize(width: 120, height: 60),
+      NSSize(width: 48, height: 96),
+      NSSize(width: 96, height: 96),
+    ]
+    var messages: [ChatMessage] = []
+    for (index, size) in sizes.enumerated() {
+      let source = NSImage(size: size, flipped: false) { bounds in
+        NSColor.systemTeal.setFill()
+        bounds.fill()
+        NSColor.systemYellow.setFill()
+        NSBezierPath(ovalIn: NSRect(x: size.width * 0.15, y: size.height * 0.25,
+          width: min(size.width, size.height) * 0.4, height: min(size.width, size.height) * 0.4)).fill()
+        return true
+      }
+      let data = try XCTUnwrap(try ScreenAttachment(image: source).makeMessagePreview())
+      let image = try XCTUnwrap(NSImage(data: data))
+      let view = NSHostingView(rootView: SentImagePreview(image: image))
+      XCTAssertEqual(view.fittingSize.width, expected[index].width, accuracy: 0.5)
+      XCTAssertEqual(view.fittingSize.height, expected[index].height, accuracy: 0.5)
+      let bitmap = try XCTUnwrap(NSBitmapImageRep(data: data))
+      XCTAssertLessThanOrEqual(bitmap.pixelsWide, 240)
+      XCTAssertLessThanOrEqual(bitmap.pixelsHigh, 192)
+      var message = ChatMessage(role: .user, content: ["What is in this image?", "Describe this portrait image.", "And this square image?"][index])
+      message.imagePreview = data
+      messages.append(message)
+    }
+    let preview = VStack(alignment: .leading, spacing: 20) {
+      ForEach(messages) { message in
+        LocalMessageView(message: message)
+      }
+      LocalMessageView(message: ChatMessage(role: .assistant, content: "Each image shows a yellow circle on a teal background."))
+    }
+    .padding(24).frame(width: 440).background(Color(nsColor: .windowBackgroundColor))
+    let renderer = ImageRenderer(content: preview)
+    renderer.scale = 2
+    let image = try XCTUnwrap(renderer.cgImage)
+    let png = try XCTUnwrap(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Sent-Image-Previews.png"))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Sent image thumbnails above message text"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
   func testKeychainAvailabilityUsesAttributesWithoutAuthentication() throws {
     let store = KeychainCredentialStore(copyMatching: { query, _ in
       let query = query as NSDictionary

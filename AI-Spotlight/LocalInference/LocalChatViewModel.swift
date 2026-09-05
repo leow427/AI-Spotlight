@@ -405,8 +405,10 @@ final class LocalChatViewModel: ObservableObject {
               if acceptedSession == nil {
                 let session = owner.ensureSelectedSession()
                 acceptedSession = session
-                // Only the user's actual question is saved, never OCR or image bytes.
-                owner.append(userMessage, to: session)
+                // The preview is UI-only; persistence still saves just the user's question.
+                var displayedMessage = userMessage
+                displayedMessage.imagePreview = attachment?.makeMessagePreview()
+                owner.append(displayedMessage, to: session)
                 owner.append(ChatMessage(id: responseID, role: .assistant, content: ""), to: session)
                 onAccepted()
                 try Task.checkCancellation()
