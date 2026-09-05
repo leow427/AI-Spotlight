@@ -3,6 +3,45 @@ import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
+/// Observe native layout without feeding measurements back into SwiftUI state.
+private struct ConversationScrollObserver: NSViewRepresentable {
+  func makeNSView(context: Context) -> ObserverView { ObserverView() }
+  func updateNSView(_ view: ObserverView, context: Context) {}
+
+  final class ObserverView: NSView {
+    private var pendingScroll: DispatchWorkItem?
+
+    override func setFrameSize(_ newSize: NSSize) {
+      let changed = frame.size != newSize
+      super.setFrameSize(newSize)
+      if changed { scheduleScroll() }
+    }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      pendingScroll?.cancel()
+      if window != nil { scheduleScroll() }
+    }
+
+    private func scheduleScroll() {
+      pendingScroll?.cancel()
+      let work = DispatchWorkItem { [weak self] in
+        guard let self, self.window != nil, let scroll = self.enclosingScrollView,
+              let document = scroll.documentView else { return }
+        let clip = scroll.contentView
+        let bottom = document.isFlipped
+          ? max(document.bounds.minY, document.bounds.maxY - clip.bounds.height)
+          : document.bounds.minY
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: bottom))
+        scroll.reflectScrolledClipView(clip)
+      }
+      pendingScroll = work
+      // Lazy rows can be measured repeatedly while a single frame settles.
+      DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(30), execute: work)
+    }
+  }
+}
+
 struct AppShellView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
@@ -24,7 +63,6 @@ struct AppShellView: View {
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
   @State private var selectedMode = ChatMode.auto
-  @State private var conversationContentSize = CGSize.zero
   @FocusState private var isComposerFocused: Bool
 
   init(
@@ -345,28 +383,18 @@ struct AppShellView: View {
 
       Spacer()
     } else {
-      ScrollViewReader { proxy in
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 18) {
-            ForEach(localChat.messages) { message in
-              LocalMessageView(message: message)
-                .id(message.id)
-            }
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 18) {
+          ForEach(localChat.messages) { message in
+            LocalMessageView(message: message)
+              .id(message.id)
           }
-          .padding(24)
         }
-        .defaultScrollAnchor(.bottom, for: .initialOffset)
-        .defaultScrollAnchor(.top, for: .alignment)
-        .onScrollGeometryChange(for: CGSize.self) { $0.contentSize } action: { _, size in
-          conversationContentSize = size
-        }
-        // Scroll after layout has measured the new reply. A task coalesces size
-        // changes without mutating scrolling from a message-change callback.
-        .task(id: conversationContentSize) {
-          guard !Task.isCancelled, let messageID = localChat.messages.last?.id else { return }
-          proxy.scrollTo(messageID, anchor: .bottom)
-        }
+        .padding(24)
+        .background(ConversationScrollObserver().allowsHitTesting(false))
       }
+      .defaultScrollAnchor(.bottom, for: .initialOffset)
+      .defaultScrollAnchor(.top, for: .alignment)
       .id(localChat.selectedSessionID)
     }
   }

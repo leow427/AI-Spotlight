@@ -16,7 +16,8 @@ for query planning and answering often produced only a transcription.
   query refinement and the answer. No model selection or installation is changed.
 - Keep the original question, OCR, relevant observations and retrieved query in
   the final context. Intermediate output never becomes the visible answer.
-- Schedule scrolling from measured layout size instead of message-publication callbacks.
+- Scroll after native view size settles, without SwiftUI geometry or message
+  callbacks. Long histories exercise lazy row measurements.
   Context fitting retains room for sources without truncating the user's question.
 
 ## Real model and search checks
@@ -60,10 +61,17 @@ resolve every issue; the opt-in report makes the same cases repeatable.
 ## Native UI and regression coverage
 
 Final local verification passed: shared-scheme build and static analyzer, plus
-258 discovered tests with zero failures (257 passed; the opt-in model matrix was
-skipped after its separate real runs). All 11 native panel tests also passed five
-iterations each, for 55 successful checks. Build products and reports remain
-outside the repository. GitHub CI status is recorded on the pull request.
+259 discovered tests with zero failures (258 passed; the opt-in model matrix was
+skipped after its separate real runs). All 12 native panel tests passed, with the
+animated long-history regression also repeated three times.
+Build products and reports remain outside the repository. GitHub CI status is
+recorded on the pull request.
+
+After the owner installed SmolVLM 2.2B, another opt-in run passed its initial
+dictionary and RAM OCR cases but failed on the visual color request with a local
+vision runtime error before query refinement. The remaining cases did not run.
+This vision runtime failure remains unresolved; the owner requested focusing on
+OCR/routing and leaving model issues for the upgrade.
 
 Hosted native panel tests submit through the actual composer, including Return
 before the draft-change callback, and verify one search, clean saved questions,
@@ -74,7 +82,11 @@ rendering tests; this is not a claim that all framework logging is silent.
 
 In the signed app launched from Xcode, `/search Look up the dictionary definition
 of serendipity.` produced a definition, five live source links and an empty focused
-composer. The older build's actual capture flow also exposed the literal `/search`
+composer. The final native scroll implementation was also checked in the signed
+app with a live lookup for `ubiquitous`: a definition, two example sentences and
+five source links appeared, the scroll bar reached the bottom, the composer cleared
+and regained focus, and neither per-frame warning appeared in the fresh Xcode log.
+The older build's actual capture flow also exposed the literal `/search`
 command and uncleared draft. Automated dragging of macOS's region selector was
 unreliable, so a complete physical capture-to-answer run on the corrected build
 is **not verified**. Native injected capture tests and real synthetic-image

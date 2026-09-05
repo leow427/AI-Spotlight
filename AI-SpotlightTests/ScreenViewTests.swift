@@ -168,7 +168,11 @@ final class ScreenViewTests: XCTestCase {
     }
   }
 
-  private func verifyFullPanelScreenSubmission(searchEnabled: Bool, commands: String? = nil) async throws {
+  func testLongScreenSearchConversationSettlesAtBottom() async throws {
+    try await verifyFullPanelScreenSubmission(searchEnabled: true, historyCount: 40)
+  }
+
+  private func verifyFullPanelScreenSubmission(searchEnabled: Bool, commands: String? = nil, historyCount: Int = 0) async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenPanel-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let suite = "ScreenPanel-\(UUID())"
@@ -183,8 +187,16 @@ final class ScreenViewTests: XCTestCase {
     let model = LocalModel(id: "text", displayName: "Qwen2.5 3B Instruct Q8_0", fileURL: directory.appendingPathComponent("text.gguf"))
     let engine = PanelScreenEngine(model: model, response: stream.stream, started: { started.fulfill() })
     let search = PanelSearch()
+    let store = ChatSessionStore(applicationSupportDirectory: directory)
+    if historyCount > 0 {
+      let history = (0..<historyCount).map { index in
+        ChatMessage(role: index.isMultiple(of: 2) ? .user : .assistant,
+          content: "Earlier message \(index). " + String(repeating: "A longer reply with wrapping text. ", count: 1 + index % 12))
+      }
+      try store.save([ChatSession(messages: history)])
+    }
     let chat = LocalChatViewModel(engine: engine, webSearch: search,
-                                 sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
+                                 sessionStore: store)
     await chat.refreshInstalledModel()
     let screen = ScreenComposerCoordinator(captureService: PreviewCapture(), ocrService: PreviewOCR())
     let credentials = ScreenTestCredentialStore()
@@ -197,7 +209,7 @@ final class ScreenViewTests: XCTestCase {
     let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, cloudSettings: cloud,
       localChat: chat, screen: screen, modelAdvisor: advisor,
       searchSettings: WebSearchSettings(credentials: PresenceOnlyCredentials()))
-      .transaction { $0.disablesAnimations = true })
+      .transaction { if historyCount == 0 { $0.disablesAnimations = true } })
     let sizes = PanelSizeStore(defaults: defaults)
     sizes.save(NSSize(width: 752, height: 462))
     let controller = SpotlightPanelController(glassAppearance: appearance, sizeStore: sizes, contentView: view)
@@ -260,8 +272,8 @@ final class ScreenViewTests: XCTestCase {
     XCTAssertFalse(chat.isBusy)
     let queries = await search.queries
     XCTAssertEqual(queries, searchEnabled ? ["Swift values.count meaning"] : [])
-    XCTAssertEqual(chat.messages.count, 2)
-    XCTAssertEqual(chat.messages.first?.content, prompt)
+    XCTAssertEqual(chat.messages.count, historyCount + 2)
+    XCTAssertEqual(chat.messages[historyCount].content, prompt)
     XCTAssertEqual(chat.messages.last?.searchSources, searchEnabled ? [PanelSearch.source] : nil)
     XCTAssertEqual(screen.draft, "")
   }
@@ -413,26 +425,32 @@ final class ScreenViewTests: XCTestCase {
   }
 
   private func renderPanel(_ view: NSView, state: String) async throws {
-    await Task.yield()
-    view.layoutSubtreeIfNeeded()
-    view.window?.displayIfNeeded()
-    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-    view.cacheDisplay(in: view.bounds, to: bitmap)
-    let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Panel-\(state).png"))
-    let rendered = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
-    rendered.name = "Screen panel · \(state)"
-    rendered.lifetime = .keepAlways
-    add(rendered)
-    XCTAssertEqual(view.bounds.size, NSSize(width: 752, height: 462))
-    let pixels = try XCTUnwrap(bitmap.cgImage)
-    let text = try await ScreenOCRService().recognize(pixels).text.lowercased()
     let expected = switch state {
     case "attached": ["screen region", "what is the answer"]
     case "loading": ["preparing", "stop", "what is the answer"]
     case "reply": ["the answer is", "streaming", "stop"]
     default: ["the answer is", "local ocr"]
     }
+    // Real animations can leave labels temporarily transparent. Wait for the
+    // same required pixels instead of assuming one main-actor yield is enough.
+    let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+    var text = ""
+    var png = Data()
+    repeat {
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+      view.window?.displayIfNeeded()
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      text = try await ScreenOCRService().recognize(XCTUnwrap(bitmap.cgImage)).text.lowercased()
+    } while !expected.allSatisfy(text.contains) && ContinuousClock.now < deadline
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Panel-\(state).png"))
+    let rendered = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    rendered.name = "Screen panel · \(state)"
+    rendered.lifetime = .keepAlways
+    add(rendered)
+    XCTAssertEqual(view.bounds.size, NSSize(width: 752, height: 462))
     if state == "reply" || state == "finished" {
       // OCR can merge the placeholder with adjacent tool icons. Inspect the
       // native field and its visible bounds to verify the actual composer instead.

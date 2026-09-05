@@ -102,11 +102,11 @@ stage. Cloud upload permission is rechecked between stages; offline fallback
 reuses any completed query and evidence. Source links are retained with the reply;
 intermediate readings, queries, OCR, and excerpts are not saved as chat turns.
 
-The conversation observes the scroll view's measured content size and schedules
-scrolling in a SwiftUI task after layout, with top alignment for short replies
-and a new scroll identity when switching chats. It does not observe message
-arrays or scroll during message publication. This avoids using a stale layout
-height and removes the callback behind the
+The conversation observes native view size changes and waits for measurements
+to settle before scrolling, with top alignment for short replies and a new scroll
+identity when switching chats. Pending scroll work is replaced when another size
+arrives. It does not publish SwiftUI state from geometry callbacks or observe
+message arrays. This avoids using a stale layout height and removes the callback behind the
 `onChange(of: Array<ChatMessage>)` warning.
 
 Leading `/screen` and `/search` commands are parsed together at submission in
