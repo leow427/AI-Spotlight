@@ -78,14 +78,21 @@ Cloud adapters reject image requests marked Local, lacking upload permission,
 or targeting a model without explicit vision support. Local transport only accepts
 numeric loopback addresses, disables proxies/caching, and refuses redirects.
 An offline cloud failure before the first response can fall back to installed
-local vision. When Web Search is enabled, Screen requests retrieve Brave evidence
-before generation and pass it alongside OCR and, for vision routes, the image.
-Only the typed question is sent to Brave; screenshot pixels, OCR, and conversation
-history are excluded. Use a specific question for useful search results.
-Search failures preserve the draft and attachment, and Stop cancels retrieval as
-well as generation. Cloud upload permission is rechecked after search. An offline
-cloud fallback reuses the evidence and fits it to the local vision context budget.
-Source links are retained with the reply; injected OCR and excerpts stay transient.
+local vision. When Web Search is enabled, Screen first reads relevant facts through
+OCR or a dedicated vision generation. The selected Screen model then rewrites the
+user's question using those facts in a separate text generation. Brave searches
+that refined query before the final answer uses the original question, screenshot
+context, observations, and retrieved evidence. A vague "Is this a lot of RAM?"
+can therefore search for the actual memory value read from the screen.
+
+Relevant screen details can enter the query. Raw image bytes, full OCR payloads,
+and history are not attached to Brave. Query instructions limit output to relevant
+details and exclude credentials/personal data, but model relevance and redaction
+are not guaranteed. The composer explains that queries may include screen details.
+Planning and search failures preserve the draft and attachment. Stop cancels every
+stage. Cloud upload permission is rechecked between stages; offline fallback
+reuses any completed query and evidence. Source links are retained with the reply;
+intermediate readings, queries, OCR, and excerpts are not saved as chat turns.
 
 Streaming scroll updates are coalesced to at most once per 50 ms and delivered
 on the main run loop instead of synchronously observing the entire message array.
@@ -226,10 +233,16 @@ failed retrieval, image context budgets, cancellation/replacement, permission
 revocation during search, and reuse of evidence on offline cloud fallback. The
 native composer test enables both tools and streams 80 rapid fragments, checks
 that all text arrives, and waits for the final text to become visible. The full
-245-test suite, shared-scheme build, and static analyzer passed on 2026-09-05;
+250-test suite, shared-scheme build, and static analyzer passed on 2026-09-05;
 the run contained no multiple-updates-per-frame warning. These combined requests
 use deterministic search and model responses, so they verify orchestration and
-UI behavior rather than the quality of a live SmolVLM 500M answer.
+UI behavior rather than the quality of a live SmolVLM 500M answer. Query-refinement
+regressions additionally verify the ordered vision → query → search → answer
+handoff with an empty OCR result, a vague RAM question, and a 57 MB reading;
+invalid/oversized planning output; cancellation during both planning stages;
+and permission revocation before refinement. Screen-plus-search requires one
+extra model call for OCR routes and two for vision routes. It uses the existing
+Screen model selection for every model stage, without a new model preference.
 
 Development proceeded sequentially, with a successful build before each phase's
 targeted tests: capture/panel (16 tests), OCR/preprocessing (11), routing/privacy

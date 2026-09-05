@@ -12,6 +12,8 @@ final class LocalChatViewModel: ObservableObject {
     case benchmarking
     case downloading(ModelDownloadProgress)
     case preparing
+    case readingScreen
+    case refiningSearch
     case searching
     case streaming
     case failed(String)
@@ -55,7 +57,7 @@ final class LocalChatViewModel: ObservableObject {
     // A persistence error must not make a live request accept another submission.
     if activeRequest != nil || generationTask != nil || installationTask != nil { return true }
     switch state {
-    case .installing, .downloading, .benchmarking, .preparing, .searching, .streaming: return true
+    case .installing, .downloading, .benchmarking, .preparing, .readingScreen, .refiningSearch, .searching, .streaming: return true
     case .idle, .failed: return false
     }
   }
@@ -351,7 +353,7 @@ final class LocalChatViewModel: ObservableObject {
     state = .preparing
     contextNotice = nil
     screenRouteDecision = attachment == nil ? nil : decision
-    generationTask = Task { [weak self, engine, visionEngine] in
+    generationTask = Task { [weak self, engine] in
       guard let owner = self else { return }
       var acceptedSession: UUID?
       let responseID = UUID()
@@ -363,12 +365,14 @@ final class LocalChatViewModel: ObservableObject {
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
         var target = model
+        var requestHistory = history
+        var searchQuery: String?
         // Reuse retrieved evidence if an offline cloud attempt falls back to local vision.
         var searchResults: [WebSearchResult]?
         while true {
           do {
             let route = target.route(searchEnabled: searchEnabled)
-            let prepare: ([ChatMessage]) async throws -> PreparedConversation
+            let prepare: ([ChatMessage], PreparedScreenImage?) async throws -> PreparedConversation
             let localModel: LocalModel?
             if target.isLocal {
               let installed = await engine.installedModels()
@@ -377,13 +381,13 @@ final class LocalChatViewModel: ObservableObject {
               localModel = installedModel
               if installedModel.supportsVision {
                 try LocalVisionModelValidation.validate(installedModel)
-                prepare = { try LlamaServerVisionEngine.prepare(messages: $0, image: image, model: installedModel) }
+                prepare = { try LlamaServerVisionEngine.prepare(messages: $0, image: $1, model: installedModel) }
               } else {
                 guard image == nil else { throw ScreenRequestError.textOnlyModel }
                 guard await engine.installedModel()?.id == target.id else {
                   throw LocalInferenceError.bridgeFailure("The selected local model changed. Please send your draft again.")
                 }
-                prepare = { try await engine.prepare(LocalModelRequest(messages: $0)) }
+                prepare = { messages, _ in try await engine.prepare(LocalModelRequest(messages: messages)) }
               }
             } else {
               localModel = nil
@@ -391,50 +395,70 @@ final class LocalChatViewModel: ObservableObject {
               let request = ChatRequest(sessionID: owner.selectedSessionID ?? UUID(), messages: history,
                                         route: route, image: image, allowsCloudImages: image != nil && cloudUploadAllowed())
               try ScreenRequestGuard.validateCloud(request)
-              prepare = { messages in
+              prepare = { messages, image in
                 try CloudContext.prepare(ChatRequest(sessionID: request.sessionID, messages: messages,
                   route: route, image: image, allowsCloudImages: request.allowsCloudImages))
               }
             }
             // Validate the full question and screenshot budget before contacting Brave.
-            var prepared = try await prepare(history)
+            var prepared = try await prepare(requestHistory, image)
             var sources: [WebSearchSource]?
             if searchEnabled {
               try Task.checkCancellation()
               guard owner.activeRequest?.id == active.id else { return }
               if searchResults == nil {
+                if let attachment, searchQuery == nil {
+                  owner.activeRequest = ActiveRequest(id: active.id, route: route, modelDisplayName: target.id)
+                  var facts = attachment.ocrText
+                  if let image {
+                    owner.state = .readingScreen
+                    let observationRequest = [ChatMessage(role: .user, content:
+                      ScreenSearchContext.observationPrompt(question: prompt, ocr: attachment.ocrText))]
+                    let observationContext = try await prepare(observationRequest, image)
+                    let observationStream = try await owner.screenOutput(observationContext, image: image,
+                      target: target, localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed)
+                    facts = try ScreenSearchContext.observations(from:
+                      await ScreenSearchContext.collect(observationStream, maximumBytes: 2_000))
+                    requestHistory[requestHistory.count - 1].content = ScreenPromptContext.text(
+                      userPrompt: prompt, ocr: attachment.ocrText, observations: facts)
+                  }
+                  try Task.checkCancellation()
+                  guard owner.activeRequest?.id == active.id else { return }
+                  if image != nil && !target.isLocal && !cloudUploadAllowed() {
+                    throw ScreenRequestError.cloudUploadNotAllowed
+                  }
+                  owner.state = .refiningSearch
+                  let queryRequest = [ChatMessage(role: .user, content:
+                    ScreenSearchContext.queryPrompt(question: prompt, facts: facts))]
+                  let queryContext = try await prepare(queryRequest, nil)
+                  let queryStream = try await owner.screenOutput(queryContext, image: nil,
+                    target: target, localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed)
+                  searchQuery = try ScreenSearchContext.query(from:
+                    await ScreenSearchContext.collect(queryStream, maximumBytes: 1_024))
+                }
+                try Task.checkCancellation()
+                guard owner.activeRequest?.id == active.id else { return }
+                if image != nil && !target.isLocal && !cloudUploadAllowed() {
+                  throw ScreenRequestError.cloudUploadNotAllowed
+                }
                 owner.state = .searching
-                // Only the typed question goes to Brave, never OCR, pixels, or history.
-                searchResults = try await owner.webSearch.search(prompt, maximumTokens: target.isLocal ? 1_024 : 4_096)
+                // Screen queries resolve the user's references with relevant observed facts.
+                // Pixels, raw OCR, and conversation history are never attached to Brave.
+                searchResults = try await owner.webSearch.search(searchQuery ?? prompt, maximumTokens: target.isLocal ? 1_024 : 4_096)
               }
               try Task.checkCancellation()
               guard owner.activeRequest?.id == active.id else { return }
               owner.state = .preparing
-              let grounded = try await WebSearchContext.prepare(messages: history, results: searchResults!, using: prepare)
+              let grounded = try await WebSearchContext.prepare(messages: requestHistory, results: searchResults!) {
+                try await prepare($0, image)
+              }
               prepared = grounded.prepared
               sources = grounded.sources
             }
             try Task.checkCancellation()
             guard owner.activeRequest?.id == active.id else { return }
-            let output: AsyncThrowingStream<String, Error>
-            if let localModel {
-              if localModel.supportsVision {
-                // Release the normal text model before loading the separate vision profile.
-                await engine.unload()
-                try Task.checkCancellation()
-                guard owner.activeRequest?.id == active.id else { return }
-                output = visionEngine.stream(messages: prepared.messages, image: image, model: localModel)
-              } else {
-                output = engine.stream(LocalModelRequest(messages: prepared.messages))
-              }
-            } else {
-              guard let providerID = CloudProviderID(rawValue: target.provider) else { throw CloudProviderError.invalidResponse }
-              let request = ChatRequest(sessionID: owner.selectedSessionID ?? UUID(), messages: prepared.messages,
-                                        route: route, image: image, allowsCloudImages: image != nil && cloudUploadAllowed())
-              // Upload consent may have changed while search was in flight.
-              try ScreenRequestGuard.validateCloud(request)
-              output = owner.cloudProviders.provider(for: providerID).textStream(request)
-            }
+            let output = try await owner.screenOutput(prepared, image: image, target: target,
+              localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed)
             owner.contextNotice = prepared.notice
             owner.activeRequest = ActiveRequest(id: active.id, route: route, modelDisplayName: target.id)
             for try await fragment in output {
@@ -478,6 +502,34 @@ final class LocalChatViewModel: ObservableObject {
         owner.finishGeneration(id: active.id, error: error)
       }
     }
+  }
+
+  private func screenOutput(
+    _ prepared: PreparedConversation, image: PreparedScreenImage?, target: ScreenModel,
+    localModel: LocalModel?, activeID: UUID, cloudUploadAllowed: @MainActor () -> Bool
+  ) async throws -> AsyncThrowingStream<String, Error> {
+    try Task.checkCancellation()
+    guard activeRequest?.id == activeID else { throw CancellationError() }
+    if let localModel {
+      if localModel.supportsVision {
+        await engine.unload()
+        try Task.checkCancellation()
+        guard activeRequest?.id == activeID else { throw CancellationError() }
+        return visionEngine.stream(messages: prepared.messages, image: image, model: localModel)
+      }
+      guard await engine.installedModel()?.id == target.id else {
+        throw LocalInferenceError.bridgeFailure("The selected local model changed. Please send your draft again.")
+      }
+      try Task.checkCancellation()
+      guard activeRequest?.id == activeID else { throw CancellationError() }
+      return engine.stream(LocalModelRequest(messages: prepared.messages))
+    }
+    guard let providerID = CloudProviderID(rawValue: target.provider) else { throw CloudProviderError.invalidResponse }
+    let request = ChatRequest(sessionID: selectedSessionID ?? UUID(), messages: prepared.messages,
+      route: target.route, image: image, allowsCloudImages: image != nil && cloudUploadAllowed())
+    // Recheck consent at every image-bearing stage, including after search.
+    try ScreenRequestGuard.validateCloud(request)
+    return cloudProviders.provider(for: providerID).textStream(request)
   }
 
   func submitCloud(

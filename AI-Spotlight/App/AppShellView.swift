@@ -120,7 +120,7 @@ struct AppShellView: View {
               if isSearchEnabled {
                 HStack(spacing: 6) {
                   Text(searchSettings.hasAPIKey
-                    ? "Web Search · Your question is sent to Brave."
+                    ? "Web Search · Queries sent to Brave may include screen details."
                     : "Add a Brave Search API key to search the web.")
                   if !searchSettings.hasAPIKey {
                     Button("Settings", action: openSettings).buttonStyle(.plain)
@@ -394,6 +394,8 @@ struct AppShellView: View {
 
   private var requestPhase: String {
     switch localChat.state {
+    case .readingScreen: "Reading screen"
+    case .refiningSearch: "Preparing search query"
     case .searching: "Searching with Brave"
     case .streaming: "Streaming"
     default: "Preparing"
@@ -417,7 +419,7 @@ struct AppShellView: View {
           ProgressView(value: progress.fractionCompleted)
             .frame(width: 72)
           Text("Downloading \(progress.fractionCompleted, format: .percent.precision(.fractionLength(0)))")
-        case .preparing, .searching:
+        case .preparing, .readingScreen, .refiningSearch, .searching:
           ProgressView()
             .controlSize(.small)
           Text("Loading local model…")
@@ -461,7 +463,7 @@ struct AppShellView: View {
           Button("Advanced Settings", action: openSettings)
         } else {
           switch localChat.state {
-          case .preparing, .searching:
+          case .preparing, .readingScreen, .refiningSearch, .searching:
             ProgressView()
               .controlSize(.small)
             Text("Connecting to \(cloudSettings.preferredProvider.displayName)…")

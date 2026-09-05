@@ -30,26 +30,43 @@ compact without changing the icons in the composer.
 This screenshot is an intentional checked-in UI reference; build outputs and test
 result bundles remain outside the repository.
 
-In Local mode, Brave receives the current question and the local model generates
-the answer. Cloud mode passes the retrieved evidence to the selected provider,
+For requests without Screen, Local mode sends the current question to Brave and
+the local model generates the answer. Cloud mode passes evidence to the provider,
 including ChatGPT via the existing Codex bridge. Auto uses the same Brave search
 and keeps choosing the model based on task complexity and context size. Merely
 mentioning web search in ordinary text does not enable the tool.
 
-Web Search also works with an enabled Screen attachment. The selected OCR text
-model or vision model receives the screenshot context together with retrieved
-evidence. Brave still receives only the typed question, so include the topic you
-want researched; screenshot text and pixels are not used to build the query.
-Evidence is fitted around the vision model's image budget. The smallest image
-models may still give terse or incomplete answers even when sources are supplied.
+With Screen attached, the app first reads relevant facts using local OCR or the
+selected vision model. A separate text generation with the selected Screen model
+rewrites the question into one self-contained query, resolving references such as
+"this" with the observed names, values, and units. For example, "Is this a lot of
+RAM?" plus an observed "57 MB" can become "Is 57 MB a lot of RAM usage?".
+Brave receives that refined query, and the final model receives the original
+question, screen context, visual observations, and retrieved evidence. Search
+still runs when enabled even if the model could answer without it.
+
+The panel shows Reading screen, Preparing search query, and Searching with Brave.
+Readable OCR skips the extra vision call. No intermediate model output is shown
+as the answer or saved as a chat turn. Empty, unrecognized, or oversized planning
+output preserves the draft and attachment instead of silently searching the
+original vague question. Stop applies throughout the pipeline.
+
+Derived queries can include relevant screen details. Prompts instruct the model
+to omit unrelated text, credentials, and personal details and treat screen content
+as untrusted data. These are model instructions, not a guarantee of perfect
+relevance or redaction. Image pixels and full OCR/history payloads are not attached
+to Brave. Evidence is fitted around the final model's image budget. Small models
+may misread details or write weak queries; this flow does not improve their
+underlying accuracy and adds one or two model calls before retrieval.
 
 ![A Screen reply with Web Search sources](images/screen-search.png)
 
 This native panel regression uses deterministic screenshot, search, and response
 fixtures; it demonstrates tool integration rather than model answer quality.
 
-Only the current question is sent to Brave, normalized to its 400-character /
-50-word query limit. The model still receives the full question. Conversation
+Without Screen, only the current question is sent to Brave, normalized to its
+400-character / 50-word query limit. With Screen, the refined query must fit the
+same limits. The final model still receives the full original question. Conversation
 history and model credentials are not sent to Brave. Search uses an ephemeral
 URLSession with redirects disabled and a 30-second timeout.
 

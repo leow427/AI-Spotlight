@@ -246,7 +246,7 @@ final class ScreenViewTests: XCTestCase {
     XCTAssertNil(screen.attachment)
     XCTAssertFalse(chat.isBusy)
     let queries = await search.queries
-    XCTAssertEqual(queries, searchEnabled ? [prompt] : [])
+    XCTAssertEqual(queries, searchEnabled ? ["Swift values.count meaning"] : [])
     XCTAssertEqual(chat.messages.count, 2)
     XCTAssertEqual(chat.messages.last?.searchSources, searchEnabled ? [PanelSearch.source] : nil)
     XCTAssertEqual(screen.draft, "")
@@ -528,7 +528,13 @@ private actor PanelScreenEngine: LocalModelEngine {
   func install(_ model: LocalModel) {}
   func selectModel(id: String) {}
   func download(_ model: LocalModelDescriptor, progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) -> LocalModel { self.model }
-  nonisolated func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> { started(); return response }
+  nonisolated func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> {
+    if request.prompt.hasPrefix("Create a web search query") {
+      return AsyncThrowingStream { $0.yield("Swift values.count meaning"); $0.finish() }
+    }
+    started()
+    return response
+  }
   func unload() {}
 }
 
