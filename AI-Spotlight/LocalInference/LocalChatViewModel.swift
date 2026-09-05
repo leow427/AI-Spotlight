@@ -328,6 +328,7 @@ final class LocalChatViewModel: ObservableObject {
     decision: ScreenRoutingPolicy.Decision,
     selectedMode: ChatMode,
     searchEnabled: Bool = false,
+    searchTextModel: ScreenModel? = nil,
     cloudUploadAllowed: @escaping @MainActor () -> Bool,
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
@@ -342,7 +343,11 @@ final class LocalChatViewModel: ObservableObject {
       return
     }
     let userMessage = ChatMessage(role: .user, content: prompt)
-    let requestText = attachment.map { ScreenPromptContext.text(userPrompt: prompt, ocr: $0.ocrText) } ?? prompt
+    let preferOCR = attachment.map {
+      ScreenRoutingPolicy.hasConfidentTextForLookup(prompt: prompt,
+        ocr: ScreenOCRResult(text: $0.ocrText, confidence: $0.ocrConfidence))
+    } ?? false
+    let requestText = attachment.map { ScreenPromptContext.text(userPrompt: prompt, ocr: $0.ocrText, preferOCR: preferOCR) } ?? prompt
     var current = userMessage
     current.content = requestText
     let history = messages + [current]
@@ -365,7 +370,9 @@ final class LocalChatViewModel: ObservableObject {
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
         var target = model
+        var requestImage = image
         var requestHistory = history
+        var screenFacts: String?
         var searchQuery: String?
         // Reuse retrieved evidence if an offline cloud attempt falls back to local vision.
         var searchResults: [WebSearchResult]?
@@ -383,7 +390,7 @@ final class LocalChatViewModel: ObservableObject {
                 try LocalVisionModelValidation.validate(installedModel)
                 prepare = { try LlamaServerVisionEngine.prepare(messages: $0, image: $1, model: installedModel) }
               } else {
-                guard image == nil else { throw ScreenRequestError.textOnlyModel }
+                guard requestImage == nil else { throw ScreenRequestError.textOnlyModel }
                 guard await engine.installedModel()?.id == target.id else {
                   throw LocalInferenceError.bridgeFailure("The selected local model changed. Please send your draft again.")
                 }
@@ -393,7 +400,7 @@ final class LocalChatViewModel: ObservableObject {
               localModel = nil
               guard CloudProviderID(rawValue: target.provider) != nil else { throw CloudProviderError.invalidResponse }
               let request = ChatRequest(sessionID: owner.selectedSessionID ?? UUID(), messages: history,
-                                        route: route, image: image, allowsCloudImages: image != nil && cloudUploadAllowed())
+                                        route: route, image: requestImage, allowsCloudImages: requestImage != nil && cloudUploadAllowed())
               try ScreenRequestGuard.validateCloud(request)
               prepare = { messages, image in
                 try CloudContext.prepare(ChatRequest(sessionID: request.sessionID, messages: messages,
@@ -401,7 +408,7 @@ final class LocalChatViewModel: ObservableObject {
               }
             }
             // Validate the full question and screenshot budget before contacting Brave.
-            var prepared = try await prepare(requestHistory, image)
+            var prepared = try await prepare(requestHistory, requestImage)
             var sources: [WebSearchSource]?
             if searchEnabled {
               try Task.checkCancellation()
@@ -409,8 +416,8 @@ final class LocalChatViewModel: ObservableObject {
               if searchResults == nil {
                 if let attachment, searchQuery == nil {
                   owner.activeRequest = ActiveRequest(id: active.id, route: route, modelDisplayName: target.id)
-                  var facts = attachment.ocrText
-                  if let image {
+                  var facts = screenFacts ?? attachment.ocrText
+                  if let image = requestImage, screenFacts == nil {
                     owner.state = .readingScreen
                     let observationRequest = [ChatMessage(role: .user, content:
                       ScreenSearchContext.observationPrompt(question: prompt, ocr: attachment.ocrText))]
@@ -420,25 +427,36 @@ final class LocalChatViewModel: ObservableObject {
                     facts = try ScreenSearchContext.observations(from:
                       await ScreenSearchContext.collect(observationStream, maximumBytes: 2_000))
                     requestHistory[requestHistory.count - 1].content = ScreenPromptContext.text(
-                      userPrompt: prompt, ocr: attachment.ocrText, observations: facts)
+                      userPrompt: prompt, ocr: attachment.ocrText, observations: facts, preferOCR: preferOCR)
                   }
+                  screenFacts = facts
                   try Task.checkCancellation()
                   guard owner.activeRequest?.id == active.id else { return }
-                  if image != nil && !target.isLocal && !cloudUploadAllowed() {
+                  // Vision reads the pixels; the selected text model handles the
+                  // search intent and evidence. Small VLMs often only transcribe.
+                  if requestImage != nil, target.isLocal, let searchTextModel,
+                     searchTextModel.isLocal, searchTextModel.supportsText, !searchTextModel.supportsVision {
+                    target = searchTextModel
+                    requestImage = nil
+                    continue // Revalidate context with the text model's tokenizer.
+                  }
+                  if requestImage != nil && !target.isLocal && !cloudUploadAllowed() {
                     throw ScreenRequestError.cloudUploadNotAllowed
                   }
                   owner.state = .refiningSearch
+                  let queryFacts = preferOCR ? attachment.ocrText : facts
                   let queryRequest = [ChatMessage(role: .user, content:
-                    ScreenSearchContext.queryPrompt(question: prompt, facts: facts))]
+                    ScreenSearchContext.queryPrompt(question: prompt, facts: queryFacts, ocr: attachment.ocrText))]
                   let queryContext = try await prepare(queryRequest, nil)
                   let queryStream = try await owner.screenOutput(queryContext, image: nil,
-                    target: target, localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed)
+                    target: target, localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed,
+                    temperature: 0)
                   searchQuery = try ScreenSearchContext.query(from:
                     await ScreenSearchContext.collect(queryStream, maximumBytes: 1_024))
                 }
                 try Task.checkCancellation()
                 guard owner.activeRequest?.id == active.id else { return }
-                if image != nil && !target.isLocal && !cloudUploadAllowed() {
+                if requestImage != nil && !target.isLocal && !cloudUploadAllowed() {
                   throw ScreenRequestError.cloudUploadNotAllowed
                 }
                 owner.state = .searching
@@ -449,16 +467,22 @@ final class LocalChatViewModel: ObservableObject {
               try Task.checkCancellation()
               guard owner.activeRequest?.id == active.id else { return }
               owner.state = .preparing
+              if let attachment, let searchQuery {
+                requestHistory[requestHistory.count - 1].content = ScreenPromptContext.text(userPrompt: prompt,
+                  ocr: attachment.ocrText, observations: image == nil ? nil : screenFacts, preferOCR: preferOCR)
+                  + "\n\nSearch query used to retrieve the evidence: " + searchQuery
+              }
               let grounded = try await WebSearchContext.prepare(messages: requestHistory, results: searchResults!) {
-                try await prepare($0, image)
+                try await prepare($0, requestImage)
               }
               prepared = grounded.prepared
               sources = grounded.sources
             }
             try Task.checkCancellation()
             guard owner.activeRequest?.id == active.id else { return }
-            let output = try await owner.screenOutput(prepared, image: image, target: target,
-              localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed)
+            let output = try await owner.screenOutput(prepared, image: requestImage, target: target,
+              localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed,
+              temperature: searchEnabled ? 0.2 : 0.7)
             owner.contextNotice = prepared.notice
             owner.activeRequest = ActiveRequest(id: active.id, route: route, modelDisplayName: target.id)
             for try await fragment in output {
@@ -484,7 +508,7 @@ final class LocalChatViewModel: ObservableObject {
             break
           } catch {
             // A genuinely offline cloud attempt can fall back before any reply is accepted.
-            if !target.isLocal, image != nil, acceptedSession == nil,
+            if !target.isLocal, requestImage != nil, acceptedSession == nil,
                normalizedCloudError(error) as? CloudProviderError == .offline,
                let fallback = (await engine.installedModels()).first(where: \.supportsVision) {
               try Task.checkCancellation()
@@ -506,7 +530,8 @@ final class LocalChatViewModel: ObservableObject {
 
   private func screenOutput(
     _ prepared: PreparedConversation, image: PreparedScreenImage?, target: ScreenModel,
-    localModel: LocalModel?, activeID: UUID, cloudUploadAllowed: @MainActor () -> Bool
+    localModel: LocalModel?, activeID: UUID, cloudUploadAllowed: @MainActor () -> Bool,
+    temperature: Float = 0.7
   ) async throws -> AsyncThrowingStream<String, Error> {
     try Task.checkCancellation()
     guard activeRequest?.id == activeID else { throw CancellationError() }
@@ -522,7 +547,7 @@ final class LocalChatViewModel: ObservableObject {
       }
       try Task.checkCancellation()
       guard activeRequest?.id == activeID else { throw CancellationError() }
-      return engine.stream(LocalModelRequest(messages: prepared.messages))
+      return engine.stream(LocalModelRequest(messages: prepared.messages, temperature: temperature))
     }
     guard let providerID = CloudProviderID(rawValue: target.provider) else { throw CloudProviderError.invalidResponse }
     let request = ChatRequest(sessionID: selectedSessionID ?? UUID(), messages: prepared.messages,

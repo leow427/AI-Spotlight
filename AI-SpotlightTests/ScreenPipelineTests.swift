@@ -7,6 +7,125 @@ import XCTest
 final class ScreenPipelineTests: XCTestCase {
   private let ocr = "let answer_count = values.count\nprint(answer_count)\nerror: cannot find variable in scope"
 
+  func testConfidentShortTextLookupsUseOCRButVisualQuestionsStillNeedVision() {
+    for (prompt, visible) in [
+      ("Can you look up what this word means from the dictionary?", "serendipity"),
+      ("Is this a lot of RAM?", "57 MB"),
+      ("What does this error mean and how do I fix it?", "HTTP 429"),
+      ("What does this mean? Search for an explanation.", "HTTP 404"),
+    ] {
+      XCTAssertFalse(ScreenRoutingPolicy.requiresVision(prompt: prompt, ocr: ScreenOCRResult(text: visible, confidence: 0.99)))
+      XCTAssertTrue(ScreenRoutingPolicy.requiresVision(prompt: prompt, ocr: ScreenOCRResult(text: visible, confidence: 0.5)))
+      XCTAssertTrue(ScreenRoutingPolicy.requiresVision(prompt: prompt, ocr: .empty))
+    }
+    for prompt in ["What color is this word?", "Explain this chart's memory usage", "What animal is this?"] {
+      XCTAssertTrue(ScreenRoutingPolicy.requiresVision(prompt: prompt, ocr: ScreenOCRResult(text: "57 MB", confidence: 0.99)))
+    }
+  }
+
+  func testComposerCommandsConsumeEitherOrderOnceAndKeepLiteralQuestionText() {
+    for draft in ["/screen /search question", " /SEARCH\n/SCREEN question", "/screen /search /screen /search question"] {
+      let commands = ComposerCommands(draft)
+      XCTAssertTrue(commands.screen)
+      XCTAssertTrue(commands.search)
+      XCTAssertEqual(commands.prompt, "question")
+      XCTAssertEqual(commands.captureDraft, "/screen question")
+    }
+    for draft in ["Explain /screen and /search", "\"/screen /search\"", "/screenshot question", "/searching question"] {
+      let commands = ComposerCommands(draft)
+      XCTAssertFalse(commands.screen)
+      XCTAssertFalse(commands.search)
+      XCTAssertEqual(commands.prompt, draft)
+    }
+    XCTAssertEqual(ComposerCommands("/screen /search").prompt, "")
+    XCTAssertEqual(ComposerCommands("/screen /search").captureDraft, "/screen")
+    XCTAssertEqual(ComposerCommands("/search question /screen").prompt, "question /screen")
+  }
+
+  func testSelectedTextModelRefinesVisionFactsAndAnswersWithEvidence() async throws {
+    let vision = PipelineVision(controlledStreams: [planningStream("Memory usage: 57 MB")])
+    let search = PipelineSearch(onSearch: { _ in XCTAssertEqual(vision.requests.count, 1) })
+    let fixture = try makeFixture(vision: vision, withVision: true, search: search)
+    var screenshot = try attachment()
+    screenshot.ocrText = "Memory: 57 MB"
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen("Is this a lot of RAM?", attachment: screenshot, decision: .vision(fixture.visual.screenModel),
+      selectedMode: .local, searchEnabled: true, searchTextModel: fixture.text.screenModel, cloudUploadAllowed: { false })
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    XCTAssertEqual(fixture.chat.state, .idle)
+    XCTAssertEqual(vision.requests.count, 1, "Vision should only read the image")
+    XCTAssertEqual(vision.imagePresence, [true])
+    let requests = await fixture.engine.requests
+    let query = try XCTUnwrap(requests.first { $0.prompt.hasPrefix("Create a web search query") })
+    XCTAssertFalse(query.prompt.contains("Memory usage: 57 MB"), "Confident OCR supplies the exact text lookup subject")
+    XCTAssertTrue(query.prompt.contains("Memory: 57 MB"), "Retain OCR spelling and labels alongside the visual reading")
+    XCTAssertTrue(query.prompt.contains("Is this a lot of RAM?"))
+    XCTAssertTrue(requests.last?.prompt.contains("Memory evidence fixture") == true)
+    XCTAssertEqual(fixture.chat.messages.map(\.content), ["Is this a lot of RAM?", "local answer"])
+    XCTAssertEqual(fixture.chat.messages.last?.searchSources, [PipelineSearch.source])
+  }
+
+  func testTextHandoffNeverIntroducesACloudRouteForALocalScreenshot() async throws {
+    let fixture = try makeFixture(withVision: true)
+    let cloud = CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen("Is this a lot?", attachment: try attachment(), decision: .vision(fixture.visual.screenModel),
+      selectedMode: .local, searchEnabled: true, searchTextModel: cloud, cloudUploadAllowed: { false })
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    XCTAssertEqual(fixture.chat.state, .idle)
+    XCTAssertTrue(fixture.cloud.requests.isEmpty)
+    XCTAssertEqual(fixture.vision.requests.count, 3)
+  }
+
+  func testConflictingVisualTranscriptionDoesNotReplaceConfidentLookupText() async throws {
+    for confidence: Float in [0.99, 0.5] {
+      let vision = PipelineVision(controlledStreams: [planningStream("Serenity in black text")])
+      let fixture = try makeFixture(vision: vision, withVision: true)
+      var screenshot = try attachment()
+      screenshot.ocrText = "serendipity"
+      screenshot.ocrConfidence = confidence
+      let done = finished(fixture.chat)
+      fixture.chat.submitScreen("What color is this word, and what is its dictionary definition?", attachment: screenshot,
+        decision: .vision(fixture.visual.screenModel), selectedMode: .local, searchEnabled: true,
+        searchTextModel: fixture.text.screenModel, cloudUploadAllowed: { false })
+      await fulfillment(of: [done.expectation], timeout: 3)
+      done.token.cancel()
+      XCTAssertEqual(fixture.chat.state, .idle)
+      let requests = await fixture.engine.requests
+      let query = try XCTUnwrap(requests.first { $0.prompt.hasPrefix("Create a web search query") })
+      XCTAssertTrue(query.prompt.contains("serendipity"))
+      let answer = try XCTUnwrap(requests.last?.prompt)
+      if confidence > 0.85 {
+        XCTAssertFalse(query.prompt.contains("Serenity"))
+        XCTAssertTrue(answer.contains("Use the OCR for exact words"))
+      } else {
+        XCTAssertTrue(query.prompt.contains("Serenity"), "Weak OCR must not discard the visual reading")
+        XCTAssertTrue(answer.contains("OCR may contain errors"))
+        XCTAssertFalse(answer.contains("Use the OCR for exact words"))
+      }
+      XCTAssertTrue(answer.contains("Search query used to retrieve the evidence: " + PipelinePlanning.query))
+    }
+  }
+
+  func testMissingSelectedTextModelAfterReadingKeepsDraftAndDoesNotSearch() async throws {
+    let fixture = try makeFixture(withVision: true)
+    var accepted = false
+    let missing = ScreenModel(id: "removed", provider: "local", isLocal: true, capabilities: .textOnly)
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen("Is this a lot?", attachment: try attachment(), decision: .vision(fixture.visual.screenModel),
+      selectedMode: .local, searchEnabled: true, searchTextModel: missing, cloudUploadAllowed: { false }) { accepted = true }
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    XCTAssertFalse(accepted)
+    XCTAssertEqual(fixture.vision.requests.count, 1)
+    let queries = await fixture.search.queries
+    XCTAssertTrue(queries.isEmpty)
+    XCTAssertTrue(fixture.chat.messages.isEmpty)
+    XCTAssertEqual(fixture.chat.state, .failed(LocalInferenceError.noModelInstalled.localizedDescription))
+  }
+
   func testVisionReadingFeedsQueryRefinementBeforeSearchAndAnswer() async throws {
     let vision = PipelineVision(controlledStreams: [planningStream("Memory usage: 57 MB"), planningStream("Is 57 MB a lot of RAM usage?")])
     let search = PipelineSearch(onSearch: { query in
@@ -106,7 +225,7 @@ final class ScreenPipelineTests: XCTestCase {
 
   func testQueryNormalizationAcceptsSimpleLabelsAndRejectsOverlongOrControlText() throws {
     XCTAssertEqual(try ScreenSearchContext.query(from: "  Query: \"Is 57 MB a lot of RAM?\"  "), "Is 57 MB a lot of RAM?")
-    for query in [String(repeating: "x", count: 401), String(repeating: "a ", count: 51), "abc\0def"] {
+    for query in [String(repeating: "x", count: 401), String(repeating: "a ", count: 51), "abc\0def", "Yes.", "No", "Sure!"] {
       XCTAssertThrowsError(try ScreenSearchContext.query(from: query))
     }
   }
@@ -174,7 +293,8 @@ final class ScreenPipelineTests: XCTestCase {
           XCTAssertEqual(fixture.vision.imageCount, 2)
           XCTAssertEqual(fixture.vision.requests.count, 3)
           XCTAssertTrue(fixture.vision.requests[0].last?.content.contains(prompt) == true)
-          XCTAssertTrue(fixture.vision.requests[1].last?.content.contains(PipelinePlanning.facts) == true)
+          XCTAssertTrue(fixture.vision.requests[1].last?.content.contains("Screen facts:\n59.7 MB") == true,
+                        "Confident short OCR supplies the lookup subject rather than a second transcription")
           XCTAssertTrue(fixture.cloud.requests.isEmpty)
         } else {
           let request = await fixture.engine.lastRequest()

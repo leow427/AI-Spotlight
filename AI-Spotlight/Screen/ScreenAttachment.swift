@@ -50,3 +50,31 @@ enum ScreenCommand {
     return remainder.trimmingCharacters(in: .whitespacesAndNewlines)
   }
 }
+
+/// Consume the leading tool command sequence atomically at submission. Commands
+/// embedded in the actual question remain ordinary text.
+struct ComposerCommands: Equatable {
+  let prompt: String
+  let screen: Bool
+  let search: Bool
+
+  init(_ draft: String) {
+    var remainder = draft
+    var screen = false
+    var search = false
+    while true {
+      if let next = ScreenCommand.remainder(in: remainder) {
+        screen = true
+        remainder = next
+      } else if let next = SearchCommand.remainder(in: remainder) {
+        search = true
+        remainder = next
+      } else { break }
+    }
+    self.prompt = remainder
+    self.screen = screen
+    self.search = search
+  }
+
+  var captureDraft: String { "/screen" + (prompt.isEmpty ? "" : " " + prompt) }
+}

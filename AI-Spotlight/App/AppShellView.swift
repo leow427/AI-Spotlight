@@ -24,6 +24,7 @@ struct AppShellView: View {
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
   @State private var selectedMode = ChatMode.auto
+  @State private var conversationContentSize = CGSize.zero
   @FocusState private var isComposerFocused: Bool
 
   init(
@@ -234,10 +235,11 @@ struct AppShellView: View {
       await modelAdvisor.start(installedModels: localChat.installedModels)
     }
     .onChange(of: draft) { _, value in
-      guard let remainder = SearchCommand.remainder(in: value) else { return }
+      let commands = ComposerCommands(value)
+      guard commands.search, value == draft else { return }
       isSearchPresented = true
       isSearchEnabled = true
-      draft = remainder
+      draft = commands.screen ? commands.captureDraft : commands.prompt
     }
     .onChange(of: isSearchPresented) { _, _ in
       isComposerFocused = true
@@ -353,24 +355,20 @@ struct AppShellView: View {
           }
           .padding(24)
         }
-        .onReceive(conversationScrollUpdates) { messageID in
-          guard messageID == localChat.messages.last?.id else { return }
+        .defaultScrollAnchor(.bottom, for: .initialOffset)
+        .defaultScrollAnchor(.top, for: .alignment)
+        .onScrollGeometryChange(for: CGSize.self) { $0.contentSize } action: { _, size in
+          conversationContentSize = size
+        }
+        // Scroll after layout has measured the new reply. A task coalesces size
+        // changes without mutating scrolling from a message-change callback.
+        .task(id: conversationContentSize) {
+          guard !Task.isCancelled, let messageID = localChat.messages.last?.id else { return }
           proxy.scrollTo(messageID, anchor: .bottom)
         }
       }
+      .id(localChat.selectedSessionID)
     }
-  }
-
-  private var conversationScrollUpdates: AnyPublisher<UUID, Never> {
-    localChat.$sessions.combineLatest(localChat.$selectedSessionID)
-      .map { sessions, selectedID in sessions.first { $0.id == selectedID }?.messages.last }
-      .removeDuplicates()
-      // Token bursts can publish several times in one frame. Schedule scrolling
-      // outside SwiftUI's change observation, retaining the final update in each burst.
-      .throttle(for: .milliseconds(50), scheduler: RunLoop.main, latest: true)
-      .compactMap { $0?.id }
-      .receive(on: RunLoop.main)
-      .eraseToAnyPublisher()
   }
 
   @ViewBuilder
@@ -732,7 +730,15 @@ struct AppShellView: View {
 
   private func submitDraft() {
     guard !localChat.isBusy, !screen.isBusy else { return }
-    if ScreenCommand.remainder(in: draft) != nil {
+    // Capture can finish and submit again before SwiftUI delivers onChange.
+    // Resolve all requested tools now; no view-update timing controls routing.
+    let commands = ComposerCommands(draft)
+    if commands.search {
+      isSearchPresented = true
+      isSearchEnabled = true
+    }
+    if commands.screen {
+      draft = commands.captureDraft
       Task {
         let automaticPrompt = await screen.capture(submittedCommand: true)
         isComposerFocused = true
@@ -740,6 +746,7 @@ struct AppShellView: View {
       }
       return
     }
+    if commands.search { draft = commands.prompt }
     if screen.isEnabled, let attachment = screen.attachment {
       submitScreenAttachment(attachment)
       return
@@ -790,7 +797,7 @@ struct AppShellView: View {
     case .text, .vision:
       let prompt = draft
       localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
-        searchEnabled: isSearchEnabled,
+        searchEnabled: isSearchEnabled, searchTextModel: localChat.installedModel?.screenModel,
         cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
           if draft == prompt { draft = "" }
           if screen.attachment?.id == attachment.id { screen.removeAttachment() }

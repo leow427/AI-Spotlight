@@ -162,7 +162,13 @@ final class ScreenViewTests: XCTestCase {
     try await verifyFullPanelScreenSubmission(searchEnabled: true)
   }
 
-  private func verifyFullPanelScreenSubmission(searchEnabled: Bool) async throws {
+  func testCombinedCommandsSearchBeforeAutomaticScreenSubmission() async throws {
+    for commands in ["/screen /search", "/search /screen", "/SCREEN /SEARCH", "/screen /search /screen /search"] {
+      try await verifyFullPanelScreenSubmission(searchEnabled: true, commands: commands)
+    }
+  }
+
+  private func verifyFullPanelScreenSubmission(searchEnabled: Bool, commands: String? = nil) async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenPanel-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let suite = "ScreenPanel-\(UUID())"
@@ -197,12 +203,19 @@ final class ScreenViewTests: XCTestCase {
     let controller = SpotlightPanelController(glassAppearance: appearance, sizeStore: sizes, contentView: view)
     controller.show()
     defer { controller.hide() }
-    _ = await screen.capture()
     let prompt = "What is the answer to this piece of code?"
-    screen.draft = (searchEnabled ? "/search " : "") + prompt
-    try await renderPanel(view, state: "attached")
-    XCTAssertEqual(screen.draft, prompt)
-    try submitComposer(in: view)
+    if let commands {
+      view.layoutSubtreeIfNeeded()
+      screen.draft = commands + " " + prompt
+      // Submit in the same turn, before SwiftUI can run an onChange action.
+      try submitComposer(in: view)
+    } else {
+      _ = await screen.capture()
+      screen.draft = (searchEnabled ? "/search " : "") + prompt
+      try await renderPanel(view, state: "attached")
+      XCTAssertEqual(screen.draft, prompt)
+      try submitComposer(in: view)
+    }
     await fulfillment(of: [started], timeout: 5)
     try await renderPanel(view, state: "loading")
     let reply = expectation(description: "First reply appears")
@@ -248,6 +261,7 @@ final class ScreenViewTests: XCTestCase {
     let queries = await search.queries
     XCTAssertEqual(queries, searchEnabled ? ["Swift values.count meaning"] : [])
     XCTAssertEqual(chat.messages.count, 2)
+    XCTAssertEqual(chat.messages.first?.content, prompt)
     XCTAssertEqual(chat.messages.last?.searchSources, searchEnabled ? [PanelSearch.source] : nil)
     XCTAssertEqual(screen.draft, "")
   }

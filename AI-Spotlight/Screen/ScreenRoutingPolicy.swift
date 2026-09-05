@@ -119,8 +119,17 @@ enum ScreenRoutingPolicy {
     }
   }
 
+  static func hasConfidentTextForLookup(prompt: String, ocr: ScreenOCRResult) -> Bool {
+    let textLookup = prompt.lowercased().range(of: #"\b(words?|terms?|dictionary|definitions?|meaning|means?|text|ram|memory|errors?|code)\b"#,
+      options: .regularExpression) != nil
+    return textLookup && (1...40).contains(ocr.nonWhitespaceCharacterCount)
+      && ocr.confidence.isFinite && ocr.confidence >= 0.85
+  }
+
   static func requiresVision(prompt: String, ocr: ScreenOCRResult) -> Bool {
-    guard ocr.isUsable else { return true }
+    // A confidently read word/value/code is enough for a text lookup. Explicit
+    // visual questions below still require the image.
+    guard ocr.isUsable || hasConfidentTextForLookup(prompt: prompt, ocr: ocr) else { return true }
     let text = prompt.lowercased()
     // Text extraction is meaningful even when the source is a chart or photo.
     let extraction = ["transcribe", "extract the text", "read the text", "copy the text", "ocr"]

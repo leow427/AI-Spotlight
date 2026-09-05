@@ -79,8 +79,16 @@ or targeting a model without explicit vision support. Local transport only accep
 numeric loopback addresses, disables proxies/caching, and refuses redirects.
 An offline cloud failure before the first response can fall back to installed
 local vision. When Web Search is enabled, Screen first reads relevant facts through
-OCR or a dedicated vision generation. The selected Screen model then rewrites the
-user's question using those facts in a separate text generation. Brave searches
+OCR or a dedicated vision generation. On a local vision route, the selected local
+text-only model takes over query refinement and the final answer when available;
+otherwise the Screen model continues. No model preference or installed library is
+changed. For confident short text lookups, OCR supplies the query subject even if
+vision misreads the spelling; other queries retain the visual observations and
+OCR. Query examples preserve dictionary, memory, and error-resolution intent. Local
+text query generation uses temperature 0 and grounded Screen answers use 0.2.
+High-confidence OCR (at least 0.85) can serve short text lookup questions without
+the general 40-character threshold. Explicit visual questions still require vision;
+blank and low-confidence short OCR retain the vision fallback. Brave searches
 that refined query before the final answer uses the original question, screenshot
 context, observations, and retrieved evidence. A vague "Is this a lot of RAM?"
 can therefore search for the actual memory value read from the screen.
@@ -94,10 +102,17 @@ stage. Cloud upload permission is rechecked between stages; offline fallback
 reuses any completed query and evidence. Source links are retained with the reply;
 intermediate readings, queries, OCR, and excerpts are not saved as chat turns.
 
-Streaming scroll updates are coalesced to at most once per 50 ms and delivered
-on the main run loop instead of synchronously observing the entire message array.
-This avoids the SwiftUI
-`onChange(of: Array<ChatMessage>)` multiple-updates-per-frame warning.
+The conversation observes the scroll view's measured content size and schedules
+scrolling in a SwiftUI task after layout, with top alignment for short replies
+and a new scroll identity when switching chats. It does not observe message
+arrays or scroll during message publication. This avoids using a stale layout
+height and removes the callback behind the
+`onChange(of: Array<ChatMessage>)` warning.
+
+Leading `/screen` and `/search` commands are parsed together at submission in
+either order, even if SwiftUI has not delivered the draft's change callback yet.
+Duplicate commands activate each tool once. Command-only capture, cancellation,
+and literal commands inside the question retain their existing behavior.
 
 ## Models and adapters
 
@@ -241,8 +256,9 @@ regressions additionally verify the ordered vision → query → search → answ
 handoff with an empty OCR result, a vague RAM question, and a 57 MB reading;
 invalid/oversized planning output; cancellation during both planning stages;
 and permission revocation before refinement. Screen-plus-search requires one
-extra model call for OCR routes and two for vision routes. It uses the existing
-Screen model selection for every model stage, without a new model preference.
+extra model call for OCR routes and two for vision routes. Later real-model
+verification and the follow-up command/scroll fixes are documented in
+[Screen search verification](Screen-Search-Verification.md).
 
 Development proceeded sequentially, with a successful build before each phase's
 targeted tests: capture/panel (16 tests), OCR/preprocessing (11), routing/privacy
@@ -278,6 +294,36 @@ Run the shared scheme with
 fixture the optional native smoke test is reported skipped; ordinary CI never
 downloads a model. The normal deterministic tests cover both image protocols and
 local vision routing without external services.
+
+### Real Screen/Search model matrix
+
+`ScreenSearchNativeSmokeTests` is opt-in and reads existing model files without
+installing, selecting, or downloading anything. It renders synthetic fixtures
+(dictionary words, RAM readings, and HTTP errors), runs production OCR, vision,
+query generation and answering, and checks query subjects, basic answer content
+and rendered Brave sources. These assertions do not establish complete factual
+accuracy; review the generated report too. An additional color-and-dictionary question exercises vision handoff;
+its visual answer quality remains dependent on the chosen vision model.
+Create `/tmp/AI-Spotlight-Screen-Search-Smoke.json`:
+
+```json
+{
+  "modelsDirectory": "file:///absolute/path/to/Models/",
+  "visionModelID": "installed-vision-model-id",
+  "useTextModel": true,
+  "liveSearch": false
+}
+```
+
+Run `-only-testing:'AI SpotlightTests/ScreenSearchNativeSmokeTests'`. The selected
+text model in that library handles the text stages. `useTextModel: false` compares
+the old behavior of using vision for every stage. Fixed evidence is the default;
+`liveSearch: true` explicitly uses the production Brave client and existing app
+Keychain credential, incurring normal Brave usage. Run live checks with the stable
+Apple Development-signed Xcode host so Keychain access matches the app identity.
+The report at `/tmp/AI-Spotlight-Screen-Search-Smoke-Result.txt` contains only
+synthetic inputs, model outputs, public queries and URLs, never credentials.
+Remove the opt-in config after testing so routine CI remains deterministic.
 
 ### Interactive checks still required
 
