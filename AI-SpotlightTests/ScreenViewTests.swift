@@ -155,6 +155,14 @@ final class ScreenViewTests: XCTestCase {
   }
 
   func testFullPanelRetainsContentDuringScreenSubmission() async throws {
+    try await verifyFullPanelScreenSubmission(searchEnabled: false)
+  }
+
+  func testFullPanelCombinesScreenAndSearchDuringRapidStreaming() async throws {
+    try await verifyFullPanelScreenSubmission(searchEnabled: true)
+  }
+
+  private func verifyFullPanelScreenSubmission(searchEnabled: Bool) async throws {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenPanel-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     let suite = "ScreenPanel-\(UUID())"
@@ -168,7 +176,9 @@ final class ScreenViewTests: XCTestCase {
     let started = expectation(description: "Screen request reaches local text model")
     let model = LocalModel(id: "text", displayName: "Qwen2.5 3B Instruct Q8_0", fileURL: directory.appendingPathComponent("text.gguf"))
     let engine = PanelScreenEngine(model: model, response: stream.stream, started: { started.fulfill() })
-    let chat = LocalChatViewModel(engine: engine, sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
+    let search = PanelSearch()
+    let chat = LocalChatViewModel(engine: engine, webSearch: search,
+                                 sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
     await chat.refreshInstalledModel()
     let screen = ScreenComposerCoordinator(captureService: PreviewCapture(), ocrService: PreviewOCR())
     let credentials = ScreenTestCredentialStore()
@@ -180,7 +190,7 @@ final class ScreenViewTests: XCTestCase {
     let appearance = GlassAppearanceSettings(defaults: defaults)
     let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, cloudSettings: cloud,
       localChat: chat, screen: screen, modelAdvisor: advisor,
-      searchSettings: WebSearchSettings(credentials: PanelSearchCredentials()))
+      searchSettings: WebSearchSettings(credentials: PresenceOnlyCredentials()))
       .transaction { $0.disablesAnimations = true })
     let sizes = PanelSizeStore(defaults: defaults)
     sizes.save(NSSize(width: 752, height: 462))
@@ -188,15 +198,11 @@ final class ScreenViewTests: XCTestCase {
     controller.show()
     defer { controller.hide() }
     _ = await screen.capture()
-    screen.draft = "What is the answer to this piece of code?"
-    let attachment = try XCTUnwrap(screen.attachment)
+    let prompt = "What is the answer to this piece of code?"
+    screen.draft = (searchEnabled ? "/search " : "") + prompt
     try await renderPanel(view, state: "attached")
-    screen.updateDecision(.text(model.screenModel))
-    chat.submitScreen(screen.draft, attachment: attachment, decision: .text(model.screenModel), selectedMode: .auto,
-      cloudUploadAllowed: { false }) {
-        screen.draft = ""
-        screen.removeAttachment()
-      }
+    XCTAssertEqual(screen.draft, prompt)
+    try submitComposer(in: view)
     await fulfillment(of: [started], timeout: 5)
     try await renderPanel(view, state: "loading")
     let reply = expectation(description: "First reply appears")
@@ -206,14 +212,44 @@ final class ScreenViewTests: XCTestCase {
     await fulfillment(of: [reply], timeout: 5)
     replyToken.cancel()
     try await renderPanel(view, state: "reply")
+    if searchEnabled {
+      let png = try Data(contentsOf: URL(fileURLWithPath: "/tmp/AI-Spotlight-Panel-reply.png"))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Screen-Search.png"))
+      let scroll = try XCTUnwrap(descendants(view).compactMap { $0 as? NSScrollView }
+        .max { view.convert($0.bounds, from: $0).midX < view.convert($1.bounds, from: $1).midX })
+      let suffix = String(repeating: " More detail.", count: 80)
+      let bottom = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+        guard let document = scroll.documentView,
+              chat.messages.last?.content == "The answer is values.count." + suffix else { return false }
+        return document.bounds.height > scroll.contentView.bounds.height
+          // The last message ends before the stack's 24-point bottom padding.
+          && abs(scroll.documentVisibleRect.maxY - document.bounds.maxY) <= 25
+      }, object: nil)
+      let burst = expectation(description: "All rapid reply fragments appear")
+      let burstToken = chat.$sessions.filter {
+        $0.flatMap(\.messages).last?.content == "The answer is values.count." + suffix
+      }.prefix(1).sink { _ in burst.fulfill() }
+      for _ in 0..<80 { stream.continuation.yield(" More detail.") }
+      await fulfillment(of: [burst, bottom], timeout: 5)
+      XCTAssertGreaterThan(scroll.contentView.bounds.minY, 0,
+                           "Expected a scroll, visible: \(scroll.documentVisibleRect), document: \(String(describing: scroll.documentView?.bounds))")
+      burstToken.cancel()
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+    }
     let done = expectation(description: "Request finished")
     let token = chat.$state.filter { $0 == .idle }.prefix(1).sink { _ in done.fulfill() }
     stream.continuation.finish()
     await fulfillment(of: [done], timeout: 5)
     token.cancel()
-    try await renderPanel(view, state: "finished")
+    if !searchEnabled { try await renderPanel(view, state: "finished") }
     XCTAssertNil(screen.attachment)
     XCTAssertFalse(chat.isBusy)
+    let queries = await search.queries
+    XCTAssertEqual(queries, searchEnabled ? [prompt] : [])
+    XCTAssertEqual(chat.messages.count, 2)
+    XCTAssertEqual(chat.messages.last?.searchSources, searchEnabled ? [PanelSearch.source] : nil)
+    XCTAssertEqual(screen.draft, "")
   }
 
   func testRepeatedScreenSubmissionsKeepFullPanelInsideWindow() async throws {
@@ -380,8 +416,16 @@ final class ScreenViewTests: XCTestCase {
     let expected = switch state {
     case "attached": ["screen region", "what is the answer"]
     case "loading": ["preparing", "stop", "what is the answer"]
-    case "reply": ["the answer is", "streaming", "stop", "ask anything"]
-    default: ["the answer is", "local ocr", "ask anything"]
+    case "reply": ["the answer is", "streaming", "stop"]
+    default: ["the answer is", "local ocr"]
+    }
+    if state == "reply" || state == "finished" {
+      // OCR can merge the placeholder with adjacent tool icons. Inspect the
+      // native field and its visible bounds to verify the actual composer instead.
+      let field = try composerField(in: view)
+      XCTAssertEqual(field.stringValue, "")
+      XCTAssertFalse(field.isHiddenOrHasHiddenAncestor)
+      XCTAssertTrue(view.bounds.contains(view.convert(field.bounds, from: field)))
     }
     for phrase in expected {
       XCTAssertTrue(text.contains(phrase), "Visible panel content missing during \(state): \(phrase)")
@@ -461,6 +505,15 @@ private struct PanelSearchCredentials: WebSearchCredentialStore {
   func apiKey() -> String? { nil }
   func setAPIKey(_ value: String) {}
   func removeAPIKey() {}
+}
+
+private actor PanelSearch: WebSearchProvider {
+  static let source = WebSearchSource(title: "Code reference", url: URL(string: "https://example.com/code")!)
+  private(set) var queries: [String] = []
+  func search(_ query: String, maximumTokens: Int) async throws -> [WebSearchResult] {
+    queries.append(query)
+    return [WebSearchResult(source: Self.source, snippets: ["The count property returns the number of elements."])]
+  }
 }
 
 private actor PanelScreenEngine: LocalModelEngine {

@@ -19,7 +19,10 @@ struct ScreenModel: Sendable, Equatable {
     supportsVision && (provider != "llama.cpp" || visionProjectorPath != nil)
   }
   var route: Route {
-    Route(mode: isLocal ? .local : .cloud, providerID: provider, modelID: id, usesNetwork: !isLocal)
+    route(searchEnabled: false)
+  }
+  func route(searchEnabled: Bool) -> Route {
+    Route(mode: isLocal ? .local : .cloud, providerID: provider, modelID: id, usesNetwork: !isLocal || searchEnabled)
   }
 }
 

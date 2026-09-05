@@ -61,7 +61,7 @@ visual property that matters.
 
 | Mode | Sufficient OCR | Visual interpretation |
 | --- | --- | --- |
-| Local | Selected local text model; no image or search request | Installed local vision profile, or a useful limitation |
+| Local | Selected local text model; no image upload | Installed local vision profile, or a useful limitation |
 | Cloud | Selected cloud text model; no image upload | Configured cloud vision model with permission; local vision when upload is unavailable |
 | Auto | Selected local text model when available, otherwise configured cloud text | Configured cloud vision model with permission; local vision for privacy/offline use |
 
@@ -78,8 +78,19 @@ Cloud adapters reject image requests marked Local, lacking upload permission,
 or targeting a model without explicit vision support. Local transport only accepts
 numeric loopback addresses, disables proxies/caching, and refuses redirects.
 An offline cloud failure before the first response can fall back to installed
-local vision. Web Search is visibly paused while an enabled Screen attachment
-is being submitted; OCR is never accidentally sent to Brave.
+local vision. When Web Search is enabled, Screen requests retrieve Brave evidence
+before generation and pass it alongside OCR and, for vision routes, the image.
+Only the typed question is sent to Brave; screenshot pixels, OCR, and conversation
+history are excluded. Use a specific question for useful search results.
+Search failures preserve the draft and attachment, and Stop cancels retrieval as
+well as generation. Cloud upload permission is rechecked after search. An offline
+cloud fallback reuses the evidence and fits it to the local vision context budget.
+Source links are retained with the reply; injected OCR and excerpts stay transient.
+
+Streaming scroll updates are coalesced to at most once per 50 ms and delivered
+on the main run loop instead of synchronously observing the entire message array.
+This avoids the SwiftUI
+`onChange(of: Array<ChatMessage>)` multiple-updates-per-frame warning.
 
 ## Models and adapters
 
@@ -208,6 +219,17 @@ If a build needs permission again, inspect the launched app with
 only of `cdhash` identifies another ad-hoc build.
 
 ## Verification
+
+The combined Screen/Search regression covers Local, Cloud, and Auto with OCR and
+vision, text-only requests through a selected vision model, search-off behavior,
+failed retrieval, image context budgets, cancellation/replacement, permission
+revocation during search, and reuse of evidence on offline cloud fallback. The
+native composer test enables both tools and streams 80 rapid fragments, checks
+that all text arrives, and waits for the final text to become visible. The full
+245-test suite, shared-scheme build, and static analyzer passed on 2026-09-05;
+the run contained no multiple-updates-per-frame warning. These combined requests
+use deterministic search and model responses, so they verify orchestration and
+UI behavior rather than the quality of a live SmolVLM 500M answer.
 
 Development proceeded sequentially, with a successful build before each phase's
 targeted tests: capture/panel (16 tests), OCR/preprocessing (11), routing/privacy

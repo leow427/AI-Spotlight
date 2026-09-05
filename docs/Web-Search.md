@@ -36,6 +36,18 @@ including ChatGPT via the existing Codex bridge. Auto uses the same Brave search
 and keeps choosing the model based on task complexity and context size. Merely
 mentioning web search in ordinary text does not enable the tool.
 
+Web Search also works with an enabled Screen attachment. The selected OCR text
+model or vision model receives the screenshot context together with retrieved
+evidence. Brave still receives only the typed question, so include the topic you
+want researched; screenshot text and pixels are not used to build the query.
+Evidence is fitted around the vision model's image budget. The smallest image
+models may still give terse or incomplete answers even when sources are supplied.
+
+![A Screen reply with Web Search sources](images/screen-search.png)
+
+This native panel regression uses deterministic screenshot, search, and response
+fixtures; it demonstrates tool integration rather than model answer quality.
+
 Only the current question is sent to Brave, normalized to its 400-character /
 50-word query limit. The model still receives the full question. Conversation
 history and model credentials are not sent to Brave. Search uses an ephemeral

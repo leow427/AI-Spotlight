@@ -7,6 +7,207 @@ import XCTest
 final class ScreenPipelineTests: XCTestCase {
   private let ocr = "let answer_count = values.count\nprint(answer_count)\nerror: cannot find variable in scope"
 
+  func testScreenSearchCombinesEvidenceWithOCRAndImagesAcrossAllRoutes() async throws {
+    for mode in ChatMode.allCases {
+      for sendsImage in [false, true] {
+        let fixture = try makeFixture(withVision: true)
+        let prompt = "How much RAM am I using and can you search if that is a lot?"
+        var screenshot = try attachment()
+        screenshot.ocrText = "59.7 MB"
+        let model = mode == .cloud
+          ? CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
+          : (sendsImage ? fixture.visual : fixture.text).screenModel
+        let done = finished(fixture.chat)
+        fixture.chat.submitScreen(prompt, attachment: screenshot,
+          decision: sendsImage ? .vision(model) : .text(model), selectedMode: mode,
+          searchEnabled: true, cloudUploadAllowed: { mode == .cloud })
+        XCTAssertEqual(fixture.chat.activeRequest?.route.usesNetwork, true)
+        await fulfillment(of: [done.expectation], timeout: 3)
+        done.token.cancel()
+        XCTAssertEqual(fixture.chat.state, .idle)
+        let queries = await fixture.search.queries
+        XCTAssertEqual(queries.map(\.prompt), [prompt], "OCR must stay out of the search query")
+        XCTAssertEqual(queries.first?.maximumTokens, mode == .cloud ? 4_096 : 1_024)
+        let requests: [ChatMessage]
+        if mode == .cloud {
+          let request = try XCTUnwrap(fixture.cloud.requests.first)
+          requests = request.messages
+          XCTAssertEqual(request.image != nil, sendsImage)
+          XCTAssertEqual(request.allowsCloudImages, sendsImage)
+        } else if sendsImage {
+          requests = try XCTUnwrap(fixture.vision.requests.first)
+          XCTAssertEqual(fixture.vision.imageCount, 1)
+          XCTAssertTrue(fixture.cloud.requests.isEmpty)
+        } else {
+          let request = await fixture.engine.lastRequest()
+          requests = try XCTUnwrap(request).messages
+          XCTAssertEqual(fixture.vision.imageCount, 0)
+          XCTAssertTrue(fixture.cloud.requests.isEmpty)
+        }
+        let context = try XCTUnwrap(requests.last?.content)
+        XCTAssertTrue(context.contains(prompt))
+        XCTAssertTrue(context.contains("59.7 MB"))
+        XCTAssertTrue(context.contains("Memory evidence fixture"))
+        XCTAssertTrue(context.contains("untrusted web data"))
+        XCTAssertTrue(context.contains("untrusted source content"))
+        let saved = try XCTUnwrap(fixture.store.load().first).messages
+        XCTAssertEqual(saved.first?.content, prompt)
+        XCTAssertNil(saved.first?.imagePreview)
+        XCTAssertNotNil(fixture.chat.messages.first?.imagePreview)
+        XCTAssertEqual(saved.last?.searchSources, [PipelineSearch.source])
+        XCTAssertFalse(saved.contains { $0.content.contains("Memory evidence fixture") || $0.content.contains("59.7 MB") })
+      }
+    }
+  }
+
+  func testSearchStillRunsWhenSelectedVisionModelReceivesTextWithoutAttachment() async throws {
+    let fixture = try makeFixture(withVision: true, selectVision: true)
+    await fixture.chat.refreshInstalledModel()
+    let done = finished(fixture.chat)
+    fixture.chat.submit("Search typical memory usage", searchEnabled: true)
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    let queries = await fixture.search.queries
+    XCTAssertEqual(queries.map(\.prompt), ["Search typical memory usage"])
+    XCTAssertEqual(fixture.vision.imageCount, 0)
+    XCTAssertTrue(fixture.vision.requests.first?.last?.content.contains("Memory evidence fixture") == true)
+    XCTAssertEqual(fixture.chat.messages.last?.searchSources, [PipelineSearch.source])
+  }
+
+  func testScreenWithoutSearchNeverContactsBrave() async throws {
+    for sendsImage in [false, true] {
+      let fixture = try makeFixture(withVision: true)
+      let done = finished(fixture.chat)
+      fixture.chat.submitScreen("Read this", attachment: try attachment(),
+        decision: sendsImage ? .vision(fixture.visual.screenModel) : .text(fixture.text.screenModel),
+        selectedMode: .local, cloudUploadAllowed: { false })
+      await fulfillment(of: [done.expectation], timeout: 3)
+      done.token.cancel()
+      let queries = await fixture.search.queries
+      XCTAssertTrue(queries.isEmpty)
+      XCTAssertNil(fixture.chat.messages.last?.searchSources)
+    }
+  }
+
+  func testScreenSearchFailuresKeepDraftAndAttachmentWithoutStartingGeneration() async throws {
+    for mode in [ChatMode.local, .cloud] {
+      for error in [WebSearchError.missingAPIKey, .noResults] {
+        let fixture = try makeFixture(withVision: true, search: PipelineSearch(error: error))
+        let screenshot = try attachment()
+        var draft = "Read and search this"
+        var pending: ScreenAttachment? = screenshot
+        let model = mode == .local ? fixture.visual.screenModel
+          : CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
+        let done = finished(fixture.chat)
+        fixture.chat.submitScreen(draft, attachment: pending, decision: .vision(model), selectedMode: mode,
+          searchEnabled: true, cloudUploadAllowed: { true }) { draft = ""; pending = nil }
+        await fulfillment(of: [done.expectation], timeout: 3)
+        done.token.cancel()
+        XCTAssertEqual(fixture.chat.state, .failed(error.localizedDescription))
+        XCTAssertEqual(draft, "Read and search this")
+        XCTAssertEqual(pending?.id, screenshot.id)
+        XCTAssertTrue(fixture.chat.messages.isEmpty)
+        XCTAssertTrue(fixture.vision.requests.isEmpty)
+        XCTAssertTrue(fixture.cloud.requests.isEmpty)
+      }
+    }
+  }
+
+  func testScreenSearchFitsEvidenceAroundReservedImageBudgetAndPreservesQuestion() async throws {
+    let search = PipelineSearch(results: [WebSearchResult(source: PipelineSearch.source,
+      snippets: [String(repeating: "Memory evidence fixture ", count: 500)])])
+    let fixture = try makeFixture(withVision: true, search: search)
+    let prompt = String(repeating: "Full question ", count: 140)
+    let screenshot = try attachment()
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen(prompt, attachment: screenshot, decision: .vision(fixture.visual.screenModel),
+      selectedMode: .local, searchEnabled: true, cloudUploadAllowed: { false })
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    XCTAssertEqual(fixture.chat.state, .idle)
+    let messages = try XCTUnwrap(fixture.vision.requests.first)
+    XCTAssertTrue(messages.last?.content.contains(prompt.trimmingCharacters(in: .whitespacesAndNewlines)) == true)
+    XCTAssertTrue(messages.last?.content.contains(ocr) == true)
+    let image = try ScreenImagePreprocessor.prepare(XCTUnwrap(screenshot.originalImage.cgImage(forProposedRect: nil, context: nil, hints: nil)))
+    let prepared = try LlamaServerVisionEngine.prepare(messages: messages, image: image, model: fixture.visual)
+    XCTAssertLessThanOrEqual(prepared.inputTokenCount, prepared.budget.availableInputTokens)
+    XCTAssertEqual(fixture.chat.messages.last?.searchSources, [PipelineSearch.source])
+  }
+
+  func testOversizedScreenQuestionFailsBeforeSearching() async throws {
+    let fixture = try makeFixture(withVision: true)
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen(String(repeating: "x", count: 10_000), attachment: try attachment(),
+      decision: .vision(fixture.visual.screenModel), selectedMode: .local,
+      searchEnabled: true, cloudUploadAllowed: { false })
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    guard case .failed = fixture.chat.state else { return XCTFail("Expected context failure") }
+    let queries = await fixture.search.queries
+    XCTAssertTrue(queries.isEmpty)
+    XCTAssertTrue(fixture.vision.requests.isEmpty)
+    XCTAssertTrue(fixture.chat.messages.isEmpty)
+  }
+
+  func testStopDuringScreenSearchCancelsRetrievalAndIgnoresLateResultsAfterReplacement() async throws {
+    let gate = PipelineSearchGate()
+    let fixture = try makeFixture(withVision: true, search: PipelineSearch(gate: gate))
+    var accepted = false
+    fixture.chat.submitScreen("Read and search", attachment: try attachment(), decision: .vision(fixture.visual.screenModel),
+      selectedMode: .local, searchEnabled: true, cloudUploadAllowed: { false }) { accepted = true }
+    await fulfillment(of: [gate.entered], timeout: 3)
+    XCTAssertEqual(fixture.chat.state, .searching)
+    let task = try XCTUnwrap(fixture.chat.stopStreaming())
+    await fulfillment(of: [gate.cancelled], timeout: 3)
+    fixture.chat.newChat()
+    let done = finished(fixture.chat)
+    fixture.chat.submitCloud("Replacement", provider: .openAI, modelID: "gpt-4o-mini")
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    await gate.release()
+    await task.value
+    XCTAssertFalse(accepted)
+    XCTAssertTrue(fixture.vision.requests.isEmpty)
+    XCTAssertEqual(fixture.chat.messages.map(\.content), ["Replacement", "cloud answer"])
+    XCTAssertEqual(fixture.chat.state, .idle)
+    XCTAssertNil(fixture.chat.activeRequest)
+  }
+
+  func testCloudImagePermissionIsRecheckedAfterScreenSearch() async throws {
+    let gate = PipelineSearchGate()
+    let fixture = try makeFixture(search: PipelineSearch(gate: gate))
+    let model = CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
+    var allowed = true
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen("Search this diagram", attachment: try attachment(), decision: .vision(model), selectedMode: .cloud,
+      searchEnabled: true, cloudUploadAllowed: { allowed })
+    await fulfillment(of: [gate.entered], timeout: 3)
+    allowed = false
+    await gate.release()
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    XCTAssertEqual(fixture.chat.state, .failed(ScreenRequestError.cloudUploadNotAllowed.localizedDescription))
+    XCTAssertTrue(fixture.cloud.requests.isEmpty)
+    XCTAssertTrue(fixture.chat.messages.isEmpty)
+  }
+
+  func testOfflineCloudFallbackReusesScreenSearchResults() async throws {
+    let fixture = try makeFixture(cloud: PipelineCloud(error: .offline), withVision: true)
+    let model = CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen("Search this diagram", attachment: try attachment(), decision: .vision(model), selectedMode: .auto,
+      searchEnabled: true, cloudUploadAllowed: { true })
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    let queries = await fixture.search.queries
+    XCTAssertEqual(queries.count, 1)
+    XCTAssertEqual(fixture.cloud.requests.count, 1)
+    XCTAssertTrue(fixture.vision.requests.first?.last?.content.contains("Memory evidence fixture") == true)
+    XCTAssertEqual(fixture.chat.messages.filter { $0.role == .user }.count, 1)
+    XCTAssertEqual(fixture.chat.messages.last?.searchSources, [PipelineSearch.source])
+    XCTAssertEqual(fixture.chat.screenRouteDecision?.model?.isLocal, true)
+  }
+
   func testSlashScreenCodeAutoSubmissionUsesOCRAndPersistsOnlyThePrompt() async throws {
     let fixture = try makeFixture()
     let screen = ScreenComposerCoordinator(captureService: PipelineCapture(), ocrService: PipelineOCR(text: ocr))
@@ -203,7 +404,8 @@ final class ScreenPipelineTests: XCTestCase {
     return attachment
   }
 
-  private func makeFixture(cloud: PipelineCloud = PipelineCloud(), withVision: Bool = false) throws -> PipelineFixture {
+  private func makeFixture(cloud: PipelineCloud = PipelineCloud(), withVision: Bool = false,
+                           selectVision: Bool = false, search: PipelineSearch = PipelineSearch()) throws -> PipelineFixture {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenPipeline-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -215,12 +417,14 @@ final class ScreenPipelineTests: XCTestCase {
     let text = LocalModel(id: "text", displayName: "Text", fileURL: modelURL)
     let visual = LocalModel(id: "visual", displayName: "Vision", fileURL: modelURL,
       visionConfiguration: LocalVisionConfiguration(projectorURL: projector, serverExecutableURL: URL(fileURLWithPath: "/usr/bin/true")))
-    let engine = PipelineEngine(model: text, models: withVision ? [text, visual] : [text])
+    let engine = PipelineEngine(model: selectVision ? visual : text, models: withVision ? [text, visual] : [text])
     let vision = PipelineVision()
     let store = ChatSessionStore(applicationSupportDirectory: directory)
     let chat = LocalChatViewModel(engine: engine, visionEngine: vision,
-      cloudProviders: CloudProviderRegistry(openAI: cloud, anthropic: cloud, chatGPT: cloud, gemini: cloud), sessionStore: store)
-    return PipelineFixture(chat: chat, engine: engine, vision: vision, cloud: cloud, store: store, text: text)
+      cloudProviders: CloudProviderRegistry(openAI: cloud, anthropic: cloud, chatGPT: cloud, gemini: cloud),
+      webSearch: search, sessionStore: store)
+    return PipelineFixture(chat: chat, engine: engine, vision: vision, cloud: cloud, search: search,
+                           store: store, text: text, visual: visual)
   }
 }
 
@@ -230,8 +434,10 @@ private struct PipelineFixture {
   let engine: PipelineEngine
   let vision: PipelineVision
   let cloud: PipelineCloud
+  let search: PipelineSearch
   let store: ChatSessionStore
   let text: LocalModel
+  let visual: LocalModel
 }
 
 private actor PipelineEngine: LocalModelEngine {
@@ -239,6 +445,7 @@ private actor PipelineEngine: LocalModelEngine {
   let models: [LocalModel]
   var requests: [LocalModelRequest] = []
   var unloads = 0
+  func lastRequest() -> LocalModelRequest? { requests.last }
   init(model: LocalModel, models: [LocalModel]) { self.model = model; self.models = models }
   func installedModel() -> LocalModel? { model }
   func installedModels() -> [LocalModel] { models }
@@ -285,11 +492,47 @@ private final class PipelineCloud: ChatProvider, @unchecked Sendable {
 private final class PipelineVision: LocalVisionServing, @unchecked Sendable {
   private let lock = NSLock()
   private var count = 0
+  private var captured: [[ChatMessage]] = []
+  var requests: [[ChatMessage]] { lock.withLock { captured } }
   var imageCount: Int { lock.withLock { count } }
   func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) -> AsyncThrowingStream<String, Error> {
+    lock.withLock { captured.append(messages) }
     if image != nil { lock.withLock { count += 1 } }
     return AsyncThrowingStream { $0.yield("local vision answer"); $0.finish() }
   }
+}
+
+private actor PipelineSearch: WebSearchProvider {
+  struct Query { let prompt: String; let maximumTokens: Int }
+  static let source = WebSearchSource(title: "Memory reference", url: URL(string: "https://example.com/memory")!)
+  private(set) var queries: [Query] = []
+  let results: [WebSearchResult]
+  let error: WebSearchError?
+  let gate: PipelineSearchGate?
+  init(results: [WebSearchResult] = [WebSearchResult(source: source, snippets: ["Memory evidence fixture"])],
+       error: WebSearchError? = nil, gate: PipelineSearchGate? = nil) {
+    self.results = results; self.error = error; self.gate = gate
+  }
+  func search(_ query: String, maximumTokens: Int) async throws -> [WebSearchResult] {
+    queries.append(Query(prompt: query, maximumTokens: maximumTokens))
+    if let gate {
+      await withTaskCancellationHandler {
+        await gate.wait()
+      } onCancel: { gate.cancelled.fulfill() }
+    }
+    if let error { throw error }
+    return results
+  }
+}
+
+private actor PipelineSearchGate {
+  nonisolated let entered = XCTestExpectation(description: "Screen search started")
+  nonisolated let cancelled = XCTestExpectation(description: "Screen search cancelled")
+  private var continuation: CheckedContinuation<Void, Never>?
+  func wait() async {
+    await withCheckedContinuation { continuation = $0; entered.fulfill() }
+  }
+  func release() { continuation?.resume(); continuation = nil }
 }
 
 private struct PipelineOCR: ScreenOCRReading {

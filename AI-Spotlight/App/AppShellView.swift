@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -116,7 +117,7 @@ struct AppShellView: View {
                 Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
                   .font(.caption).foregroundStyle(.secondary)
               }
-              if isSearchEnabled && !(screen.isEnabled && screen.attachment != nil) {
+              if isSearchEnabled {
                 HStack(spacing: 6) {
                   Text(searchSettings.hasAPIKey
                     ? "Web Search · Your question is sent to Brave."
@@ -127,10 +128,6 @@ struct AppShellView: View {
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-              }
-              if isSearchEnabled && screen.isEnabled && screen.attachment != nil {
-                Text("Web Search is paused for this Screen request.")
-                  .font(.caption).foregroundStyle(.secondary)
               }
               compactModeControls
               if let attachment = screen.attachment {
@@ -356,12 +353,24 @@ struct AppShellView: View {
           }
           .padding(24)
         }
-        .onChange(of: localChat.messages) { _, messages in
-          guard let lastMessage = messages.last else { return }
-          proxy.scrollTo(lastMessage.id, anchor: .bottom)
+        .onReceive(conversationScrollUpdates) { messageID in
+          guard messageID == localChat.messages.last?.id else { return }
+          proxy.scrollTo(messageID, anchor: .bottom)
         }
       }
     }
+  }
+
+  private var conversationScrollUpdates: AnyPublisher<UUID, Never> {
+    localChat.$sessions.combineLatest(localChat.$selectedSessionID)
+      .map { sessions, selectedID in sessions.first { $0.id == selectedID }?.messages.last }
+      .removeDuplicates()
+      // Token bursts can publish several times in one frame. Schedule scrolling
+      // outside SwiftUI's change observation, retaining the final update in each burst.
+      .throttle(for: .milliseconds(50), scheduler: RunLoop.main, latest: true)
+      .compactMap { $0?.id }
+      .receive(on: RunLoop.main)
+      .eraseToAnyPublisher()
   }
 
   @ViewBuilder
@@ -779,6 +788,7 @@ struct AppShellView: View {
     case .text, .vision:
       let prompt = draft
       localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
+        searchEnabled: isSearchEnabled,
         cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
           if draft == prompt { draft = "" }
           if screen.attachment?.id == attachment.id { screen.removeAttachment() }
