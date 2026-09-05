@@ -27,7 +27,7 @@ struct ScreenToolButton: View {
       .disabled(isBusy || coordinator.isBusy)
       .accessibilityLabel("Screen")
       .accessibilityValue(coordinator.isEnabled ? "On" : "Off")
-      .help(coordinator.isEnabled ? "Turn Screen off for this prompt" : "Turn Screen on")
+      .help(coordinator.isEnabled ? "Turn Screen off for this prompt" : "Turn Screen on. Hide inactive tools with ⌘⇧H.")
       .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: coordinator.isEnabled)
       .transition(reduceMotion ? .opacity : .scale(scale: 0.6, anchor: .leading).combined(with: .opacity))
       }
@@ -35,6 +35,10 @@ struct ScreenToolButton: View {
     .frame(width: coordinator.isPresented ? 30 : 0, height: 30, alignment: .leading)
     .clipped()
     .padding(.leading, coordinator.isPresented ? 10 : 0)
+    .onReceive(NotificationCenter.default.publisher(for: .hideInactiveToolsRequested)) { _ in
+      guard !isBusy, !coordinator.isBusy, !coordinator.isEnabled else { return }
+      coordinator.isPresented = false
+    }
   }
 }
 

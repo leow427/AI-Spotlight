@@ -12,17 +12,22 @@ struct WebSearchControls: View {
     HStack(spacing: 0) {
       Menu {
         if let captureScreen {
-          Button(action: captureScreen) { Label("Screen", image: "ScreenCapture") }
+          Button(action: captureScreen) { ToolMenuLabel(title: "Screen", imageName: "ScreenCapture") }
             .disabled(isBusy)
         }
         Button {
           isPresented.toggle()
           isEnabled = isPresented
         } label: {
-          Label(isPresented ? "Remove Web Search" : "Web Search", image: "WebSearch")
+          ToolMenuLabel(title: isPresented ? "Remove Web Search" : "Web Search", imageName: "WebSearch")
         }
         .disabled(isBusy)
         Divider()
+        Button("Hide Inactive Tools") {
+          NotificationCenter.default.post(name: .hideInactiveToolsRequested, object: nil)
+        }
+        .keyboardShortcut("h", modifiers: [.command, .shift])
+        .disabled(isBusy)
         Button("Web Search Settings…", action: openSettings)
       } label: {
         Image(systemName: "plus")
@@ -54,7 +59,7 @@ struct WebSearchControls: View {
           .disabled(isBusy)
           .accessibilityLabel("Web Search")
           .accessibilityValue(isEnabled ? "On" : "Off")
-          .help(isEnabled ? "Web Search is on. Click to turn off." : "Click to turn on Web Search.")
+          .help(isEnabled ? "Web Search is on. Click to turn off." : "Click to turn on Web Search. Hide inactive tools with ⌘⇧H.")
           .transition(reduceMotion ? .opacity : .scale(scale: 0.6, anchor: .leading).combined(with: .opacity))
         }
       }
@@ -65,9 +70,36 @@ struct WebSearchControls: View {
       .padding(.leading, isPresented ? 10 : 0)
     }
     .fixedSize(horizontal: true, vertical: false)
+    .onReceive(NotificationCenter.default.publisher(for: .hideInactiveToolsRequested)) { _ in
+      guard !isBusy, !isEnabled else { return }
+      isPresented = false
+    }
   }
 
   static let activeColor = Color(red: 142.0 / 255, green: 216.0 / 255, blue: 160.0 / 255)
+}
+
+struct ToolMenuLabel: View {
+  let title: String
+  let imageName: String
+
+  var body: some View {
+    Label {
+      Text(title)
+    } icon: {
+      Image(nsImage: Self.menuImage(named: imageName))
+    }
+  }
+
+  static func menuImage(named name: String) -> NSImage {
+    // Native menus use the NSImage's intrinsic size, ignoring SwiftUI frames.
+    // Copy the asset so resizing the menu icon cannot change the composer icon.
+    let size = NSSize(width: 16, height: 16)
+    let image = (NSImage(named: name)?.copy() as? NSImage) ?? NSImage(size: size)
+    image.size = size
+    image.isTemplate = true
+    return image
+  }
 }
 
 struct WebSearchSettingsSection: View {
@@ -104,7 +136,7 @@ struct WebSearchSettingsSection: View {
       Text("Use a Brave Search key with LLM Context access. Stored in macOS Keychain. Brave usage is billed separately.")
         .font(.caption)
         .foregroundStyle(.secondary)
-      Text("Choose Web Search from + or type /search to add the search icon. Click it to toggle search, or remove it from +. Search sends your current question to Brave, including in Local mode; your selected model writes the answer.")
+      Text("Choose Web Search from + or type /search to add the search icon. Click it to toggle search, or remove it from +. Press ⌘⇧H to hide tools that are switched off. Search sends your current question to Brave, including in Local mode; your selected model writes the answer.")
         .font(.caption)
         .foregroundStyle(.secondary)
       Link("Brave Search API dashboard", destination: URL(string: "https://api-dashboard.search.brave.com/")!)

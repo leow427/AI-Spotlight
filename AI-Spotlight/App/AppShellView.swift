@@ -905,6 +905,7 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Next recent chat", keys: "⌃ Tab")
           shortcut("Open Settings", keys: "⌘ ,")
           shortcut("Send from the message field", keys: "Return")
+          shortcut("Hide inactive tools", keys: "⇧ ⌘ H")
           shortcut("Enable Web Search", keys: "/search")
           shortcut("Capture a screen region", keys: "/screen")
           Text("/screen with a question captures and sends. /screen alone attaches a screenshot and waits for a question.")

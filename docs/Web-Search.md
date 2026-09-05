@@ -14,6 +14,17 @@ selected for subsequent messages until turned off. **+ → Remove Web Search**
 disables search and hides the icon; a new chat also resets it. The composer keeps
 the same height whether the icon is hidden or visible.
 
+Press **⌘⇧H** while typing to hide Web Search and Screen icons that are switched
+off. Active tools stay visible; the shortcut preserves the draft and any attached
+screenshot, and is inactive during a request or screen capture. You can also use
+**+ → Hide Inactive Tools**. Add tools again through **+**, **/search**, or
+**/screen**. Each hidden icon returns 40 points of space to the text field.
+
+The plus menu uses 16-point copies of the tool images, so native menu items stay
+compact without changing the icons in the composer.
+
+![Compact tool menu labels](images/compact-tool-icons.png)
+
 ![Composer with Web Search off and on](images/web-search-composer.png)
 
 This screenshot is an intentional checked-in UI reference; build outputs and test

@@ -327,3 +327,12 @@ above comes from the production SwiftUI view in the regression test.
 - [Ollama native chat](https://docs.ollama.com/api/chat)
 - [llama.cpp server flags and multimodal input](https://github.com/ggml-org/llama.cpp/blob/master/tools/server/README.md)
 - [Smoke-test model and matching projector](https://huggingface.co/ggml-org/SmolVLM-256M-Instruct-GGUF/tree/b9e4379657e1450d04d02eec8e345667265b0a00)
+
+
+## Hide inactive composer tools
+
+Use **⌘⇧H** (or **+ → Hide Inactive Tools**) to reclaim text space after turning
+Screen or Web Search off. Active tools stay visible, draft text and attachments
+are retained, and the shortcut does nothing during capture, OCR, or generation.
+The plus menu uses compact 16-point icons. The shortcut is listed in Help and in
+the inactive tools' hover hints.

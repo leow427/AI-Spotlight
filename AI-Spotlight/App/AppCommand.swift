@@ -15,5 +15,6 @@ extension Notification.Name {
   static let panelHidden = Notification.Name("aiSpotlight.panelHidden")
   static let panelPresented = Notification.Name("aiSpotlight.panelPresented")
   static let stopStreamingRequested = Notification.Name("aiSpotlight.stopStreamingRequested")
+  static let hideInactiveToolsRequested = Notification.Name("aiSpotlight.hideInactiveToolsRequested")
   static let recentChatCycleRequested = Notification.Name("aiSpotlight.recentChatCycleRequested")
 }

@@ -58,6 +58,32 @@ final class AppCommandTests: XCTestCase {
     XCTAssertNil(PanelShortcut.resolve(characters: "n", modifiers: []))
   }
 
+  func testHideInactiveToolsShortcutRequiresCommandShiftH() {
+    XCTAssertEqual(PanelShortcut.resolve(characters: "H", modifiers: [.command, .shift]), .hideInactiveTools)
+    XCTAssertEqual(PanelShortcut.resolve(characters: "h", modifiers: [.command, .shift, .capsLock]), .hideInactiveTools)
+    XCTAssertNil(PanelShortcut.resolve(characters: "h", modifiers: .command))
+    XCTAssertNil(PanelShortcut.resolve(characters: "h", modifiers: .shift))
+    XCTAssertNil(PanelShortcut.resolve(characters: "h", modifiers: [.command, .option, .shift]))
+  }
+
+  @MainActor
+  func testHideInactiveToolsShortcutWorksWhileTypingWithoutChangingDraft() throws {
+    let field = NSTextField(string: "Keep my unsent text")
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(field.window)
+    XCTAssertTrue(window.makeFirstResponder(field))
+    let delivered = expectation(forNotification: .hideInactiveToolsRequested, object: nil)
+    let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+      modifierFlags: [.command, .shift], timestamp: 0, windowNumber: window.windowNumber,
+      context: nil, characters: "H", charactersIgnoringModifiers: "h", isARepeat: false, keyCode: 4))
+    XCTAssertTrue(window.performKeyEquivalent(with: event))
+    wait(for: [delivered], timeout: 1)
+    XCTAssertEqual(field.stringValue, "Keep my unsent text")
+    XCTAssertTrue(controller.isVisible)
+  }
+
   func testGlobalHotKeysUseOptionSpaceAndOptionS() {
     XCTAssertEqual(GlobalHotKey.togglePanel.keyCode, UInt32(kVK_Space))
     XCTAssertEqual(GlobalHotKey.togglePanel.modifiers, UInt32(optionKey))

@@ -8,6 +8,74 @@ import XCTest
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testPlusMenuIconsHaveCompactIntrinsicSizesWithoutChangingAssets() throws {
+    for name in ["ScreenCapture", "WebSearch"] {
+      let source = try XCTUnwrap(NSImage(named: name))
+      let originalSize = source.size
+      let image = ToolMenuLabel.menuImage(named: name)
+      XCTAssertEqual(image.size, NSSize(width: 16, height: 16))
+      XCTAssertTrue(image.isTemplate)
+      XCTAssertFalse(image === source)
+      XCTAssertEqual(source.size, originalSize)
+      XCTAssertNotNil(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    }
+    let preview = VStack(alignment: .leading, spacing: 10) {
+      ToolMenuLabel(title: "Screen", imageName: "ScreenCapture")
+      ToolMenuLabel(title: "Web Search", imageName: "WebSearch")
+      Divider()
+      HStack {
+        Text("Hide Inactive Tools")
+        Spacer()
+        Text("⇧⌘H").foregroundStyle(.secondary)
+      }
+    }
+    .font(.system(size: 13)).padding(12).frame(width: 240)
+    .background(Color(nsColor: .windowBackgroundColor))
+    let renderer = ImageRenderer(content: preview)
+    renderer.scale = 2
+    let image = try XCTUnwrap(renderer.cgImage)
+    let png = try XCTUnwrap(NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Compact-Tool-Icons.png"))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Compact tool menu labels"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
+  func testHideInactiveToolsReclaimsSpaceAndPreservesActiveToolsAndDrafts() async throws {
+    for (searchEnabled, screenEnabled, busy) in [
+      (false, false, false), (true, false, false), (false, true, false),
+      (true, true, false), (false, false, true),
+    ] {
+      let state = ToolControlsTestState()
+      state.searchEnabled = searchEnabled
+      let screen = ScreenComposerCoordinator(captureService: PreviewCapture(), ocrService: PreviewOCR())
+      _ = await screen.capture()
+      let attachmentID = try XCTUnwrap(screen.attachment?.id)
+      screen.isEnabled = screenEnabled
+      screen.draft = "Keep this draft"
+      let view = NSHostingView(rootView: ToolControlsTestView(state: state, screen: screen, busy: busy))
+      let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 240, height: 50),
+                            styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = view
+      view.layoutSubtreeIfNeeded()
+      await Task.yield()
+      let initialWidth = view.fittingSize.width
+      NotificationCenter.default.post(name: .hideInactiveToolsRequested, object: nil)
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+      XCTAssertEqual(state.searchPresented, searchEnabled || busy)
+      XCTAssertEqual(screen.isPresented, screenEnabled || busy)
+      XCTAssertEqual(state.searchEnabled, searchEnabled)
+      XCTAssertEqual(screen.isEnabled, screenEnabled)
+      XCTAssertEqual(screen.draft, "Keep this draft")
+      XCTAssertEqual(screen.attachment?.id, attachmentID)
+      let removed = busy ? 0 : (searchEnabled ? 0 : 1) + (screenEnabled ? 0 : 1)
+      XCTAssertEqual(initialWidth - view.fittingSize.width, Double(removed * 40), accuracy: 0.5)
+      window.contentView = nil
+    }
+  }
+
   func testSentImagesStaySmallAndPreserveTheirProportions() throws {
     let sizes: [NSSize] = [
       NSSize(width: 1600, height: 800),
@@ -444,4 +512,26 @@ private final class RepeatedPanelEngine: LocalModelEngine, @unchecked Sendable {
     return AsyncThrowingStream { $0.yield("The answer is values.count."); $0.finish() }
   }
   func unload() async {}
+}
+
+@MainActor
+private final class ToolControlsTestState: ObservableObject {
+  @Published var searchEnabled = false
+  @Published var searchPresented = true
+}
+
+private struct ToolControlsTestView: View {
+  @ObservedObject var state: ToolControlsTestState
+  @ObservedObject var screen: ScreenComposerCoordinator
+  let busy: Bool
+
+  var body: some View {
+    HStack(spacing: 0) {
+      WebSearchControls(isEnabled: $state.searchEnabled, isPresented: $state.searchPresented,
+                        isBusy: busy, openSettings: {}, captureScreen: {})
+      ScreenToolButton(coordinator: screen, isBusy: busy, capture: {})
+    }
+    .fixedSize()
+    .transaction { $0.disablesAnimations = true }
+  }
 }

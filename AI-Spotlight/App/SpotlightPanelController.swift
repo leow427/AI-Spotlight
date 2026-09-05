@@ -173,6 +173,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       NotificationCenter.default.post(name: .recentChatCycleRequested, object: nil)
     case .settings:
       NotificationCenter.default.post(name: .settingsRequested, object: nil)
+    case .hideInactiveTools:
+      NotificationCenter.default.post(name: .hideInactiveToolsRequested, object: nil)
     }
   }
 }
