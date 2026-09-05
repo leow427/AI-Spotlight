@@ -27,6 +27,7 @@ struct LocalVisionConfiguration: Codable, Sendable, Equatable {
   let projectorURL: URL
   let serverExecutableURL: URL
   var contextWindow: Int = 8192
+  var managedRuntimeDirectory: URL? = nil
 }
 
 extension LocalModel {

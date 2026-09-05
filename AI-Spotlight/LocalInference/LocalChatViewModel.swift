@@ -41,6 +41,7 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var screenRouteDecision: ScreenRoutingPolicy.Decision?
   @Published private(set) var state: State = .idle
   @Published private(set) var benchmarkNotice: String?
+  @Published private(set) var visionDownloadID: String?
   private let modelAdvisor: LocalModelAdvisor?
 
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
@@ -103,6 +104,7 @@ final class LocalChatViewModel: ObservableObject {
     installationTask?.cancel()
     idleUnloadTask?.cancel()
     state = .installing
+    visionDownloadID = nil
     let didAccessSecurityScope = sourceURL.startAccessingSecurityScopedResource()
     let modelName = sourceURL.deletingPathExtension().lastPathComponent
     let accessedProjector = vision?.projectorURL.startAccessingSecurityScopedResource() ?? false
@@ -134,6 +136,7 @@ final class LocalChatViewModel: ObservableObject {
     stopStreaming()
     installationTask?.cancel()
     idleUnloadTask?.cancel()
+    visionDownloadID = nil
     state = .downloading(ModelDownloadProgress(receivedByteCount: 0, expectedByteCount: descriptor.expectedByteCount))
     installationTask = Task { [weak self, engine] in
       do {
@@ -156,6 +159,31 @@ final class LocalChatViewModel: ObservableObject {
     }
   }
 
+  func downloadVisionModel(_ descriptor: LocalVisionModelDescriptor,
+                           onInstalled: @escaping @MainActor (LocalModel) -> Void = { _ in }) {
+    guard !isBusy else { return }
+    idleUnloadTask?.cancel()
+    visionDownloadID = descriptor.id
+    state = .downloading(ModelDownloadProgress(receivedByteCount: 0, expectedByteCount: descriptor.downloadByteCount))
+    installationTask = Task { [weak self, engine] in
+      do {
+        let model = try await engine.downloadVision(descriptor) { [weak self] progress in
+          await self?.updateDownloadProgress(progress)
+        }
+        guard let self else { return }
+        await self.refreshInstalledModel()
+        // The atomic installer may finish just as Cancel is pressed. A fully
+        // installed package stays usable; partial downloads never reach here.
+        onInstalled(model)
+        self.finishInstallation()
+      } catch is CancellationError {
+        self?.finishInstallation()
+      } catch {
+        self?.failInstallation(error)
+      }
+    }
+  }
+
   func cancelInstallation() {
     // Keep submission blocked until the downloader/benchmark acknowledges cancellation.
     installationTask?.cancel()
@@ -164,6 +192,7 @@ final class LocalChatViewModel: ObservableObject {
   func runModelBenchmark() {
     guard !isBusy, installedModel != nil else { return }
     idleUnloadTask?.cancel()
+    visionDownloadID = nil
     state = .benchmarking
     installationTask = Task { [weak self] in
       guard let self else { return }
@@ -653,6 +682,7 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   private func finishInstallation() {
+    visionDownloadID = nil
     state = .idle
     installationTask = nil
   }
@@ -663,11 +693,13 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   private func failInstallation(_ error: Error) {
+    if Task.isCancelled { finishInstallation(); return }
     state = .failed(error.localizedDescription)
     installationTask = nil
   }
 
   private func beginGeneration(route: Route, modelDisplayName: String) -> ActiveRequest {
+    visionDownloadID = nil
     let request = ActiveRequest(id: UUID(), route: route, modelDisplayName: modelDisplayName)
     activeRequest = request
     return request

@@ -102,29 +102,63 @@ not know how an image was captured. New feature files live under
 `AI-Spotlight/Screen/`, following the existing Swift/Xcode project layout rather
 than the original scaffold's suggested `src/` convention.
 
-## Optional local llama.cpp vision
+## Guided local image-model downloads
 
-In **Advanced Settings → Local Models → Local Vision**, select:
+In **Settings → Local Models → Image understanding**, click **Download** next
+to a model. The app downloads the model, its matching image projector, and an
+architecture-specific official llama.cpp runtime together. No file picker,
+terminal command, or separate executable download is needed for these choices:
 
-1. A vision model GGUF.
-2. Its matching mmproj GGUF from the same model release.
-3. A current `llama-server` executable with multimodal and `--offline` support.
+| Model | Package size on Apple silicon | Intended use |
+| --- | --- | --- |
+| SmolVLM 500M Q8_0 | 556.7 MB | Small starter for simple photos and objects |
+| SmolVLM 2.2B Q4_K_M | 1.72 GB | Larger option for image descriptions |
 
-Import copies the GGUF and projector together into the model library and commits
-their metadata atomically. Failed copies/moves/metadata writes roll back only
-files created by that transaction. The normal text-model selection is preserved.
-The app checks GGUF headers, separate files, projector availability, executable
-availability, and a bounded context setting. llama-server validates the actual
-model/projector compatibility when loading. Imports are user-selected profiles,
-not new automatic catalog recommendations.
+Both models use their matching Q8_0 projector. Sizes include the runtime. These
+are small models, and answers on dense screenshots may be unreliable.
 
-The vision engine unloads the embedded text model before starting the separate
+The section shows combined progress and **Cancel**, then **Ready for Screen**
+after successful installation. **Use for Screen** switches between installed
+image models without replacing the selected text model. This choice persists
+under `screen.localVisionModelID`; missing choices fall back to another installed
+vision profile. Installing a model does not enable cloud screenshot uploads.
+
+![Guided image-model downloads](images/vision-downloads.png)
+
+The built-in packages pin model/projector revisions and SHA-256 checksums from
+[the publisher's 500M repository](https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/tree/72e986006ef53e37cdd3f6d4241c90b0f01df376) and
+[2.2B repository](https://huggingface.co/ggml-org/SmolVLM-Instruct-GGUF/tree/e75618fdae83145c487f1b4d8115bb02a5b58ecc).
+The runtime pins the official [llama.cpp b10797 release](https://github.com/ggml-org/llama.cpp/releases/tag/b10797),
+including separate arm64/x64 archive sizes and publisher SHA-256 digests.
+
+Text and vision downloads share a file-based URLSession transfer with progress,
+size bounds, and SHA-256 verification. Memory and disk checks run before a vision
+download, and disk space is checked again before installation. The verified
+runtime is unpacked in a private staging directory; archive paths and resolved
+links are checked, and `llama-server --help` must successfully advertise image
+and offline support before the runtime is retained.
+
+The full runtime directory, including dynamic libraries, is kept permanently in
+the model library. Model/projector metadata uses the existing atomic installer.
+Cancellation and failed downloads remove staging files; failed installation also
+removes its new runtime. Replacing a downloaded profile retires its prior runtime
+only when it is app-owned and no other profile references it. Manually imported
+executables are never removed.
+
+### Advanced manual import
+
+Expand **Advanced: import your own files** to select a vision model GGUF, its
+matching mmproj GGUF, and a recent `llama-server` executable with multimodal and
+`--offline` support. Keep a manually selected executable and its accompanying
+libraries in a permanent folder. The model and projector are copied into the
+library, and llama-server validates their actual compatibility when loading.
+
+The vision engine unloads the embedded text model before starting its separate
 server. It uses `-m <model> --mmproj <projector>`, loopback binding, a fresh port,
 a per-request credential/alias, one slot, `--offline`, and no web UI. It verifies
 the server's model alias before sending image bytes. The server is terminated on
-completion, failure, or cancellation. The embedded text-only llama.cpp b5046
-bridge remains unchanged; no native dependency upgrade or mandatory vision-model
-download is introduced.
+completion, failure, or cancellation. The bundled text-only llama.cpp b5046
+bridge remains unchanged; image-model downloads are optional.
 
 ## Stable development signing
 
@@ -249,10 +283,31 @@ failure; the unchanged test passed in isolation and the unchanged full suite the
 passed. No test or assertion was removed or weakened. The PR records build,
 analysis, and CI results for the final revision.
 
-The exact user-operated Auto screenshot flow still needs confirmation with the
-updated app. No live cloud screenshot upload has been performed. Native mouse
-control is unavailable in this assistant session; real selection and system
-consent checks above require the user.
+Subsequent signed-app verification with Computer Use completed seven OCR
+submissions across three chats through both entry points. The measured panel
+layout regression and condition matrix are recorded in
+[Screen-Panel-Regression.md](Screen-Panel-Regression.md). No live cloud screenshot
+upload has been performed.
+
+### Guided-download verification (2026-09-05)
+
+The guided download adds seven deterministic tests covering pinned matching
+packages, all-part installation, existing text selection, replacement cleanup,
+checksum/size/HTTP/runtime/metadata/disk failures, cancellation, persisted image
+selection, duplicate clicks, and the rendered download UI. The 60-test related
+suite and full 229-test suite pass. Build and static analysis also pass. The
+existing Codex EOF/timeout test initially failed; the unchanged assertions passed
+with temporary tracing and in the clean full-suite rerun. No connection code or
+test was changed.
+
+The signed Xcode app exposes both download choices through accessibility. A real
+500M download was started, cancelled, and restarted. That check caught a
+URLSession cancellation error being displayed as a failure; cancellation now
+returns to the ready state after cleanup, with a regression for that error type.
+The real package download is still in progress on the user's slow connection.
+Completed installation and an image response using this new package remain
+pending; the app is being left running for that check. The rendered preview
+above comes from the production SwiftUI view in the regression test.
 
 ## Primary references
 

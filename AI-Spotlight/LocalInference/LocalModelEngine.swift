@@ -44,6 +44,8 @@ protocol LocalModelEngine: Sendable {
     _ model: LocalModelDescriptor,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
   ) async throws -> LocalModel
+  func downloadVision(_ model: LocalVisionModelDescriptor,
+    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error>
   func unload() async
@@ -71,6 +73,11 @@ enum LocalInferenceError: LocalizedError, Equatable {
 }
 
 extension LocalModelEngine {
+  func downloadVision(_ model: LocalVisionModelDescriptor,
+    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel {
+    throw LocalInferenceError.bridgeFailure("Image-model downloads are unavailable in this engine.")
+  }
+
   func benchmark() async throws -> LocalBenchmarkMetrics? { nil }
 
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {

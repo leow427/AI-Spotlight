@@ -166,7 +166,7 @@ struct LocalModelManagerSection: View {
         Text("\(hardware.chip) · \(hardware.inferenceMemoryBudget, format: .byteCount(style: .memory)) available for inference")
           .font(.caption).foregroundStyle(.secondary)
       }
-      if chat.state != .idle || chat.benchmarkNotice != nil || advisor.latestBenchmark(for: chat.installedModel) != nil || advisor.notice != nil {
+      if chat.visionDownloadID == nil && (chat.state != .idle || chat.benchmarkNotice != nil || advisor.latestBenchmark(for: chat.installedModel) != nil || advisor.notice != nil) {
         LocalModelOperationView(chat: chat, advisor: advisor)
       }
       HStack {
@@ -218,7 +218,7 @@ struct LocalModelManagerSection: View {
         }
         .padding(.vertical, 5)
       }
-      let imported = chat.installedModels.filter { model in !advisor.manifest.models.contains { $0.id == model.id } }
+      let imported = chat.installedModels.filter { model in !model.supportsVision && !advisor.manifest.models.contains { $0.id == model.id } }
       ForEach(imported) { model in
         HStack {
           VStack(alignment: .leading) {

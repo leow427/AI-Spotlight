@@ -43,6 +43,12 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     return try await catalog.download(model, progress: progress)
   }
 
+  func downloadVision(_ model: LocalVisionModelDescriptor,
+    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel {
+    releaseEngine()
+    return try await catalog.downloadVision(model, progress: progress)
+  }
+
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
     try Task.checkCancellation()
     let handle = try loadEngineIfNeeded()

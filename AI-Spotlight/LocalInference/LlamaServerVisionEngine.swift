@@ -148,3 +148,97 @@ enum LocalOnlyNetworking {
     return URLSession(configuration: config, delegate: LocalOnlyRedirectDelegate(), delegateQueue: nil)
   }
 }
+
+/// A pinned official runtime is installed beside the model library, including
+/// its dynamic libraries. Nothing depends on a temporary folder or shell PATH.
+struct LocalVisionRuntime: Sendable {
+  let archive: VerifiedModelArtifact
+  static let directoryName = "llama-b10797"
+
+  static var bundled: LocalVisionRuntime {
+    #if arch(arm64)
+    let architecture = "arm64"
+    let size: Int64 = 11108860
+    let checksum = "474a788ec73d17a066360b1c50c9733c78a47d062616e91963c65a344548e889"
+    #else
+    let architecture = "x64"
+    let size: Int64 = 11156383
+    let checksum = "a12a85385c74e1e0260dd207cc49f90db902df0fa2f12fc734971d0323aa1df0"
+    #endif
+    return LocalVisionRuntime(archive: VerifiedModelArtifact(
+      url: URL(string: "https://github.com/ggml-org/llama.cpp/releases/download/b10797/llama-b10797-bin-macos-\(architecture).tar.gz")!,
+      expectedByteCount: size, checksumSHA256: checksum))
+  }
+
+  func validate() throws {
+    try archive.validate()
+    guard archive.url == Self.bundled.archive.url else {
+      throw LocalModelCatalogError.invalidManifest("vision runtime")
+    }
+  }
+
+  func install(archive: URL, staging: URL, destination: URL) async throws -> URL {
+    let unpacked = staging.appending(path: "unpacked", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: unpacked, withIntermediateDirectories: true)
+    let listing = try await Self.run(URL(fileURLWithPath: "/usr/bin/tar"), ["-tzf", archive.path], in: staging)
+    let paths = listing.split(whereSeparator: \.isNewline).map(String.init)
+    guard !paths.isEmpty, paths.allSatisfy({ path in
+      (path == Self.directoryName || path.hasPrefix(Self.directoryName + "/"))
+        && !path.split(separator: "/").contains("..")
+    }) else { throw LocalInferenceError.bridgeFailure("The image support download contains invalid paths.") }
+    _ = try await Self.run(URL(fileURLWithPath: "/usr/bin/tar"),
+      ["-xzf", archive.path, "--no-same-owner", "-C", unpacked.path], in: staging)
+    let root = unpacked.resolvingSymlinksInPath().path + "/"
+    let entries = FileManager.default.enumerator(at: unpacked, includingPropertiesForKeys: nil)
+    while let url = entries?.nextObject() as? URL {
+      guard url.resolvingSymlinksInPath().path.hasPrefix(root) else {
+        throw LocalInferenceError.bridgeFailure("The image support download contains an invalid link.")
+      }
+    }
+    let relativeServer = Self.directoryName + "/llama-server"
+    let server = unpacked.appending(path: relativeServer)
+    guard FileManager.default.isExecutableFile(atPath: server.path) else {
+      throw LocalInferenceError.bridgeFailure("The image support download is incomplete. Try downloading again.")
+    }
+    let help = try await Self.run(server, ["--help"], in: staging)
+    guard help.contains("--mmproj"), help.contains("--offline") else {
+      throw LocalInferenceError.bridgeFailure("The downloaded image support could not start on this Mac.")
+    }
+    try Task.checkCancellation()
+    try FileManager.default.moveItem(at: unpacked, to: destination)
+    return destination.appending(path: relativeServer)
+  }
+
+  private static func run(_ executable: URL, _ arguments: [String], in directory: URL) async throws -> String {
+    let output = directory.appending(path: "runtime-output-\(UUID().uuidString)")
+    FileManager.default.createFile(atPath: output.path, contents: nil)
+    let file = try FileHandle(forWritingTo: output)
+    defer { try? file.close(); try? FileManager.default.removeItem(at: output) }
+    let process = Process()
+    process.executableURL = executable
+    process.arguments = arguments
+    process.environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "en_US.UTF-8"]
+    process.standardOutput = file
+    process.standardError = file
+    let timeout = Task {
+      try await Task.sleep(for: .seconds(30))
+      if process.isRunning { process.terminate() }
+    }
+    defer { timeout.cancel() }
+    try await withTaskCancellationHandler {
+      try Task.checkCancellation()
+      try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+        process.terminationHandler = { _ in continuation.resume() }
+        do {
+          try process.run()
+          if Task.isCancelled && process.isRunning { process.terminate() }
+        } catch { continuation.resume(throwing: error) }
+      }
+      try Task.checkCancellation()
+      guard process.terminationStatus == 0 else {
+        throw LocalInferenceError.bridgeFailure("Image support could not be installed. Try downloading again.")
+      }
+    } onCancel: { if process.isRunning { process.terminate() } }
+    return String(decoding: try Data(contentsOf: output), as: UTF8.self)
+  }
+}

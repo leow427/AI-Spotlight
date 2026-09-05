@@ -764,7 +764,7 @@ struct AppShellView: View {
     let request = ScreenRoutingPolicy.Request(
       prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText, confidence: attachment.ocrConfidence),
       mode: selectedMode, localText: localChat.installedModel?.screenModel, cloudText: cloudText,
-      localVision: localChat.installedModels.filter(\.supportsVision).map(\.screenModel), cloudVision: cloudVision,
+      localVision: screenSettings.preferredLocalVisionModels(from: localChat.installedModels), cloudVision: cloudVision,
       allowCloudScreenshots: screenSettings.allowCloudScreenshots,
       hasExplainedCloudPermission: screenSettings.hasExplainedCloudPermission, isOffline: connectivity.isOffline
     )

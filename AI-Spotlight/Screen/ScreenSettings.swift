@@ -15,6 +15,9 @@ final class ScreenSettings: ObservableObject {
   @Published private(set) var hasExplainedCloudPermission: Bool {
     didSet { defaults.set(hasExplainedCloudPermission, forKey: "screen.hasExplainedCloudPermission") }
   }
+  @Published var localVisionModelID: String {
+    didSet { defaults.set(localVisionModelID, forKey: "screen.localVisionModelID") }
+  }
   @Published var cloudVisionProvider: CloudProviderID {
     didSet { defaults.set(cloudVisionProvider.rawValue, forKey: "screen.cloudVisionProvider") }
   }
@@ -24,6 +27,7 @@ final class ScreenSettings: ObservableObject {
 
   init(defaults: UserDefaults = .standard) {
     self.defaults = defaults
+    localVisionModelID = defaults.string(forKey: "screen.localVisionModelID") ?? ""
     allowCloudScreenshots = defaults.bool(forKey: "screen.allowCloudScreenshots")
     hasExplainedCloudPermission = defaults.bool(forKey: "screen.hasExplainedCloudPermission")
     cloudVisionProvider = defaults.string(forKey: "screen.cloudVisionProvider").flatMap(CloudProviderID.init(rawValue:)) ?? .openAI
@@ -37,6 +41,12 @@ final class ScreenSettings: ObservableObject {
 
   var configuredVisionModel: CloudModel {
     CloudModel(id: cloudVisionModelID, displayName: cloudVisionModelID, provider: cloudVisionProvider)
+  }
+
+  func preferredLocalVisionModels(from models: [LocalModel]) -> [ScreenModel] {
+    let available = models.filter(\.supportsVision)
+    return (available.filter { $0.id == localVisionModelID }
+      + available.filter { $0.id != localVisionModelID }).map(\.screenModel)
   }
 
   static let permissionExplanation = "Text is read locally first. This question needs the image itself. Allowing screenshots sends the selected region to your configured cloud vision provider, where that provider’s data policies apply. This setting applies to future screenshots and can be turned off in Settings. Local mode always keeps screenshots on this Mac."

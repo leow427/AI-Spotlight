@@ -99,7 +99,8 @@ struct LocalModelInstallationStore: Sendable {
       try fileOperations.moveItem(projectorTemporary, projectorDestination)
       movedProjector = true
       installedVision = LocalVisionConfiguration(projectorURL: projectorDestination,
-        serverExecutableURL: vision.serverExecutableURL, contextWindow: vision.contextWindow)
+        serverExecutableURL: vision.serverExecutableURL, contextWindow: vision.contextWindow,
+        managedRuntimeDirectory: vision.managedRuntimeDirectory)
     }
 
     let record = Record(id: model.id, displayName: model.displayName, fileName: fileName,
@@ -125,6 +126,12 @@ struct LocalModelInstallationStore: Sendable {
               $0.caseInsensitiveCompare(previousURL.resolvingSymlinksInPath().path) == .orderedSame
             }) else { continue }
       try? fileOperations.removeItem(previousURL)
+      if let runtime = previous.visionConfiguration?.managedRuntimeDirectory,
+         runtime.deletingLastPathComponent().standardizedFileURL == modelsDirectory.standardizedFileURL,
+         runtime.lastPathComponent.hasPrefix("vision-runtime-"),
+         !library.models.contains(where: { $0.visionConfiguration?.managedRuntimeDirectory == runtime }) {
+        try? fileOperations.removeItem(runtime)
+      }
       if let projector = previous.visionConfiguration?.projectorURL,
          projector.deletingLastPathComponent().standardizedFileURL == modelsDirectory.standardizedFileURL,
          !library.models.contains(where: { $0.visionConfiguration?.projectorURL == projector }) {
