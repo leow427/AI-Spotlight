@@ -82,7 +82,11 @@ local vision. When Web Search is enabled, Screen first reads relevant facts thro
 OCR or a dedicated vision generation. On a local vision route, the selected local
 text-only model takes over query refinement and the final answer when available;
 otherwise the Screen model continues. No model preference or installed library is
-changed. For confident short text lookups, OCR supplies the query subject even if
+changed. To use separate models, leave a text model such as Qwen selected in the
+main chat picker and choose SmolVLM2 under Settings → Local Models → Image
+understanding → Use for Screen. Selecting SmolVLM2 in the main chat picker gives
+the VLM the query-writing and answer stages as well. For confident short text
+lookups, OCR supplies the query subject even if
 vision misreads the spelling; other queries retain the visual observations and
 OCR. Query examples preserve dictionary, memory, and error-resolution intent. Local
 text query generation uses temperature 0 and grounded Screen answers use 0.2.
@@ -261,9 +265,10 @@ vision, text-only requests through a selected vision model, search-off behavior,
 failed retrieval, image context budgets, cancellation/replacement, permission
 revocation during search, and reuse of evidence on offline cloud fallback. The
 native composer test enables both tools and streams 80 rapid fragments, checks
-that all text arrives, and waits for the final text to become visible. The full
-250-test suite, shared-scheme build, and static analyzer passed on 2026-09-05;
-the run contained no multiple-updates-per-frame warning. These combined requests
+that all text arrives, and waits for the final text to become visible. The earlier
+250-test verification run passed on 2026-09-05 with no multiple-updates-per-frame
+warning. Latest counts, CI results and remaining failures are recorded in
+[Screen search verification](Screen-Search-Verification.md). These combined requests
 use deterministic search and model responses, so they verify orchestration and
 UI behavior rather than the quality of a live SmolVLM 500M answer. Query-refinement
 regressions additionally verify the ordered vision → query → search → answer

@@ -442,8 +442,12 @@ final class LocalVisionTests: XCTestCase {
     let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
     view.cacheDisplay(in: view.bounds, to: bitmap)
     let text = try await ScreenOCRService().recognize(try XCTUnwrap(bitmap.cgImage)).text
-    XCTAssertTrue(text.contains("Update"), text)
-    XCTAssertTrue(text.contains("SmolVLM2 2.2B"), text)
+    // A separate Update line verifies the button, not just the explanatory
+    // caption. CI OCR can confuse the similar l/I glyphs in this brand name;
+    // normalize only that spelling while retaining the full model/version check.
+    XCTAssertTrue(text.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "Update" }, text)
+    let modelText = text.replacingOccurrences(of: "SmoIVLM2", with: "SmolVLM2")
+    XCTAssertTrue(modelText.contains("SmolVLM2 2.2B"), text)
     XCTAssertFalse(text.contains("Ready for Screen"), text)
     let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")

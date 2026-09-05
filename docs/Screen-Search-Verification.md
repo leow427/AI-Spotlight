@@ -77,6 +77,14 @@ production server code observed EOF and passed, so the hosted-test discrepancy
 remains unresolved. No assertion was changed to hide it. Build products and
 reports remain outside the repository; the pull request records GitHub CI.
 
+GitHub's first run of the compatibility repair passed the Codex subprocess test
+and all runtime, download, migration and routing tests. Its only failure was the
+new settings rendering assertion: OCR read `SmolVLM2` as `SmoIVLM2` even though
+the Update control was present. The UI test now normalizes only that known glyph
+ambiguity while retaining the full model/version assertion, and additionally
+requires a standalone `Update` line so the explanatory caption cannot satisfy
+the button check. All 18 focused tests passed again after this fixture correction.
+
 ## SmolVLM 2.2B compatibility repair
 
 The owner's shapes request reproduced a model/runtime compatibility failure.
