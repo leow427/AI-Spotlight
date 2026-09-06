@@ -9,6 +9,12 @@ The primary visual direction is a minimalistic liquid glass interface. This is t
 - Use slightly opaque liquid-glass surfaces throughout the interface.
 - Keep the visual language clean, restrained, and spacious.
 - Use translucency, soft layering, and subtle depth without adding unnecessary decoration.
+- Add restrained botanical accents: pale sage in dark mode, deeper green in light
+  mode, fine gradient borders, and a quiet composer focus glow.
+- Keep text primarily neutral and use rounded typography sparingly for greetings
+  and message labels. Preserve distinct tool/status colors.
+- Use brief hover and press feedback on navigation controls; respect Reduce
+  Motion and avoid continuous decorative animation.
 
 ## Conversation Layout
 

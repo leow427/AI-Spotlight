@@ -8,6 +8,60 @@ import XCTest
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testConversationScrollPreservesReadingPositionAcrossLayoutAndStreaming() throws {
+    for flipped in [true, false] {
+      let document = ConversationTestDocument(flipped: flipped)
+      document.frame = NSRect(x: 0, y: 0, width: 400, height: 1600)
+      let observer = ConversationScrollObserver.ObserverView()
+      observer.frame = document.bounds
+      document.addSubview(observer)
+      let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+      scroll.documentView = document
+      let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = scroll
+      defer { window.contentView = nil }
+      observer.scrollToBottomIfFollowing()
+      XCTAssertTrue(observer.followsLatest)
+      let bottom = scroll.contentView.bounds.minY
+
+      // A tiny wheel/keyboard movement cancels a layout correction already queued.
+      observer.setFrameSize(NSSize(width: 400, height: 1601))
+      scroll.contentView.scroll(to: NSPoint(x: 0, y: bottom + (flipped ? -8 : 8)))
+      let readingPosition = scroll.contentView.bounds.minY
+      XCTAssertFalse(observer.followsLatest)
+      observer.scrollToBottomIfFollowing()
+      XCTAssertEqual(scroll.contentView.bounds.minY, readingPosition, accuracy: 0.5)
+
+      document.setFrameSize(NSSize(width: 400, height: 2000))
+      observer.setFrameSize(document.bounds.size)
+      observer.scrollToBottomIfFollowing()
+      XCTAssertFalse(observer.followsLatest)
+      XCTAssertEqual(scroll.contentView.bounds.minY, readingPosition, accuracy: 0.5)
+
+      // Returning to the bottom restores following for the next streamed growth.
+      let newBottom = flipped ? document.bounds.maxY - scroll.contentView.bounds.height : 0
+      scroll.contentView.scroll(to: NSPoint(x: 0, y: newBottom))
+      XCTAssertTrue(observer.followsLatest)
+      document.setFrameSize(NSSize(width: 400, height: 2200))
+      observer.setFrameSize(document.bounds.size)
+      observer.scrollToBottomIfFollowing()
+      XCTAssertEqual(scroll.contentView.bounds.minY,
+                     flipped ? document.bounds.maxY - scroll.contentView.bounds.height : 0, accuracy: 0.5)
+
+      // Trackpad gestures suspend following even before their first offset change.
+      NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+      observer.setFrameSize(NSSize(width: 400, height: 2201))
+      observer.scrollToBottomIfFollowing()
+      XCTAssertFalse(observer.followsLatest)
+      scroll.contentView.scroll(to: NSPoint(x: 0, y: flipped ? 100 : 1000))
+      NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+      XCTAssertFalse(observer.followsLatest)
+      let olderPosition = scroll.contentView.bounds.minY
+      observer.scrollToBottomIfFollowing()
+      XCTAssertEqual(scroll.contentView.bounds.minY, olderPosition, accuracy: 0.5)
+    }
+  }
+
   func testPlusMenuIconsHaveCompactIntrinsicSizesWithoutChangingAssets() throws {
     for name in ["ScreenCapture", "WebSearch"] {
       let source = try XCTUnwrap(NSImage(named: name))
@@ -261,6 +315,31 @@ final class ScreenViewTests: XCTestCase {
       burstToken.cancel()
       await Task.yield()
       view.layoutSubtreeIfNeeded()
+      if historyCount > 0 {
+        let observer = try XCTUnwrap(descendants(view).compactMap { $0 as? ConversationScrollObserver.ObserverView }.first)
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.minY - 8))
+        NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        view.layoutSubtreeIfNeeded()
+        XCTAssertFalse(observer.followsLatest, "Even a small scroll must let the reader leave the bottom")
+        let readingPosition = scroll.contentView.bounds.minY
+        let extra = String(repeating: " Additional streamed detail.", count: 40)
+        let received = expectation(description: "Reply grows while reading history")
+        let receivedToken = chat.$sessions.filter { $0.flatMap(\.messages).last?.content.hasSuffix(extra) == true }
+          .prefix(1).sink { _ in received.fulfill() }
+        stream.continuation.yield(extra)
+        await fulfillment(of: [received], timeout: 5)
+        receivedToken.cancel()
+        view.layoutSubtreeIfNeeded()
+        observer.scrollToBottomIfFollowing()
+        XCTAssertFalse(observer.followsLatest)
+        XCTAssertEqual(scroll.contentView.bounds.minY, readingPosition, accuracy: 2,
+                       "Streaming must not pull the reader back to the newest reply")
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: 0))
+        view.layoutSubtreeIfNeeded()
+        observer.scrollToBottomIfFollowing()
+        XCTAssertEqual(scroll.contentView.bounds.minY, 0, accuracy: 2, "The oldest messages remain reachable")
+      }
     }
     let done = expectation(description: "Request finished")
     let token = chat.$state.filter { $0 == .idle }.prefix(1).sink { _ in done.fulfill() }
@@ -625,4 +704,14 @@ private struct ToolControlsTestView: View {
     .fixedSize()
     .transaction { $0.disablesAnimations = true }
   }
+}
+
+private final class ConversationTestDocument: NSView {
+  private let usesFlippedCoordinates: Bool
+  init(flipped: Bool) {
+    self.usesFlippedCoordinates = flipped
+    super.init(frame: .zero)
+  }
+  required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+  override var isFlipped: Bool { usesFlippedCoordinates }
 }
