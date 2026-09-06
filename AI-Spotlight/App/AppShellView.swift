@@ -3,13 +3,20 @@ import Combine
 import SwiftUI
 import UniformTypeIdentifiers
 
-/// Observe native layout without feeding measurements back into SwiftUI state.
-private struct ConversationScrollObserver: NSViewRepresentable {
+/// Follow new layout only while the reader remains at the end of the chat.
+struct ConversationScrollObserver: NSViewRepresentable {
   func makeNSView(context: Context) -> ObserverView { ObserverView() }
   func updateNSView(_ view: ObserverView, context: Context) {}
 
   final class ObserverView: NSView {
     private var pendingScroll: DispatchWorkItem?
+    private weak var observedScroll: NSScrollView?
+    private var previousClipBounds = NSRect.zero
+    private var previousDocumentSize = NSSize.zero
+    private var isAdjustingScroll = false
+    private var isLiveScrolling = false
+    private var hasPositionedInitially = false
+    private(set) var followsLatest = true
 
     override func setFrameSize(_ newSize: NSSize) {
       let changed = frame.size != newSize
@@ -19,26 +26,139 @@ private struct ConversationScrollObserver: NSViewRepresentable {
 
     override func viewDidMoveToWindow() {
       super.viewDidMoveToWindow()
+      disconnect()
+      if window != nil {
+        connect()
+        scheduleScroll()
+      }
+    }
+
+    private func connect() {
+      guard let scroll = enclosingScrollView, observedScroll !== scroll else { return }
+      observedScroll = scroll
+      rememberGeometry()
+      scroll.contentView.postsBoundsChangedNotifications = true
+      let center = NotificationCenter.default
+      if let document = scroll.documentView {
+        document.postsFrameChangedNotifications = true
+        center.addObserver(self, selector: #selector(documentLayoutChanged),
+                           name: NSView.frameDidChangeNotification, object: document)
+      }
+      center.addObserver(self, selector: #selector(boundsChanged),
+                         name: NSView.boundsDidChangeNotification, object: scroll.contentView)
+      center.addObserver(self, selector: #selector(beginScrolling),
+                         name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+      center.addObserver(self, selector: #selector(endScrolling),
+                         name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+    }
+
+    private func disconnect() {
       pendingScroll?.cancel()
-      if window != nil { scheduleScroll() }
+      pendingScroll = nil
+      NotificationCenter.default.removeObserver(self)
+      observedScroll = nil
+      isLiveScrolling = false
+    }
+
+    private var isAtBottom: Bool {
+      guard let scroll = observedScroll, let document = scroll.documentView else { return false }
+      let visible = scroll.contentView.bounds
+      let distance = document.isFlipped
+        ? document.bounds.maxY - visible.maxY : visible.minY - document.bounds.minY
+      return distance <= 2
+    }
+
+    private func rememberGeometry() {
+      previousClipBounds = observedScroll?.contentView.bounds ?? .zero
+      previousDocumentSize = observedScroll?.documentView?.bounds.size ?? .zero
+    }
+
+    @objc private func documentLayoutChanged() {
+      rememberGeometry()
+      scheduleScroll()
+    }
+
+    @objc private func beginScrolling() {
+      isLiveScrolling = true
+      followsLatest = false
+      pendingScroll?.cancel()
+    }
+
+    @objc private func endScrolling() {
+      isLiveScrolling = false
+      followsLatest = isAtBottom
+      rememberGeometry()
+      if followsLatest { scheduleScroll() }
+    }
+
+    @objc private func boundsChanged() {
+      guard let scroll = observedScroll else { return }
+      defer { rememberGeometry() }
+      guard !isAdjustingScroll, hasPositionedInitially else { return }
+      // Resizing/streaming changes geometry too. Only an offset change at the
+      // same size is navigation; live gestures suspend following before layout.
+      let bounds = scroll.contentView.bounds
+      if isLiveScrolling || (bounds.origin != previousClipBounds.origin
+          && bounds.size == previousClipBounds.size
+          && scroll.documentView?.bounds.size == previousDocumentSize) {
+        followsLatest = !isLiveScrolling && isAtBottom
+        if !followsLatest { pendingScroll?.cancel() }
+      }
     }
 
     private func scheduleScroll() {
       pendingScroll?.cancel()
-      let work = DispatchWorkItem { [weak self] in
-        guard let self, self.window != nil, let scroll = self.enclosingScrollView,
-              let document = scroll.documentView else { return }
-        let clip = scroll.contentView
-        let bottom = document.isFlipped
-          ? max(document.bounds.minY, document.bounds.maxY - clip.bounds.height)
-          : document.bounds.minY
-        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: bottom))
-        scroll.reflectScrolledClipView(clip)
-      }
+      guard followsLatest, !isLiveScrolling else { return }
+      let work = DispatchWorkItem { [weak self] in self?.scrollToBottomIfFollowing() }
       pendingScroll = work
-      // Lazy rows can be measured repeatedly while a single frame settles.
+      // Coalesce repeated lazy-row measurements; recheck reader intent at execution.
       DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(30), execute: work)
     }
+
+    func scrollToBottomIfFollowing() {
+      pendingScroll?.cancel()
+      pendingScroll = nil
+      connect()
+      guard followsLatest, !isLiveScrolling, window != nil,
+            let scroll = observedScroll, let document = scroll.documentView else { return }
+      let clip = scroll.contentView
+      let bottom = document.isFlipped
+        ? max(document.bounds.minY, document.bounds.maxY - clip.bounds.height)
+        : document.bounds.minY
+      isAdjustingScroll = true
+      clip.scroll(to: NSPoint(x: clip.bounds.minX, y: bottom))
+      scroll.reflectScrolledClipView(clip)
+      isAdjustingScroll = false
+      hasPositionedInitially = true
+      rememberGeometry()
+    }
+  }
+}
+
+/// A quiet botanical accent, with enough depth to stay legible in light mode.
+private enum NatureGlass {
+  static let accent = Color(nsColor: NSColor(name: nil) { appearance in
+    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+      ? NSColor(srgbRed: 0.66, green: 0.86, blue: 0.72, alpha: 1)
+      : NSColor(srgbRed: 0.22, green: 0.43, blue: 0.31, alpha: 1)
+  })
+  static let edge = LinearGradient(colors: [accent.opacity(0.5), .white.opacity(0.14), accent.opacity(0.18)],
+                                   startPoint: .topLeading, endPoint: .bottomTrailing)
+}
+
+private struct NatureButtonStyle: ButtonStyle {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  @Environment(\.isEnabled) private var isEnabled
+  @State private var isHovered = false
+
+  func makeBody(configuration: Configuration) -> some View {
+    configuration.label
+      .background(NatureGlass.accent.opacity(isEnabled && isHovered ? 0.09 : 0),
+                  in: RoundedRectangle(cornerRadius: 9))
+      .scaleEffect(!reduceMotion && configuration.isPressed ? 0.98 : 1)
+      .animation(reduceMotion ? nil : .easeOut(duration: 0.16), value: isHovered)
+      .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: configuration.isPressed)
+      .onHover { isHovered = $0 }
   }
 }
 
@@ -110,9 +230,16 @@ struct AppShellView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(localChat.selectedSessionID == session.id ? .white.opacity(0.10) : .clear)
+                    .background(localChat.selectedSessionID == session.id ? NatureGlass.accent.opacity(0.12) : .clear,
+                                in: RoundedRectangle(cornerRadius: 9))
+                    .overlay(alignment: .leading) {
+                      if localChat.selectedSessionID == session.id {
+                        Capsule().fill(NatureGlass.accent).frame(width: 2, height: 16)
+                      }
+                    }
                 }
-                .buttonStyle(.plain)
+                .buttonStyle(NatureButtonStyle())
+                .padding(.horizontal, 6)
               }
             }
 
@@ -127,7 +254,7 @@ struct AppShellView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .contentShape(Rectangle())
             }
-            .buttonStyle(.plain)
+            .buttonStyle(NatureButtonStyle())
             .padding(.horizontal, 12)
             .padding(.top, 12)
 
@@ -200,7 +327,7 @@ struct AppShellView: View {
     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 24, style: .continuous)
-        .stroke(.white.opacity(0.14), lineWidth: 0.5)
+        .stroke(NatureGlass.edge, lineWidth: 0.75)
     }
   }
 
@@ -381,8 +508,11 @@ struct AppShellView: View {
     }
     .overlay {
       RoundedRectangle(cornerRadius: 18)
-        .stroke(.white.opacity(0.16), lineWidth: 0.5)
+        .stroke(isComposerFocused ? NatureGlass.accent.opacity(0.55) : NatureGlass.accent.opacity(0.22),
+                lineWidth: isComposerFocused ? 1 : 0.5)
     }
+    .shadow(color: NatureGlass.accent.opacity(isComposerFocused ? 0.07 : 0), radius: 10, y: 2)
+    .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isComposerFocused)
   }
 
   @ViewBuilder
@@ -392,10 +522,14 @@ struct AppShellView: View {
 
       VStack(spacing: 10) {
         Image(systemName: selectedMode == .local ? "laptopcomputer" : "sparkles")
-          .font(.system(size: 30, weight: .light))
-          .foregroundStyle(.secondary)
+          .font(.system(size: 28, weight: .light))
+          .foregroundStyle(NatureGlass.accent)
+          .frame(width: 64, height: 64)
+          .background(NatureGlass.accent.opacity(0.06), in: Circle())
+          .overlay { Circle().stroke(NatureGlass.edge, lineWidth: 0.75) }
+          .padding(.bottom, 4)
         Text("How can I help?")
-          .font(.title2.weight(.medium))
+          .font(.system(.title2, design: .rounded, weight: .medium))
         Text(welcomeSubtitle)
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -638,7 +772,7 @@ struct AppShellView: View {
             }
             .contentShape(Rectangle())
           }
-          .buttonStyle(.plain)
+          .buttonStyle(NatureButtonStyle())
           .padding(.horizontal, 10)
           .padding(.vertical, 8)
         }
@@ -665,7 +799,7 @@ struct AppShellView: View {
       .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
       .overlay {
         RoundedRectangle(cornerRadius: 18)
-          .stroke(.white.opacity(0.16), lineWidth: 0.5)
+          .stroke(NatureGlass.edge, lineWidth: 0.75)
       }
       .shadow(radius: 24, y: 10)
     }
@@ -922,9 +1056,15 @@ struct LocalMessageView: View {
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
-      Text(message.role == .user ? "You" : "AI Spotlight")
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
+      HStack(spacing: 6) {
+        if message.role == .assistant {
+          Circle().fill(NatureGlass.accent).frame(width: 5, height: 5)
+            .accessibilityHidden(true)
+        }
+        Text(message.role == .user ? "You" : "AI Spotlight")
+          .font(.system(.caption, design: .rounded, weight: .semibold))
+          .foregroundStyle(.secondary)
+      }
 
       if message.role == .user, let data = message.imagePreview, let image = NSImage(data: data) {
         SentImagePreview(image: image)
