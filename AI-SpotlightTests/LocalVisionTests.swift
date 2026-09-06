@@ -78,7 +78,7 @@ final class LocalVisionTests: XCTestCase {
   }
 
   func testBundledVisionPackagesPinMatchingPairsAndOfficialRuntime() throws {
-    XCTAssertEqual(LocalVisionModelDescriptor.bundled.count, 12)
+    XCTAssertEqual(LocalVisionModelDescriptor.bundled.count, 13)
     for model in LocalVisionModelDescriptor.bundled {
       try model.validate()
       XCTAssertEqual(model.model.url.deletingLastPathComponent(), model.projector.url.deletingLastPathComponent())

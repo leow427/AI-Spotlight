@@ -10,13 +10,23 @@ under every name. There is no separate image-model selection.
 reviewed llama.cpp runtime with its libraries. All components have immutable URLs,
 exact byte counts and SHA-256 checksums. Users never select component files during
 normal setup. The complete package becomes selected only after installation commits.
-The same picker also labels existing text-only models honestly.
+The same picker also labels existing text-only models honestly. Every installed
+model has a Delete button with a confirmation step. Deletion unloads the model,
+removes its managed weights, projector and runtime, and selects another installed
+model automatically when one remains.
+
+Google Gemma 4 12B remains honestly labeled when its memory estimate exceeds the
+Mac's inference budget, but it offers **Install Anyway** for users who explicitly
+want to try it. That override applies only to the reviewed, checksum-pinned 12B
+package; disk capacity, architecture, Metal-buffer and integrity checks remain
+enforced. The app also repeats that the model may create memory pressure or fail
+to load.
 
 ![Local model setup](images/local-model-manager.png)
 
 ## Catalog reviewed on 2026-09-06
 
-Catalog version 3 contains **12 multimodal packages from four makers**: Alibaba /
+Catalog version 4 contains **13 multimodal packages from four makers**: Alibaba /
 Qwen, Google, Mistral AI and OpenBMB. Every entry uses the publisher's own GGUF
 repository, a matching projector from the same immutable revision, and the pinned
 llama.cpp b10797 runtime. Google uses its official QAT Q4_0 weights; the others use
@@ -30,6 +40,7 @@ are optional downloads, not weights bundled in the app.
 | Qwen3-VL 32B Instruct | Alibaba / Qwen | 20.97 GB | 27.42 GiB | 64 GiB | 90 |
 | Google Gemma 4 E2B | Google | 4.35 GB | 7.17 GiB | 16 GiB | 77 |
 | Google Gemma 4 E4B | Google | 6.16 GB | 9.63 GiB | 24 GiB | 86 |
+| Google Gemma 4 12B | Google | 7.16 GB | 12.62 GiB | 32 GiB | 89 |
 | Google Gemma 4 26B A4B | Google | 15.65 GB | 21.19 GiB | 48 GiB | 91 |
 | Google Gemma 4 31B | Google | 18.86 GB | 29.94 GiB | 64 GiB | 93 |
 | Mistral Ministral 3 3B | Mistral AI | 3.00 GB | 6.15 GiB | 12 GiB | 70 |
@@ -62,8 +73,7 @@ choices explicitly say “May be slow” and never receive the Recommended badge
 
 New families were reviewed against publisher configurations, embedded GGUF
 architecture/template metadata and the pinned runtime's implementations. Gemma's
-PLE weights and all MoE experts count in full. Gemma 4 12B's unified architecture
-is deferred pending its own review. Publisher instructions flag extreme image
+PLE weights and all MoE experts count in full. Publisher instructions flag extreme image
 aspect ratios as a Ministral quality limitation. Response-quality testing for the
 new families is left to the owner as requested; no new-family response results are
 claimed. The existing Qwen 4B fixtures remain documented in
@@ -77,6 +87,7 @@ Primary sources:
 - [Qwen 4B official files](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/tree/1cd86afb9a95c410a6038ab3b40d8b578c892266), [8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/tree/f982a07559d4a2f6c8744d840bf6fccab30eea96), [32B](https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct-GGUF/tree/e3e1fe0c76de7ee58ea65db420c643adfe2e457c)
 - [Google Gemma 4 E2B: official card and pinned files](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/tree/675cff42a74c774d6cb76f76d8eacb49b48c9b93)
 - [Google Gemma 4 E4B: official card and pinned files](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/tree/4b4a2c1d584be7264f87aac328a1bc739ce81b6c)
+- [Google Gemma 4 12B: official card and pinned files](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/tree/29d097773436b69ff9feafd636ab4cf873786537)
 - [Google Gemma 4 26B A4B: official card and pinned files](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/tree/d1c082be9cf3c8a514acf63b8761f4b41935842e)
 - [Google Gemma 4 31B: official card and pinned files](https://huggingface.co/google/gemma-4-31B-it-qat-q4_0-gguf/tree/59dde24573e7e61570dba08b18a2e1fe246955ed)
 - [Mistral Ministral 3 3B: official card and pinned files](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/tree/eb599d408350ea2bb60452cb86be7c7b2fc28227)
@@ -104,6 +115,7 @@ Qwen 4B/8B and MiniCPM 4.5 use 36×8×128; Qwen 32B uses 64×8×128;
 Ministral 3B/8B/14B use 26/34/40×8×128; MiniCPM 4 uses 32×2×128.
 Gemma uses per-layer sums for its different global/sliding dimensions and heads:
 E2B `(28×1×256 + 7×1×512)`, E4B `(35×2×256 + 7×2×512)`,
+12B `(40×8×256 + 8×1×512)`,
 26B `(25×8×256 + 5×2×512)`, 31B `(50×16×256 + 10×4×512)`.
 We conservatively reserve full context even on shared/sliding layers. Actual GGUF
 weight bytes include Gemma PLE tables and all MoE experts; active parameter counts

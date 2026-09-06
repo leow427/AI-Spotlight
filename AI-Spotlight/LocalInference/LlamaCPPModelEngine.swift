@@ -35,6 +35,11 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     releaseEngine()
   }
 
+  func deleteModel(id: String) async throws {
+    releaseEngine()
+    try installationStore.deleteModel(id: id)
+  }
+
   func download(
     _ model: LocalModelDescriptor,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void

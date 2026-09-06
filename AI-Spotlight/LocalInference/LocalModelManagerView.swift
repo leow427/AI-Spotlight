@@ -121,6 +121,8 @@ struct LocalModelOperationView: View {
         }
       case .installing:
         ProgressView("Installing model…")
+      case .deleting:
+        ProgressView("Deleting model…")
       case .benchmarking:
         HStack {
           ProgressView().controlSize(.small)
@@ -153,6 +155,7 @@ struct LocalModelManagerSection: View {
   @ObservedObject var advisor: LocalModelAdvisor = .shared
   @ObservedObject var chat: LocalChatViewModel = .shared
   @State private var isImporterPresented = false
+  @State private var pendingDeletion: LocalModel?
 
   var body: some View {
     Section("Local Models") {
@@ -209,6 +212,7 @@ struct LocalModelManagerSection: View {
           Spacer()
           Button(chat.installedModel?.id == model.id ? "Selected" : "Use") { chat.selectModel(id: model.id) }
             .disabled(chat.isBusy || chat.installedModel?.id == model.id)
+          deleteButton(model)
         }
       }
       LocalFileToolsSetupView(model: chat.installedModel)
@@ -225,6 +229,14 @@ struct LocalModelManagerSection: View {
       allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data], allowsMultipleSelection: false) { result in
       if case .success(let urls) = result, let url = urls.first { chat.installModel(from: url) }
     }
+    .alert(item: $pendingDeletion) { model in
+      Alert(
+        title: Text("Delete \(model.displayName)?"),
+        message: Text("This removes the downloaded model and its local support files from this Mac."),
+        primaryButton: .destructive(Text("Delete")) { chat.deleteModel(id: model.id) },
+        secondaryButton: .cancel()
+      )
+    }
   }
 
   private func modelRow(_ assessment: LocalModelAssessment, rank: Int? = nil, isRecommended: Bool = false) -> some View {
@@ -232,15 +244,20 @@ struct LocalModelManagerSection: View {
       HStack(alignment: .top) {
         Text(rank.map { "\($0). \(assessment.model.displayName)" } ?? assessment.model.displayName).font(.subheadline.weight(.medium))
         Spacer(minLength: 8)
-        if let installed = chat.installedModels.first(where: { $0.id == assessment.id }),
-           !assessment.model.requiresUpdate(installed) {
-          Button(chat.installedModel?.id == assessment.id ? "Selected" : "Use") {
-            chat.selectModel(id: assessment.id)
+        if let installed = chat.installedModels.first(where: { $0.id == assessment.id }) {
+          if !assessment.model.requiresUpdate(installed) {
+            Button(chat.installedModel?.id == assessment.id ? "Selected" : "Use") {
+              chat.selectModel(id: assessment.id)
+            }
+            .disabled(chat.isBusy || !assessment.canInstall || chat.installedModel?.id == assessment.id)
+          } else {
+            Button(assessment.permitsMemoryOverride ? "Update Anyway" : "Update") { chat.downloadModel(assessment.model) }
+              .disabled(chat.isBusy || !assessment.canInstall)
           }
-          .disabled(chat.isBusy || !assessment.fit.canRun || chat.installedModel?.id == assessment.id)
+          deleteButton(installed)
         } else {
-          Button(chat.installedModels.contains { $0.id == assessment.id } ? "Update" : "Install") { chat.downloadModel(assessment.model) }
-            .disabled(chat.isBusy || !assessment.fit.canRun)
+          Button(assessment.permitsMemoryOverride ? "Install Anyway" : "Install") { chat.downloadModel(assessment.model) }
+            .disabled(chat.isBusy || !assessment.canInstall)
         }
       }
       Text(assessment.model.summary).font(.subheadline).foregroundStyle(.secondary)
@@ -250,6 +267,10 @@ struct LocalModelManagerSection: View {
       Text("\(assessment.model.maker) · \(assessment.model.downloadByteCount, format: .byteCount(style: .file)) · \(assessment.model.license)")
         .font(.caption).foregroundStyle(.secondary)
       Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
+      if assessment.permitsMemoryOverride {
+        Text("Install anyway is enabled. This model may put this Mac under memory pressure or fail to load.")
+          .font(.caption).foregroundStyle(.orange)
+      }
       DisclosureGroup("Model details") {
         Text("\(assessment.model.quantization) · \(assessment.model.recommendedContextSize) token context · \(assessment.model.performanceClass)")
         Text("Estimated memory \(assessment.model.estimatedRuntimeMemory, format: .byteCount(style: .memory)) · Minimum Mac memory \(assessment.model.minimumMemory, format: .byteCount(style: .memory))")
@@ -259,5 +280,11 @@ struct LocalModelManagerSection: View {
       .font(.caption)
     }
     .padding(.vertical, 5)
+  }
+
+  private func deleteButton(_ model: LocalModel) -> some View {
+    Button("Delete", role: .destructive) { pendingDeletion = model }
+      .disabled(chat.isBusy)
+      .accessibilityLabel("Delete \(model.displayName)")
   }
 }

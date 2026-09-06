@@ -1,0 +1,29 @@
+{
+  "configurations" : [
+    {
+      "id" : "55931618-5A94-4655-91A0-ACE7948B990E",
+      "name" : "Test Scheme Action",
+      "options" : {
+
+      }
+    }
+  ],
+  "defaultOptions" : {
+    "performanceAntipatternCheckerEnabled" : true,
+    "targetForVariableExpansion" : {
+      "containerPath" : "container:AI-Spotlight.xcodeproj",
+      "identifier" : "A50000000000000000000001",
+      "name" : "AI Spotlight"
+    }
+  },
+  "testTargets" : [
+    {
+      "target" : {
+        "containerPath" : "container:AI-Spotlight.xcodeproj",
+        "identifier" : "A50000000000000000000002",
+        "name" : "AI SpotlightTests"
+      }
+    }
+  ],
+  "version" : 1
+}

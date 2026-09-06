@@ -604,6 +604,10 @@ struct AppShellView: View {
           ProgressView()
             .controlSize(.small)
           Text("Installing local model…")
+        case .deleting:
+          ProgressView()
+            .controlSize(.small)
+          Text("Deleting local model…")
         case .downloading(let progress):
           ProgressView(value: progress.fractionCompleted)
             .frame(width: 72)
@@ -674,7 +678,7 @@ struct AppShellView: View {
               Text("Unverified")
                 .help(cloudSettings.selectedModelCompatibility.message)
             }
-          case .installing, .downloading, .benchmarking:
+          case .installing, .deleting, .downloading, .benchmarking:
             Text("Finish the local model task before using Cloud mode.")
           }
         }

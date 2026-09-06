@@ -37,6 +37,16 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
     inferenceProfile ?? LocalMultimodalProfile.legacyQwen(parameters: parameterBillions)
   }
 
+  /// Gemma 4 12B is deliberately available as an opt-in on lower-memory Macs.
+  /// Keep this tied to the reviewed, pinned package so a catalog entry cannot
+  /// accidentally broaden the override to a different artifact.
+  var permitsMemoryOverride: Bool {
+    id == "gemma-4-12b-it-qat-q4_0-gguf"
+      && revision == "29d097773436b69ff9feafd636ab4cf873786537"
+      && checksumSHA256 == "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b"
+      && projector?.checksumSHA256 == "cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7"
+  }
+
   var downloadByteCount: Int64 {
     expectedByteCount + (projector?.expectedByteCount ?? 0)
       + (projector == nil ? 0 : LocalVisionRuntime.bundled.archive.expectedByteCount)
@@ -108,7 +118,7 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
 /// cache is reserved even for sliding/shared KV layers, avoiding optimistic fits.
 enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
   case qwen3VL4B, qwen3VL8B, qwen3VL32B
-  case gemma4E2B, gemma4E4B, gemma4A4B, gemma4_31B
+  case gemma4E2B, gemma4E4B, gemma4_12B, gemma4A4B, gemma4_31B
   case ministral3B, ministral8B, ministral14B
   case miniCPMV4, miniCPMV45
 
@@ -119,7 +129,7 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
   var architecture: String {
     switch self {
     case .qwen3VL4B, .qwen3VL8B, .qwen3VL32B: "qwen3vl"
-    case .gemma4E2B, .gemma4E4B, .gemma4A4B, .gemma4_31B: "gemma4"
+    case .gemma4E2B, .gemma4E4B, .gemma4_12B, .gemma4A4B, .gemma4_31B: "gemma4"
     case .ministral3B, .ministral8B, .ministral14B: "mistral3"
     case .miniCPMV4: "llama"
     case .miniCPMV45: "qwen3"
@@ -129,7 +139,7 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
   var chatTemplate: String {
     switch self {
     case .qwen3VL4B, .qwen3VL8B, .qwen3VL32B: "qwen3-vl-instruct"
-    case .gemma4E2B, .gemma4E4B, .gemma4A4B, .gemma4_31B: "gemma4-instruct"
+    case .gemma4E2B, .gemma4E4B, .gemma4_12B, .gemma4A4B, .gemma4_31B: "gemma4-instruct"
     case .ministral3B, .ministral8B, .ministral14B: "ministral3-instruct"
     case .miniCPMV4: "minicpm-v4"
     case .miniCPMV45: "minicpm-v4.5"
@@ -139,7 +149,8 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
   var parameters: Double {
     switch self {
     case .qwen3VL4B: 4; case .qwen3VL8B: 8; case .qwen3VL32B: 32
-    case .gemma4E2B: 4.6; case .gemma4E4B: 7.5; case .gemma4A4B: 26; case .gemma4_31B: 31
+    case .gemma4E2B: 4.6; case .gemma4E4B: 7.5; case .gemma4_12B: 12
+    case .gemma4A4B: 26; case .gemma4_31B: 31
     case .ministral3B: 3.4; case .ministral8B: 8.5; case .ministral14B: 13.5
     case .miniCPMV4: 3.6; case .miniCPMV45: 8.2
     }
@@ -158,6 +169,7 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
     case .qwen3VL32B: 64 * 8 * 128 * 4
     case .gemma4E2B: (28 * 1 * 256 + 7 * 1 * 512) * 4
     case .gemma4E4B: (35 * 2 * 256 + 7 * 2 * 512) * 4
+    case .gemma4_12B: (40 * 8 * 256 + 8 * 1 * 512) * 4
     case .gemma4A4B: (25 * 8 * 256 + 5 * 2 * 512) * 4
     case .gemma4_31B: (50 * 16 * 256 + 10 * 4 * 512) * 4
     case .ministral3B: 26 * 8 * 128 * 4
@@ -186,7 +198,7 @@ struct LocalModelManifest: Codable, Sendable, Equatable {
     try models.forEach { try $0.validate() }
   }
 
-  static let bundled = LocalModelManifest(version: 3, models: BundledLocalModels.models)
+  static let bundled = LocalModelManifest(version: 4, models: BundledLocalModels.models)
 }
 
 struct ModelDownloadProgress: Sendable, Equatable {
@@ -248,7 +260,7 @@ struct LocalModelCatalog: Sendable {
     }
     let hardware = detectHardware(installationStore.modelsDirectoryURL)
     let assessment = LocalModelSelector.assess(descriptor, hardware: hardware)
-    guard assessment.fit.canRun else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
+    guard assessment.canInstall else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
     return try await downloadVision(descriptor.visionDescriptor!, runtime: runtime, catalogDescriptor: descriptor, progress: progress)
   }
 
@@ -262,7 +274,8 @@ struct LocalModelCatalog: Sendable {
     try runtime.validate()
     let directory = installationStore.modelsDirectoryURL
     let hardware = detectHardware(directory)
-    guard hardware.inferenceMemoryBudget >= descriptor.estimatedRuntimeMemory else {
+    guard hardware.inferenceMemoryBudget >= descriptor.estimatedRuntimeMemory
+      || catalogDescriptor?.permitsMemoryOverride == true else {
       throw LocalInferenceError.bridgeFailure("This model does not leave enough memory for macOS, image processing and context. Review Local Models for a suitable package.")
     }
     let total = descriptor.model.expectedByteCount + descriptor.projector.expectedByteCount + runtime.archive.expectedByteCount

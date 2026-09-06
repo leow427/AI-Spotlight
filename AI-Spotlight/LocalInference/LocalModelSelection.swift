@@ -41,6 +41,11 @@ struct LocalModelAssessment: Identifiable, Sendable {
   let timeToFirstToken: Double
   let isMeasured: Bool
   var id: String { model.id }
+  /// This preserves all compatibility and disk checks. It only lets the
+  /// reviewed Gemma 4 12B package be intentionally installed or loaded when
+  /// the conservative memory estimate says it will not fit.
+  var permitsMemoryOverride: Bool { fit == .memory && model.permitsMemoryOverride }
+  var canInstall: Bool { fit.canRun || permitsMemoryOverride }
   var isResponsive: Bool { fit.canRun && tokensPerSecond >= 8 && timeToFirstToken <= 5 }
   var performanceDescription: String {
     if !fit.canRun { return reason }
