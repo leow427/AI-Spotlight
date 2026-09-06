@@ -40,34 +40,25 @@ including ChatGPT via the existing Codex bridge. Auto uses the same Brave search
 and keeps choosing the model based on task complexity and context size. Merely
 mentioning web search in ordinary text does not enable the tool.
 
-With Screen attached, the app first reads relevant facts using local OCR or the
-selected vision model. For local vision requests, the selected local text model
-then handles query refinement and the answer when it is a text-only model; the
-vision model only reads the pixels. Other routes reuse their Screen model.
-A separate text generation rewrites the question into one self-contained query, resolving references such as
-"this" with the observed names, values, and units. For example, "Is this a lot of
-RAM?" plus an observed "57 MB" can become "Is 57 MB a lot of RAM usage?".
-Brave receives that refined query, and the final model receives the original
-question, screen context, visual observations, and retrieved evidence. Search
-still runs when enabled even if the model could answer without it.
+With Screen attached, the ordinarily selected model resolves the question using
+local OCR or the image and generates one focused query. Brave retrieves evidence,
+then that same model answers the original question with the screenshot context and
+sources. Readable OCR avoids sending pixels when visual interpretation is not
+needed. Visual questions use the image in planning and answering. Search controls
+retrieval, not model selection; there is no cross-model handoff.
 
-The panel shows Reading screen, Preparing search query, and Searching with Brave.
-Confident short text can use OCR for word/definition, memory, and error lookups,
-without the general 40-character minimum. Low-confidence text and visual questions
-still require vision. Readable OCR skips the extra vision call. No intermediate model output is shown
-as the answer or saved as a chat turn. Empty, unrecognized, or oversized planning
-output preserves the draft and attachment instead of silently searching the
-original vague question. Stop applies throughout the pipeline.
+The panel shows Preparing search query and Searching with Brave. Intermediate
+planning is hidden and is never saved as a chat turn. Empty, invalid or oversized
+queries retain the draft/image rather than silently searching a vague question.
+Stop applies throughout. See [Screen](Screen-Skill.md) for consent, context and
+migration behavior, and [local model setup](Local-Model-Selection.md) for packages.
 
-Derived queries can include relevant screen details. Prompts instruct the model
-to omit unrelated text, credentials, and personal details and treat screen content
-as untrusted data. These are model instructions, not a guarantee of perfect
-relevance or redaction. Image pixels and full OCR/history payloads are not attached
-to Brave. Evidence is fitted to the final model's context budget. When handing
-vision observations to a text-only model, the final request contains those facts
-and OCR instead of sending the image a second time. Small models
-may misread details or write weak queries; this flow does not improve their
-underlying accuracy and adds one or two model calls before retrieval.
+Derived queries can contain relevant screen details. Prompts instruct the model
+to treat screen content as untrusted data and omit unrelated or sensitive details.
+These instructions do not guarantee perfect relevance or redaction. Full OCR,
+pixels and history are never attached to Brave. Evidence is fitted to the selected
+model's context before the final answer. There is one extra model call for a
+screenshot query; its model stays loaded across both stages.
 
 ![A Screen reply with Web Search sources](images/screen-search.png)
 

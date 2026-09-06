@@ -420,7 +420,6 @@ struct AppShellView: View {
 
   private var requestPhase: String {
     switch localChat.state {
-    case .readingScreen: "Reading screen"
     case .refiningSearch: "Preparing search query"
     case .searching: "Searching with Brave"
     case .streaming: "Streaming"
@@ -445,7 +444,7 @@ struct AppShellView: View {
           ProgressView(value: progress.fractionCompleted)
             .frame(width: 72)
           Text("Downloading \(progress.fractionCompleted, format: .percent.precision(.fractionLength(0)))")
-        case .preparing, .readingScreen, .refiningSearch, .searching:
+        case .preparing, .refiningSearch, .searching:
           ProgressView()
             .controlSize(.small)
           Text("Loading local model…")
@@ -489,7 +488,7 @@ struct AppShellView: View {
           Button("Advanced Settings", action: openSettings)
         } else {
           switch localChat.state {
-          case .preparing, .readingScreen, .refiningSearch, .searching:
+          case .preparing, .refiningSearch, .searching:
             ProgressView()
               .controlSize(.small)
             Text("Connecting to \(cloudSettings.preferredProvider.displayName)…")
@@ -691,7 +690,7 @@ struct AppShellView: View {
               localChat.selectModel(id: model.id)
             } label: {
               Label(
-                model.displayName,
+                model.displayName + (model.supportsVision ? " · Text + images" : " · Text only"),
                 systemImage: localChat.installedModel?.id == model.id ? "checkmark" : "cpu"
               )
             }
@@ -705,7 +704,7 @@ struct AppShellView: View {
       Button("Manage Models in Settings…", action: openSettings)
 
       Divider()
-      Button("Choose GGUF File…") {
+      Button("Advanced: Import Text GGUF…") {
         isModelImporterPresented = true
       }
     } label: {
@@ -726,7 +725,7 @@ struct AppShellView: View {
               cloudSettings.preferredModelID = model.id
             } label: {
               Label(
-                model.displayName,
+                model.displayName + (model.supportsVision ? " · Text + images" : " · Text only"),
                 systemImage: cloudSettings.preferredModelID == model.id ? "checkmark" : "cloud"
               )
             }
@@ -805,12 +804,21 @@ struct AppShellView: View {
     let cloudText = cloudSettings.isConfigured
       ? CloudModel(id: cloudSettings.preferredModelID, displayName: cloudSettings.preferredModelID,
                    provider: cloudSettings.preferredProvider).screenModel : nil
-    let visionModel = screenSettings.configuredVisionModel
-    let cloudVision = cloudSettings.hasCloudAccess(for: visionModel.provider) ? visionModel.screenModel : nil
+    let automatic = selectedMode == .auto ? AutoRouter.decide(AutoRouter.Request(
+      selectedMode: .auto, webSearchEnabled: isSearchEnabled, prompt: draft,
+      contextMessages: localChat.messages, localModel: localChat.installedModel,
+      additionalInputTokens: attachment.ocrText.utf8.count + 512
+        + (ScreenRoutingPolicy.requiresVision(prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText,
+          confidence: attachment.ocrConfidence)) ? 4096 : 0),
+      cloud: connectivity.isOffline ? nil : autoCloudConfiguration)) : nil
+    if let limitation = automatic?.limitation {
+      screen.error = limitation.message
+      return
+    }
     let request = ScreenRoutingPolicy.Request(
       prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText, confidence: attachment.ocrConfidence),
       mode: selectedMode, localText: localChat.installedModel?.screenModel, cloudText: cloudText,
-      localVision: screenSettings.preferredLocalVisionModels(from: localChat.installedModels), cloudVision: cloudVision,
+      autoRoute: automatic?.route,
       allowCloudScreenshots: screenSettings.allowCloudScreenshots,
       hasExplainedCloudPermission: screenSettings.hasExplainedCloudPermission, isOffline: connectivity.isOffline
     )
@@ -825,7 +833,7 @@ struct AppShellView: View {
     case .text, .vision:
       let prompt = draft
       localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
-        searchEnabled: isSearchEnabled, searchTextModel: localChat.installedModel?.screenModel,
+        searchEnabled: isSearchEnabled,
         cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
           if draft == prompt { draft = "" }
           if screen.attachment?.id == attachment.id { screen.removeAttachment() }
@@ -1072,7 +1080,6 @@ struct SettingsView: View {
   var body: some View {
     TabView {
       Form {
-        LocalVisionSettingsView(chat: .shared)
         LocalModelManagerSection()
       }
         .formStyle(.grouped)

@@ -30,3 +30,11 @@ the green variant retains the original geometry and includes attribution metadat
 https://thenounproject.com/
 
 Screen Capture icon: Adrien Coquet, The Noun Project (noun_ScreenCapture_3967429). Supplied by the project owner.
+
+Qwen3-VL model packages (optional downloads)
+==========================================
+Official Qwen3-VL 4B, 8B and 32B Instruct GGUF weights and matching vision encoders.
+License: Apache License 2.0. Model weights are downloaded separately, not bundled.
+https://huggingface.co/Qwen
+https://github.com/QwenLM/Qwen3-VL/blob/main/LICENSE
+The optional llama.cpp b10797 runtime is MIT licensed as above.

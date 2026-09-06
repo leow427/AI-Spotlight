@@ -50,7 +50,7 @@ extension LocalModel {
 
 extension LocalModelDescriptor {
   var supportsText: Bool { true }
-  var supportsVision: Bool { false }
+  var supportsVision: Bool { projector != nil && runtimeBuild == LocalVisionRuntime.build }
   var isLocal: Bool { true }
   var provider: String { "local" }
   var visionProjectorPath: String? { nil }
@@ -94,8 +94,7 @@ enum ScreenRoutingPolicy {
     let mode: ChatMode
     var localText: ScreenModel? = nil
     var cloudText: ScreenModel? = nil
-    var localVision: [ScreenModel] = []
-    var cloudVision: ScreenModel? = nil
+    var autoRoute: Route? = nil
     var allowCloudScreenshots = false
     var hasExplainedCloudPermission = false
     var isOffline = false
@@ -135,41 +134,36 @@ enum ScreenRoutingPolicy {
     let text = prompt.lowercased()
     // Text extraction is meaningful even when the source is a chart or photo.
     let extraction = ["transcribe", "extract the text", "read the text", "copy the text", "ocr"]
-    let visual = #"\b(diagrams?|charts?|graphs?|photos?|photographs?|colors?|colours?|layout|appearance|alignment|positions?|spatial|objects?|icons?|buttons?|flowcharts?)\b|what.*look like|visual (bug|issue)|where (is|are)|which (button|object)|overlap|cropped|cut off"#
+    let visual = #"\b(diagrams?|charts?|graphs?|photos?|photographs?|colors?|colours?|layout|appearance|alignment|positions?|spatial|shapes?|circles?|squares?|triangles?|arrows?|above|below|left|right|objects?|icons?|buttons?|flowcharts?)\b|what.*look like|visual (bug|issue)|where (is|are)|which (button|object)|overlap|cropped|cut off"#
     if extraction.contains(where: text.contains),
        text.range(of: #"\b(color|colour|position|layout|where|visual)\b"#, options: .regularExpression) == nil { return false }
     return text.range(of: visual, options: .regularExpression) != nil
   }
 
   static func decide(_ request: Request) -> Decision {
-    let localText = request.localText.flatMap { $0.isLocal && $0.supportsText ? $0 : nil }
-    let cloudText = request.cloudText.flatMap { !$0.isLocal && $0.supportsText && !request.isOffline ? $0 : nil }
-    if !requiresVision(prompt: request.prompt, ocr: request.ocr) {
-      let selected: ScreenModel?
-      switch request.mode {
-      case .local: selected = localText
-      case .cloud: selected = cloudText
-      case .auto: selected = localText ?? cloudText
-      }
-      if let selected { return .text(selected) }
-      return .blocked("Choose an available text model for this mode. Your screenshot and draft have been kept.")
+    let local = request.localText.flatMap { $0.isLocal && $0.supportsText ? $0 : nil }
+    let cloud = request.cloudText.flatMap { !$0.isLocal && $0.supportsText && !request.isOffline ? $0 : nil }
+    let selected: ScreenModel?
+    switch request.mode {
+    case .local: selected = local
+    case .cloud: selected = cloud
+    case .auto: selected = request.autoRoute?.mode == .cloud ? (cloud ?? local) : (local ?? cloud)
     }
-    let localVision = request.localVision.first { $0.isLocal && $0.supportsText && $0.canUseVision }
-      ?? localText.flatMap { $0.canUseVision ? $0 : nil }
-    if request.mode == .local {
-      if let localVision { return .vision(localVision) }
-      return .blocked("This request requires visual analysis. Install a local vision model or switch to Auto or Cloud.")
+    let needsImage = requiresVision(prompt: request.prompt, ocr: request.ocr)
+    guard let selected else { return .blocked("Choose an available model for this mode. Your screenshot and draft have been kept.") }
+    if !needsImage { return .text(selected) }
+    if selected.isLocal {
+      if selected.canUseVision { return .vision(selected) }
+      return .blocked("The selected local model is text-only. Install and select a recommended text-and-image package in Local Models. Your screenshot and draft have been kept.")
     }
-    let cloudVision = request.cloudVision.flatMap { !$0.isLocal && $0.supportsText && $0.canUseVision && !request.isOffline ? $0 : nil }
-    if request.allowCloudScreenshots, request.hasExplainedCloudPermission, let cloudVision {
-      return .vision(cloudVision)
+    if selected.canUseVision && request.allowCloudScreenshots && request.hasExplainedCloudPermission {
+      return .vision(selected)
     }
-    if let localVision { return .vision(localVision) }
-    if cloudVision != nil, !request.hasExplainedCloudPermission { return .needsCloudPermission }
-    if request.isOffline { return .blocked("You are offline. Install a local vision model to analyze this screenshot.") }
-    if !request.allowCloudScreenshots {
-      return .blocked("Visual analysis requires a local vision model or screenshot-upload permission in Screen settings.")
-    }
-    return .blocked("Choose a configured vision-capable cloud model in Screen settings. Text-only models cannot receive screenshots.")
+    // Consent is a constraint on normal Auto routing. Its only local fallback is
+    // the ordinary selected model, never another installed vision package.
+    if request.mode == .auto, let local, local.canUseVision { return .vision(local) }
+    if selected.canUseVision && !request.hasExplainedCloudPermission { return .needsCloudPermission }
+    if !selected.canUseVision { return .blocked("The selected cloud model cannot receive images. Choose a model with image support in the normal model picker. Your draft has been kept.") }
+    return .blocked("Screenshot upload is disabled. Enable it in Screen settings or select a local text-and-image model. Your draft has been kept.")
   }
 }

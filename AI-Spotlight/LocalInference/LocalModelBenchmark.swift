@@ -40,7 +40,7 @@ struct LocalModelBenchmark: Codable, Sendable, Equatable {
   }
 
   func isApplicable(to hardware: LocalHardwareProfile, now: Date = .now) -> Bool {
-    version == Self.version && llamaBuild == LocalModelCompatibility.llamaBuild
+    version == Self.version && llamaBuild == (architecture == "qwen3vl" ? LocalVisionRuntime.build : LocalModelCompatibility.llamaBuild)
       && hardwareFingerprint == hardware.fingerprint && lowPowerMode == hardware.lowPowerMode
       && recordedAt <= now && now.timeIntervalSince(recordedAt) < 90 * 86_400 && metrics.isValid
   }

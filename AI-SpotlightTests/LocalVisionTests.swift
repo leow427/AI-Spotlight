@@ -78,7 +78,7 @@ final class LocalVisionTests: XCTestCase {
   }
 
   func testBundledVisionPackagesPinMatchingPairsAndOfficialRuntime() throws {
-    XCTAssertEqual(LocalVisionModelDescriptor.bundled.count, 2)
+    XCTAssertEqual(LocalVisionModelDescriptor.bundled.count, 3)
     for model in LocalVisionModelDescriptor.bundled {
       try model.validate()
       XCTAssertEqual(model.model.url.deletingLastPathComponent(), model.projector.url.deletingLastPathComponent())
@@ -93,39 +93,26 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertThrowsError(try mismatched.validate())
   }
 
-  func testLegacyPackageOffersUpdateWithoutInvalidatingOtherModels() throws {
+  func testLegacyPackageExplainsMigrationWithoutChangingItsFiles() throws {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let source = try fixture(in: directory)
-    let descriptor = LocalVisionModelDescriptor.bundled[1]
-    var legacy = LocalModel(id: descriptor.id, displayName: "SmolVLM 2.2B", fileURL: source.fileURL,
+    let legacy = LocalModel(id: "smolvlm-2b-q4:vision", displayName: "SmolVLM 2.2B", fileURL: source.fileURL,
       visionConfiguration: source.visionConfiguration)
-    // Exercise decoding metadata written before packageRevision existed.
-    legacy = try JSONDecoder().decode(LocalModel.self, from: JSONEncoder().encode(legacy))
-    XCTAssertNil(legacy.visionConfiguration?.packageRevision)
-    XCTAssertTrue(descriptor.requiresUpdate(legacy))
+    let restored = try JSONDecoder().decode(LocalModel.self, from: JSONEncoder().encode(legacy))
+    XCTAssertEqual(restored, legacy)
     let image = PreparedScreenImage(data: Data([0xff, 0xd8, 0xff, 0xd9]), mimeType: "image/jpeg", pixelWidth: 10, pixelHeight: 10)
-    XCTAssertNoThrow(try LlamaServerVisionEngine.prepare(
-      messages: [ChatMessage(role: .user, content: "Define serendipity.")], image: nil, model: legacy),
-      "Text/OCR requests do not use the missing image token")
-    XCTAssertThrowsError(try LlamaServerVisionEngine.prepare(
-      messages: [ChatMessage(role: .user, content: "Describe these shapes.")], image: image, model: legacy)) { error in
-      XCTAssertTrue(error.localizedDescription.contains("Update SmolVLM2 2.2B"))
-      XCTAssertTrue(error.localizedDescription.contains("Settings → Local Models → Image understanding"))
+    XCTAssertNoThrow(try LlamaServerVisionEngine.prepare(messages: [ChatMessage(role: .user, content: "Define serendipity.")], image: nil, model: restored))
+    XCTAssertThrowsError(try LlamaServerVisionEngine.prepare(messages: [ChatMessage(role: .user, content: "Describe the shapes.")], image: image, model: restored)) { error in
+      XCTAssertTrue(error.localizedDescription.contains("Settings → Local Models"))
       XCTAssertTrue(error.localizedDescription.contains("draft has been kept"))
     }
-    var current = legacy
-    current.visionConfiguration?.packageRevision = descriptor.packageRevision
-    XCTAssertFalse(descriptor.requiresUpdate(current))
-    XCTAssertNoThrow(try LlamaServerVisionEngine.prepare(
-      messages: [ChatMessage(role: .user, content: "Describe these shapes.")], image: image, model: current))
-    let small = LocalVisionModelDescriptor.bundled[0]
-    let oldSmall = LocalModel(id: small.id, displayName: small.displayName, fileURL: source.fileURL,
-      visionConfiguration: source.visionConfiguration)
-    XCTAssertFalse(small.requiresUpdate(oldSmall))
-    XCTAssertFalse(descriptor.requiresUpdate(source), "Manually imported models retain their own compatibility contract")
-    XCTAssertTrue(descriptor.model.url.path.contains("/SmolVLM2-2.2B-Instruct-GGUF/"))
-    XCTAssertTrue(descriptor.projector.url.path.contains("/SmolVLM2-2.2B-Instruct-GGUF/"))
+    var repaired = restored
+    repaired.visionConfiguration?.packageRevision = "1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91"
+    XCTAssertNoThrow(try LlamaServerVisionEngine.prepare(messages: [ChatMessage(role: .user, content: "Describe the shapes.")], image: image, model: repaired))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: source.fileURL.path))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: source.visionConfiguration!.projectorURL.path))
+    XCTAssertFalse(LocalModelManifest.bundled.models.contains { $0.id.contains("smol") })
   }
 
   func testPackageReplacementPreservesSelectedVisionAndRollsBackOnFailure() throws {
@@ -215,6 +202,53 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertNotEqual(replacement.visionConfiguration?.managedRuntimeDirectory, managed)
     XCTAssertFalse(FileManager.default.fileExists(atPath: managed.path))
     XCTAssertEqual(store.installedModel(), original)
+  }
+
+  func testNormalInstallationSelectsCompletePackageAndUpgradeFailureKeepsItUsable() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let package = try downloadFixture(in: directory)
+    let store = LocalModelInstallationStore(modelsDirectory: directory.appending(path: "library"))
+    let text = try store.install(LocalModel(id: "old-text", displayName: "Old text", fileURL: package.source.fileURL))
+    let base = LocalModelManifest.bundled.models[0]
+    var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(base)) as? [String: Any])
+    json["downloadURL"] = package.descriptor.model.url.absoluteString
+    json["expectedByteCount"] = package.descriptor.model.expectedByteCount
+    json["checksumSHA256"] = package.descriptor.model.checksumSHA256
+    json["projector"] = try JSONSerialization.jsonObject(with: JSONEncoder().encode(package.descriptor.projector))
+    let descriptor = try JSONDecoder().decode(LocalModelDescriptor.self, from: JSONSerialization.data(withJSONObject: json))
+    let session = downloadSession()
+    defer { session.invalidateAndCancel() }
+    let progress = VisionProgressProbe()
+    let hardware = LocalHardwareProfile(physicalMemory: 64 * LocalHardwareProfile.gib, isAppleSilicon: true,
+      hasMetal: true, hasUnifiedMemory: true, chip: "Fixture", device: "Fixture", cpuCount: 12, performanceCPUCount: 8,
+      availableDiskBytes: 200 * LocalHardwareProfile.gib, metalRecommendedWorkingSet: nil,
+      metalMaximumBufferLength: 8 * LocalHardwareProfile.gib, lowPowerMode: false)
+    let catalog = LocalModelCatalog(installationStore: store, session: session, detectHardware: { _ in hardware })
+    let installed = try await catalog.download(descriptor, runtime: package.runtime) { await progress.record($0) }
+    XCTAssertEqual(store.installedModel(), installed)
+    XCTAssertTrue(installed.supportsVision)
+    XCTAssertEqual(installed.catalogDescriptor, descriptor)
+    XCTAssertFalse(descriptor.requiresUpdate(installed))
+    XCTAssertEqual(installed.visionConfiguration?.contextWindow, 8192)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: text.fileURL.path), "Migration retains legacy weights")
+    let values = await progress.values
+    XCTAssertEqual(values.last?.receivedByteCount, package.descriptor.model.expectedByteCount
+      + package.descriptor.projector.expectedByteCount + package.runtime.archive.expectedByteCount)
+    var operations = LocalModelInstallationStore.FileOperations()
+    operations.writeMetadata = { _, _ in throw CocoaError(.fileWriteOutOfSpace) }
+    let failed = LocalModelCatalog(installationStore: LocalModelInstallationStore(modelsDirectory: store.modelsDirectoryURL,
+      fileOperations: operations), session: session, detectHardware: { _ in hardware })
+    let before = try FileManager.default.contentsOfDirectory(atPath: store.modelsDirectoryURL.path).sorted()
+    do { _ = try await failed.download(descriptor, runtime: package.runtime) { _ in }; XCTFail("Expected rollback") }
+    catch { }
+    XCTAssertEqual(store.installedModel(), installed)
+    XCTAssertEqual(try FileManager.default.contentsOfDirectory(atPath: store.modelsDirectoryURL.path).sorted(), before)
+    let upgraded = try await catalog.download(descriptor, runtime: package.runtime) { _ in }
+    XCTAssertEqual(store.installedModel(), upgraded)
+    XCTAssertNotEqual(upgraded.fileURL, installed.fileURL)
+    XCTAssertFalse(descriptor.requiresUpdate(upgraded))
+    XCTAssertTrue(FileManager.default.fileExists(atPath: text.fileURL.path))
   }
 
   func testArtifactReportsProgressBeforeCompletionAndCanCancelMidTransfer() async throws {
@@ -345,21 +379,26 @@ final class LocalVisionTests: XCTestCase {
   }
 
   @MainActor
-  func testVisionChoicePersistsSeparatelyFromTextAndKeepsFallback() throws {
+  func testObsoleteVisionPreferenceIsRetiredWithoutSelectingOrDeletingModels() throws {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let suite = "VisionChoice-\(UUID())"
     let defaults = UserDefaults(suiteName: suite)!
     defer { defaults.removePersistentDomain(forName: suite) }
+    let store = LocalModelInstallationStore(modelsDirectory: directory.appending(path: "library"))
+    let source = try fixture(in: directory)
+    let text = try store.install(LocalModel(id: "text", displayName: "Text", fileURL: source.fileURL))
+    let vision = try store.install(source)
+    defaults.set(vision.id, forKey: "screen.localVisionModelID")
+    defaults.set(true, forKey: "screen.allowCloudScreenshots")
+    defaults.set(true, forKey: "screen.hasExplainedCloudPermission")
     let settings = ScreenSettings(defaults: defaults)
-    let first = try fixture(in: directory)
-    let second = LocalModel(id: "second", displayName: "Second", fileURL: first.fileURL, visionConfiguration: first.visionConfiguration)
-    let text = LocalModel(id: "text", displayName: "Text", fileURL: first.fileURL)
-    settings.localVisionModelID = second.id
-    let restored = ScreenSettings(defaults: defaults)
-    XCTAssertEqual(restored.preferredLocalVisionModels(from: [first, text, second]).map(\.id), [second.id, first.id])
-    XCTAssertEqual(restored.preferredLocalVisionModels(from: [first, text]).map(\.id), [first.id])
-    XCTAssertFalse(restored.allowCloudScreenshots)
+    XCTAssertNil(defaults.object(forKey: "screen.localVisionModelID"))
+    XCTAssertEqual(store.installedModel(), text)
+    XCTAssertEqual(store.installedModels().count, 2)
+    XCTAssertTrue(FileManager.default.fileExists(atPath: vision.fileURL.path))
+    XCTAssertTrue(settings.allowCloudScreenshots)
+    XCTAssertTrue(settings.hasExplainedCloudPermission)
   }
 
   @MainActor
@@ -368,14 +407,13 @@ final class LocalVisionTests: XCTestCase {
     defer { try? FileManager.default.removeItem(at: directory) }
     let engine = VisionDownloadEngineFixture(model: try fixture(in: directory))
     let chat = LocalChatViewModel(engine: engine, sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
-    var accepted = 0
     for cancelled in [true, false] {
       let started = expectation(description: "Download producer started")
       await engine.setStarted(started)
       let done = expectation(description: "Download lifecycle finished")
       let token = chat.$state.dropFirst().filter { $0 == .idle }.prefix(1).sink { _ in done.fulfill() }
-      chat.downloadVisionModel(LocalVisionModelDescriptor.bundled[0]) { _ in accepted += 1 }
-      chat.downloadVisionModel(LocalVisionModelDescriptor.bundled[0]) { _ in XCTFail("Overlapping download") }
+      chat.downloadModel(LocalModelManifest.bundled.models[0])
+      chat.downloadModel(LocalModelManifest.bundled.models[0])
       await fulfillment(of: [started], timeout: 3)
       XCTAssertTrue(chat.isBusy)
       if cancelled {
@@ -386,7 +424,6 @@ final class LocalVisionTests: XCTestCase {
       await fulfillment(of: [done], timeout: 3)
       token.cancel()
       XCTAssertFalse(chat.isBusy)
-      XCTAssertEqual(accepted, cancelled ? 0 : 1)
       XCTAssertEqual(chat.installedModels.count, cancelled ? 0 : 1)
     }
     let calls = await engine.calls
@@ -398,10 +435,12 @@ final class LocalVisionTests: XCTestCase {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let chat = LocalChatViewModel(engine: LlamaCPPModelEngine(installationStore: LocalModelInstallationStore(modelsDirectory: directory)))
-    let view = NSHostingView(rootView: Form { LocalVisionSettingsView(chat: chat) }.formStyle(.grouped))
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 560, height: 450), styleMask: [.borderless], backing: .buffered, defer: false)
+    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, trust: nil)
+    await advisor.detectHardware()
+    let view = NSHostingView(rootView: Form { LocalModelManagerSection(advisor: advisor, chat: chat) }.formStyle(.grouped))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 950), styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view
-    view.frame = NSRect(x: 0, y: 0, width: 560, height: 450)
+    view.frame = NSRect(x: 0, y: 0, width: 680, height: 950)
     await Task.yield()
     view.layoutSubtreeIfNeeded()
     let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
@@ -413,10 +452,11 @@ final class LocalVisionTests: XCTestCase {
     add(attachment)
     try png.write(to: URL(fileURLWithPath: "/tmp/ai-spotlight-vision-download-preview.png"))
     let text = try await ScreenOCRService().recognize(try XCTUnwrap(bitmap.cgImage)).text
-    XCTAssertTrue(text.contains("Image understanding"), text)
-    XCTAssertTrue(text.contains("500M"), text)
-    XCTAssertTrue(text.contains("2.2B"), text)
-    XCTAssertTrue(text.contains("Download"), text)
+    XCTAssertTrue(text.contains("Local Models"), text)
+    XCTAssertFalse(text.contains("Image understanding"), text)
+    XCTAssertTrue(text.contains("Qwen3"), text)
+    XCTAssertFalse(text.contains("SmolVLM"), text)
+    XCTAssertTrue(text.contains("Install"), text)
     XCTAssertFalse(text.contains("Choose a file"), text)
   }
 
@@ -432,11 +472,13 @@ final class LocalVisionTests: XCTestCase {
     let chat = LocalChatViewModel(engine: LlamaCPPModelEngine(installationStore: store),
       sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
     await chat.refreshInstalledModel()
-    let view = NSHostingView(rootView: Form { LocalVisionSettingsView(chat: chat) }.formStyle(.grouped))
-    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 600, height: 550),
+    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, trust: nil)
+    await advisor.detectHardware()
+    let view = NSHostingView(rootView: Form { LocalModelManagerSection(advisor: advisor, chat: chat) }.formStyle(.grouped))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 1200),
       styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view
-    view.frame = NSRect(x: 0, y: 0, width: 600, height: 550)
+    view.frame = NSRect(x: 0, y: 0, width: 680, height: 1200)
     await Task.yield()
     view.layoutSubtreeIfNeeded()
     let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
@@ -446,8 +488,7 @@ final class LocalVisionTests: XCTestCase {
     // caption. CI OCR can confuse the similar l/I glyphs in this brand name;
     // normalize only that spelling while retaining the full model/version check.
     XCTAssertTrue(text.split(separator: "\n").contains { $0.trimmingCharacters(in: .whitespaces) == "Update" }, text)
-    let modelText = text.replacingOccurrences(of: "SmoIVLM2", with: "SmolVLM2")
-    XCTAssertTrue(modelText.contains("SmolVLM2 2.2B"), text)
+    XCTAssertTrue(text.contains("Qwen3"), text)
     XCTAssertFalse(text.contains("Ready for Screen"), text)
     let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
@@ -455,6 +496,110 @@ final class LocalVisionTests: XCTestCase {
     attachment.lifetime = .keepAlways
     add(attachment)
     try png.write(to: URL(fileURLWithPath: "/tmp/ai-spotlight-vision-update-preview.png"))
+  }
+
+  func testResidentRuntimeReusesModelForTextImagesAndPlanningThenSwitchesAndUnloads() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = try controlledRuntimeModel(in: directory)
+    let runtime = LlamaServerVisionEngine()
+    let image = PreparedScreenImage(data: Data([0xff, 0xd8, 0xff, 0xd9]), mimeType: "image/jpeg", pixelWidth: 10, pixelHeight: 10)
+    var firstPID: Int32?
+    for inputImage in [nil, image, nil, image] {
+      let output = try await ScreenSearchContext.collect(runtime.stream(
+        messages: [ChatMessage(role: .user, content: "A controlled request")], image: inputImage, model: model), maximumBytes: 100)
+      XCTAssertEqual(output, "fixture answer")
+      let pid = await runtime.runtimeProcessIdentifier()
+      XCTAssertNotNil(pid)
+      if let firstPID { XCTAssertEqual(pid, firstPID, "Text/image stages must not reload the same model") }
+      else { firstPID = pid }
+    }
+    let replacement = LocalModel(id: "replacement", displayName: "Replacement", fileURL: model.fileURL,
+      visionConfiguration: model.visionConfiguration)
+    _ = try await ScreenSearchContext.collect(runtime.stream(
+      messages: [ChatMessage(role: .user, content: "Switch")], image: nil, model: replacement), maximumBytes: 100)
+    let nextPID = await runtime.runtimeProcessIdentifier()
+    XCTAssertNotEqual(nextPID, firstPID)
+    await runtime.unload()
+    let unloaded = await runtime.runtimeProcessIdentifier()
+    XCTAssertNil(unloaded)
+    for pid in [firstPID, nextPID].compactMap({ $0 }) {
+      try await waitForRuntimeCondition { Darwin.kill(pid, 0) != 0 }
+    }
+  }
+
+  func testResidentRuntimeCancellationAndIdleCleanupReleaseTheChild() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = try controlledRuntimeModel(in: directory)
+    let runtime = LlamaServerVisionEngine(idleDelay: .milliseconds(30))
+    let task = Task {
+      try await ScreenSearchContext.collect(runtime.stream(messages: [ChatMessage(role: .user, content: "hold")],
+        image: nil, model: model), maximumBytes: 100)
+    }
+    let marker = directory.appending(path: "request-started")
+    try await waitForRuntimeCondition { FileManager.default.fileExists(atPath: marker.path) }
+    let pid = await runtime.runtimeProcessIdentifier()
+    XCTAssertNotNil(pid)
+    task.cancel()
+    do { _ = try await task.value; XCTFail("Expected cancellation") } catch { }
+    try await waitForRuntimeCondition { await runtime.runtimeProcessIdentifier() == nil }
+    if let pid { try await waitForRuntimeCondition { Darwin.kill(pid, 0) != 0 } }
+    _ = try await ScreenSearchContext.collect(runtime.stream(messages: [ChatMessage(role: .user, content: "Retry")],
+      image: nil, model: model), maximumBytes: 100)
+    try await waitForRuntimeCondition { await runtime.runtimeProcessIdentifier() == nil }
+  }
+
+  func testApplicationTerminationDoesNotLeaveTheModelProcessRunning() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = try controlledRuntimeModel(in: directory)
+    let runtime = LlamaServerVisionEngine()
+    _ = try await ScreenSearchContext.collect(runtime.stream(messages: [ChatMessage(role: .user, content: "Hello")],
+      image: nil, model: model), maximumBytes: 100)
+    let identifier = await runtime.runtimeProcessIdentifier()
+    let pid = try XCTUnwrap(identifier)
+    NotificationCenter.default.post(name: NSApplication.willTerminateNotification, object: nil)
+    try await waitForRuntimeCondition { Darwin.kill(pid, 0) != 0 }
+    await runtime.unload()
+  }
+
+  private func waitForRuntimeCondition(_ condition: () async -> Bool) async throws {
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while !(await condition()) {
+      guard ContinuousClock.now < deadline else { XCTFail("Runtime condition did not complete"); return }
+      try await Task.sleep(for: .milliseconds(10))
+    }
+  }
+
+  private func controlledRuntimeModel(in directory: URL) throws -> LocalModel {
+    let source = try fixture(in: directory)
+    let server = directory.appending(path: "controlled-server")
+    let script = #"""
+    #!/usr/bin/python3
+    import http.server, json, sys, pathlib, threading
+    port = int(sys.argv[sys.argv.index('--port') + 1])
+    alias = sys.argv[sys.argv.index('--alias') + 1]
+    class Handler(http.server.BaseHTTPRequestHandler):
+        def log_message(self, *args): pass
+        def do_GET(self):
+            self.send_response(200); self.end_headers()
+            self.wfile.write(json.dumps({'data': [{'id': alias}]} if self.path == '/v1/models' else {'status': 'ok'}).encode())
+        def do_POST(self):
+            body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            self.send_response(200); self.send_header('Content-Type', 'text/event-stream'); self.end_headers()
+            if body['messages'][-1]['content'] == 'hold':
+                pathlib.Path(__file__).with_name('request-started').write_text('ready')
+                self.wfile.write(b': waiting\n\n'); self.wfile.flush(); threading.Event().wait()
+            else:
+                self.wfile.write(b'data: {"choices":[{"delta":{"content":"fixture answer"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n')
+                self.wfile.flush()
+    http.server.HTTPServer(('127.0.0.1', port), Handler).serve_forever()
+    """#
+    try Data(script.utf8).write(to: server)
+    try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: server.path)
+    return LocalModel(id: source.id, displayName: source.displayName, fileURL: source.fileURL,
+      visionConfiguration: LocalVisionConfiguration(projectorURL: source.visionConfiguration!.projectorURL, serverExecutableURL: server))
   }
 
   private func downloadSession() -> URLSession {
@@ -557,7 +702,7 @@ private actor VisionDownloadEngineFixture: LocalModelEngine {
   init(model: LocalModel) { self.model = model }
   func setStarted(_ expectation: XCTestExpectation) { started = expectation }
   func complete() { continuation?.resume(); continuation = nil }
-  func downloadVision(_ descriptor: LocalVisionModelDescriptor,
+  func download(_ descriptor: LocalModelDescriptor,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel {
     calls += 1
     await progress(ModelDownloadProgress(receivedByteCount: 1, expectedByteCount: 2))
@@ -570,8 +715,6 @@ private actor VisionDownloadEngineFixture: LocalModelEngine {
   func installedModel() async -> LocalModel? { nil }
   func installedModels() async -> [LocalModel] { installed }
   func selectModel(id: String) async throws { }
-  func download(_ descriptor: LocalModelDescriptor,
-    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel { model }
   nonisolated func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> { AsyncThrowingStream { $0.finish() } }
   func unload() async { }
 }

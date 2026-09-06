@@ -7,7 +7,13 @@ enum LocalModelCompatibility {
   static let minimumContext = 4_096
 
   static func supports(_ model: LocalModelDescriptor) -> Bool {
-    model.minimumLlamaBuild <= llamaBuild && model.architecture == "qwen2"
+    if model.supportsVision {
+      return model.runtimeBuild == LocalVisionRuntime.build && model.minimumLlamaBuild <= LocalVisionRuntime.build
+        && model.architecture == "qwen3vl" && model.chatTemplate == "qwen3-vl-instruct"
+        && [4.0, 8.0, 32.0].contains(model.parameterBillions)
+        && ["Q4_K_M", "Q8_0"].contains(model.quantization) && model.recommendedContextSize == 8192
+    }
+    return model.minimumLlamaBuild <= llamaBuild && model.architecture == "qwen2"
       && model.chatTemplate == "chatml"
       && ["Q4_K_M", "Q5_K_M", "Q8_0"].contains(model.quantization)
       && model.recommendedContextSize >= minimumContext
@@ -108,7 +114,7 @@ enum LocalModelSelector {
       LocalModelAssessment(model: model, fit: fit, reason: reason, tokensPerSecond: speed,
                            timeToFirstToken: ttft, isMeasured: exact != nil)
     }
-    guard (try? model.validate()) != nil, LocalModelCompatibility.supports(model) else {
+    guard model.supportsVision, (try? model.validate()) != nil, LocalModelCompatibility.supports(model) else {
       return result(.unsupported, "Requires an unsupported architecture, chat format, context, or llama.cpp build.")
     }
     // The bridge uses GPU offload when Metal exists. Discrete GPU memory needs
@@ -126,7 +132,7 @@ enum LocalModelSelector {
       return result(.memory, "Does not leave enough memory for macOS and other apps.")
     }
     // Installation copies the verified download before committing the library.
-    let requiredDisk = model.expectedByteCount * 2 + 2 * LocalHardwareProfile.gib
+    let requiredDisk = model.downloadByteCount * 2 + 2 * LocalHardwareProfile.gib
     guard installed || hardware.availableDiskBytes >= requiredDisk else {
       return result(.disk, "Needs room for the download, installation copy, and 2 GB of free space.")
     }

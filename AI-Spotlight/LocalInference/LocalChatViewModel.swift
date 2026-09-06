@@ -12,7 +12,6 @@ final class LocalChatViewModel: ObservableObject {
     case benchmarking
     case downloading(ModelDownloadProgress)
     case preparing
-    case readingScreen
     case refiningSearch
     case searching
     case streaming
@@ -43,7 +42,6 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var screenRouteDecision: ScreenRoutingPolicy.Decision?
   @Published private(set) var state: State = .idle
   @Published private(set) var benchmarkNotice: String?
-  @Published private(set) var visionDownloadID: String?
   private let modelAdvisor: LocalModelAdvisor?
 
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
@@ -57,7 +55,7 @@ final class LocalChatViewModel: ObservableObject {
     // A persistence error must not make a live request accept another submission.
     if activeRequest != nil || generationTask != nil || installationTask != nil { return true }
     switch state {
-    case .installing, .downloading, .benchmarking, .preparing, .readingScreen, .refiningSearch, .searching, .streaming: return true
+    case .installing, .downloading, .benchmarking, .preparing, .refiningSearch, .searching, .streaming: return true
     case .idle, .failed: return false
     }
   }
@@ -106,7 +104,6 @@ final class LocalChatViewModel: ObservableObject {
     installationTask?.cancel()
     idleUnloadTask?.cancel()
     state = .installing
-    visionDownloadID = nil
     let didAccessSecurityScope = sourceURL.startAccessingSecurityScopedResource()
     let modelName = sourceURL.deletingPathExtension().lastPathComponent
     let accessedProjector = vision?.projectorURL.startAccessingSecurityScopedResource() ?? false
@@ -118,6 +115,7 @@ final class LocalChatViewModel: ObservableObject {
         if accessedProjector { vision?.projectorURL.stopAccessingSecurityScopedResource() }
       }
       do {
+        await self?.visionEngine.unload()
         try await engine.install(model)
         guard let self else { return }
         await self.refreshInstalledModel()
@@ -138,12 +136,12 @@ final class LocalChatViewModel: ObservableObject {
     stopStreaming()
     installationTask?.cancel()
     idleUnloadTask?.cancel()
-    visionDownloadID = nil
-    state = .downloading(ModelDownloadProgress(receivedByteCount: 0, expectedByteCount: descriptor.expectedByteCount))
+    state = .downloading(ModelDownloadProgress(receivedByteCount: 0, expectedByteCount: descriptor.downloadByteCount))
     installationTask = Task { [weak self, engine] in
       do {
         let prediction = try await self?.modelAdvisor?.confirmDownload(descriptor, installedModels: self?.installedModels ?? [])
         try Task.checkCancellation()
+        await self?.visionEngine.unload()
         _ = try await engine.download(descriptor) { [weak self] progress in
           await self?.updateDownloadProgress(progress)
         }
@@ -161,46 +159,20 @@ final class LocalChatViewModel: ObservableObject {
     }
   }
 
-  func downloadVisionModel(_ descriptor: LocalVisionModelDescriptor,
-                           onInstalled: @escaping @MainActor (LocalModel) -> Void = { _ in }) {
-    guard !isBusy else { return }
-    idleUnloadTask?.cancel()
-    visionDownloadID = descriptor.id
-    state = .downloading(ModelDownloadProgress(receivedByteCount: 0, expectedByteCount: descriptor.downloadByteCount))
-    installationTask = Task { [weak self, engine] in
-      do {
-        let model = try await engine.downloadVision(descriptor) { [weak self] progress in
-          await self?.updateDownloadProgress(progress)
-        }
-        guard let self else { return }
-        await self.refreshInstalledModel()
-        // The atomic installer may finish just as Cancel is pressed. A fully
-        // installed package stays usable; partial downloads never reach here.
-        onInstalled(model)
-        self.finishInstallation()
-      } catch is CancellationError {
-        self?.finishInstallation()
-      } catch {
-        self?.failInstallation(error)
-      }
-    }
-  }
-
   func cancelInstallation() {
     // Keep submission blocked until the downloader/benchmark acknowledges cancellation.
     installationTask?.cancel()
   }
 
   func runModelBenchmark() {
-    guard !isBusy, installedModel != nil else { return }
+    guard !isBusy, let installedModel else { return }
     idleUnloadTask?.cancel()
-    visionDownloadID = nil
     state = .benchmarking
     installationTask = Task { [weak self] in
       guard let self else { return }
       await modelAdvisor?.detectHardware()
       let prediction = modelAdvisor?.recommendations(installedModels: installedModels)
-        .assessments.first { $0.id == installedModel?.id }
+        .assessments.first { $0.id == installedModel.id }
       await benchmarkInstalledModel(prediction: prediction)
       finishInstallation()
     }
@@ -213,7 +185,8 @@ final class LocalChatViewModel: ObservableObject {
     do {
       try Task.checkCancellation()
       if modelAdvisor.hardware == nil { await modelAdvisor.detectHardware() }
-      if let metrics = try await engine.benchmark() {
+      let measured = model.supportsVision ? try await visionEngine.benchmark(model: model) : try await engine.benchmark()
+      if let metrics = measured {
         try Task.checkCancellation()
         modelAdvisor.record(metrics, model: model, prediction: prediction)
         benchmarkNotice = "Performance check complete. Results are saved on this Mac."
@@ -232,6 +205,7 @@ final class LocalChatViewModel: ObservableObject {
     state = .preparing
     Task { [weak self, engine] in
       do {
+        await self?.visionEngine.unload()
         try await engine.selectModel(id: id)
         guard let self else { return }
         await self.refreshInstalledModel()
@@ -328,7 +302,6 @@ final class LocalChatViewModel: ObservableObject {
     decision: ScreenRoutingPolicy.Decision,
     selectedMode: ChatMode,
     searchEnabled: Bool = false,
-    searchTextModel: ScreenModel? = nil,
     cloudUploadAllowed: @escaping @MainActor () -> Bool,
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
@@ -370,9 +343,8 @@ final class LocalChatViewModel: ObservableObject {
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
         var target = model
-        var requestImage = image
+        let requestImage = image
         var requestHistory = history
-        var screenFacts: String?
         var searchQuery: String?
         // Reuse retrieved evidence if an offline cloud attempt falls back to local vision.
         var searchResults: [WebSearchResult]?
@@ -385,6 +357,9 @@ final class LocalChatViewModel: ObservableObject {
               let installed = await engine.installedModels()
               try Task.checkCancellation()
               guard let installedModel = installed.first(where: { $0.id == target.id }) else { throw LocalInferenceError.noModelInstalled }
+              guard await engine.installedModel()?.id == target.id else {
+                throw LocalInferenceError.bridgeFailure("The selected local model changed. Please send your draft again.")
+              }
               localModel = installedModel
               if installedModel.supportsVision {
                 try LocalVisionModelValidation.validate(installedModel)
@@ -416,39 +391,11 @@ final class LocalChatViewModel: ObservableObject {
               if searchResults == nil {
                 if let attachment, searchQuery == nil {
                   owner.activeRequest = ActiveRequest(id: active.id, route: route, modelDisplayName: target.id)
-                  var facts = screenFacts ?? attachment.ocrText
-                  if let image = requestImage, screenFacts == nil {
-                    owner.state = .readingScreen
-                    let observationRequest = [ChatMessage(role: .user, content:
-                      ScreenSearchContext.observationPrompt(question: prompt, ocr: attachment.ocrText))]
-                    let observationContext = try await prepare(observationRequest, image)
-                    let observationStream = try await owner.screenOutput(observationContext, image: image,
-                      target: target, localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed)
-                    facts = try ScreenSearchContext.observations(from:
-                      await ScreenSearchContext.collect(observationStream, maximumBytes: 2_000))
-                    requestHistory[requestHistory.count - 1].content = ScreenPromptContext.text(
-                      userPrompt: prompt, ocr: attachment.ocrText, observations: facts, preferOCR: preferOCR)
-                  }
-                  screenFacts = facts
-                  try Task.checkCancellation()
-                  guard owner.activeRequest?.id == active.id else { return }
-                  // Vision reads the pixels; the selected text model handles the
-                  // search intent and evidence. Small VLMs often only transcribe.
-                  if requestImage != nil, target.isLocal, let searchTextModel,
-                     searchTextModel.isLocal, searchTextModel.supportsText, !searchTextModel.supportsVision {
-                    target = searchTextModel
-                    requestImage = nil
-                    continue // Revalidate context with the text model's tokenizer.
-                  }
-                  if requestImage != nil && !target.isLocal && !cloudUploadAllowed() {
-                    throw ScreenRequestError.cloudUploadNotAllowed
-                  }
                   owner.state = .refiningSearch
-                  let queryFacts = preferOCR ? attachment.ocrText : facts
                   let queryRequest = [ChatMessage(role: .user, content:
-                    ScreenSearchContext.queryPrompt(question: prompt, facts: queryFacts, ocr: attachment.ocrText))]
-                  let queryContext = try await prepare(queryRequest, nil)
-                  let queryStream = try await owner.screenOutput(queryContext, image: nil,
+                    ScreenSearchContext.queryPrompt(question: prompt, facts: "", ocr: attachment.ocrText))]
+                  let queryContext = try await prepare(queryRequest, requestImage)
+                  let queryStream = try await owner.screenOutput(queryContext, image: requestImage,
                     target: target, localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed,
                     temperature: 0)
                   searchQuery = try ScreenSearchContext.query(from:
@@ -469,7 +416,7 @@ final class LocalChatViewModel: ObservableObject {
               owner.state = .preparing
               if let attachment, let searchQuery {
                 requestHistory[requestHistory.count - 1].content = ScreenPromptContext.text(userPrompt: prompt,
-                  ocr: attachment.ocrText, observations: image == nil ? nil : screenFacts, preferOCR: preferOCR)
+                  ocr: attachment.ocrText, preferOCR: preferOCR)
                   + "\n\nSearch query used to retrieve the evidence: " + searchQuery
               }
               let grounded = try await WebSearchContext.prepare(messages: requestHistory, results: searchResults!) {
@@ -510,7 +457,7 @@ final class LocalChatViewModel: ObservableObject {
             // A genuinely offline cloud attempt can fall back before any reply is accepted.
             if !target.isLocal, requestImage != nil, acceptedSession == nil,
                normalizedCloudError(error) as? CloudProviderError == .offline,
-               let fallback = (await engine.installedModels()).first(where: \.supportsVision) {
+               let fallback = await engine.installedModel(), fallback.supportsVision, selectedMode == .auto {
               try Task.checkCancellation()
               target = fallback.screenModel
               owner.screenRouteDecision = .vision(target)
@@ -540,7 +487,7 @@ final class LocalChatViewModel: ObservableObject {
         await engine.unload()
         try Task.checkCancellation()
         guard activeRequest?.id == activeID else { throw CancellationError() }
-        return visionEngine.stream(messages: prepared.messages, image: image, model: localModel)
+        return visionEngine.stream(messages: prepared.messages, image: image, model: localModel, temperature: temperature)
       }
       guard await engine.installedModel()?.id == target.id else {
         throw LocalInferenceError.bridgeFailure("The selected local model changed. Please send your draft again.")
@@ -752,11 +699,13 @@ final class LocalChatViewModel: ObservableObject {
 
   func applicationBecameInactive() {
     idleUnloadTask?.cancel()
-    idleUnloadTask = Task { [engine, idleUnloadDelay, sleep] in
+    idleUnloadTask = Task { [weak self, engine, visionEngine, idleUnloadDelay, sleep] in
       do {
         try await sleep(idleUnloadDelay)
         try Task.checkCancellation()
+        guard self?.isBusy == false else { return }
         await engine.unload()
+        await visionEngine.unload()
       } catch {
         // Cancellation means the app became active before the idle policy elapsed.
       }
@@ -800,7 +749,6 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   private func finishInstallation() {
-    visionDownloadID = nil
     state = .idle
     installationTask = nil
   }
@@ -817,7 +765,6 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   private func beginGeneration(route: Route, modelDisplayName: String) -> ActiveRequest {
-    visionDownloadID = nil
     let request = ActiveRequest(id: UUID(), route: route, modelDisplayName: modelDisplayName)
     activeRequest = request
     return request

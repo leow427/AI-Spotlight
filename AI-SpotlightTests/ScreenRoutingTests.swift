@@ -19,7 +19,7 @@ final class ScreenRoutingTests: XCTestCase {
   }
 
   func testVisualIntentOverridesGoodOCRAndLowOCRRequiresVision() {
-    for prompt in ["explain the chart", "describe this diagram", "what color is it?", "where is the button?", "fix this visual bug", "describe the photo", "is the layout aligned?"] {
+    for prompt in ["explain the chart", "describe this diagram", "what color is it?", "where is the button?", "fix this visual bug", "describe the photo", "is the layout aligned?", "Which shape is above the circle?", "Are the arrows connected?"] {
       XCTAssertTrue(ScreenRoutingPolicy.requiresVision(prompt: prompt, ocr: ocr), prompt)
     }
     XCTAssertFalse(ScreenRoutingPolicy.requiresVision(prompt: "transcribe the text in this chart", ocr: ocr))
@@ -32,7 +32,7 @@ final class ScreenRoutingTests: XCTestCase {
       input.allowCloudScreenshots = allowed
       input.hasExplainedCloudPermission = true
       XCTAssertNil(ScreenRoutingPolicy.decide(input).model)
-      input.localVision = [vision, localVision]
+      input.localText = localVision
       XCTAssertEqual(ScreenRoutingPolicy.decide(input), .vision(localVision))
     }
   }
@@ -40,24 +40,55 @@ final class ScreenRoutingTests: XCTestCase {
   func testCloudPermissionAndOfflineFallback() {
     for mode in [ChatMode.auto, .cloud] {
       var input = request("describe the diagram", mode: mode)
+      input.cloudText = vision
+      input.autoRoute = vision.route
       XCTAssertEqual(ScreenRoutingPolicy.decide(input), .needsCloudPermission)
       input.hasExplainedCloudPermission = true
       XCTAssertNil(ScreenRoutingPolicy.decide(input).model)
-      input.localVision = [localVision]
-      XCTAssertEqual(ScreenRoutingPolicy.decide(input), .vision(localVision))
+      input.localText = localVision
+      if mode == .auto { XCTAssertEqual(ScreenRoutingPolicy.decide(input), .vision(localVision)) }
+      else { XCTAssertNil(ScreenRoutingPolicy.decide(input).model) }
       input.allowCloudScreenshots = true
       XCTAssertEqual(ScreenRoutingPolicy.decide(input), .vision(vision))
       input.isOffline = true
-      XCTAssertEqual(ScreenRoutingPolicy.decide(input), .vision(localVision))
+      if mode == .auto { XCTAssertEqual(ScreenRoutingPolicy.decide(input), .vision(localVision)) }
+      else { XCTAssertNil(ScreenRoutingPolicy.decide(input).model) }
     }
+  }
+
+  func testAutoUsesNormalRouterForOCRAndVisualRequestsWithSearchOnAndOff() {
+    let model = LocalModel(id: "selected", displayName: "Selected", fileURL: URL(fileURLWithPath: "/tmp/model.gguf"),
+      visionConfiguration: LocalVisionConfiguration(projectorURL: URL(fileURLWithPath: "/tmp/mmproj.gguf"),
+        serverExecutableURL: URL(fileURLWithPath: "/usr/bin/true")))
+    for search in [false, true] {
+      for prompt in ["Summarize this text", "Analyze this diagram", "What color is the square?"] {
+        let automatic = AutoRouter.decide(.init(selectedMode: .auto, webSearchEnabled: search, prompt: prompt,
+          contextMessages: [], localModel: model, cloud: .init(provider: .openAI, modelID: "gpt-4o-mini")))
+        let cloudModel = CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
+        let input = ScreenRoutingPolicy.Request(prompt: prompt, ocr: ocr, mode: .auto,
+          localText: model.screenModel, cloudText: cloudModel, autoRoute: automatic.route,
+          allowCloudScreenshots: true, hasExplainedCloudPermission: true)
+        XCTAssertEqual(ScreenRoutingPolicy.decide(input).model?.id, automatic.route?.modelID)
+      }
+    }
+  }
+
+  func testAutoAccountsForScreenshotContextWhenChoosingItsNormalModel() {
+    let model = LocalModel(id: "selected", displayName: "Selected", fileURL: URL(fileURLWithPath: "/tmp/model.gguf"),
+      visionConfiguration: LocalVisionConfiguration(projectorURL: URL(fileURLWithPath: "/tmp/mmproj.gguf"),
+        serverExecutableURL: URL(fileURLWithPath: "/usr/bin/true")))
+    let decision = AutoRouter.decide(.init(selectedMode: .auto, prompt: "Summarize this", contextMessages: [],
+      localModel: model, additionalInputTokens: 8000, cloud: .init(provider: .openAI, modelID: "gpt-4o-mini")))
+    XCTAssertEqual(decision.reason, .exceedsLocalContext)
+    XCTAssertEqual(decision.route?.modelID, "gpt-4o-mini")
   }
 
   func testTextOnlyModelsAndMissingProjectorsNeverGetImages() {
     var input = request("describe the chart", mode: .auto)
     input.allowCloudScreenshots = true
     input.hasExplainedCloudPermission = true
-    input.cloudVision = cloud
-    input.localVision = [local, ScreenModel(id: "fake", provider: "llama.cpp", isLocal: true, capabilities: .textAndVision)]
+    input.cloudText = cloud
+    input.localText = ScreenModel(id: "fake", provider: "llama.cpp", isLocal: true, capabilities: .textAndVision)
     XCTAssertNil(ScreenRoutingPolicy.decide(input).model)
   }
 
@@ -87,6 +118,6 @@ final class ScreenRoutingTests: XCTestCase {
   }
 
   private func request(_ prompt: String, mode: ChatMode) -> ScreenRoutingPolicy.Request {
-    ScreenRoutingPolicy.Request(prompt: prompt, ocr: ocr, mode: mode, localText: local, cloudText: cloud, cloudVision: vision)
+    ScreenRoutingPolicy.Request(prompt: prompt, ocr: ocr, mode: mode, localText: local, cloudText: cloud)
   }
 }

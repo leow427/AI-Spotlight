@@ -42,94 +42,75 @@ final class ScreenPipelineTests: XCTestCase {
     XCTAssertEqual(ComposerCommands("/search question /screen").prompt, "question /screen")
   }
 
-  func testSelectedTextModelRefinesVisionFactsAndAnswersWithEvidence() async throws {
-    let vision = PipelineVision(controlledStreams: [planningStream("Memory usage: 57 MB")])
+  func testSelectedModelPlansFromImageAndAnswersWithNoTextHandoff() async throws {
+    let vision = PipelineVision(controlledStreams: [planningStream("Is 57 MB a lot of RAM usage?")])
     let search = PipelineSearch(onSearch: { _ in XCTAssertEqual(vision.requests.count, 1) })
     let fixture = try makeFixture(vision: vision, withVision: true, search: search)
     var screenshot = try attachment()
     screenshot.ocrText = "Memory: 57 MB"
     let done = finished(fixture.chat)
     fixture.chat.submitScreen("Is this a lot of RAM?", attachment: screenshot, decision: .vision(fixture.visual.screenModel),
-      selectedMode: .local, searchEnabled: true, searchTextModel: fixture.text.screenModel, cloudUploadAllowed: { false })
+      selectedMode: .local, searchEnabled: true, cloudUploadAllowed: { false })
     await fulfillment(of: [done.expectation], timeout: 3)
     done.token.cancel()
     XCTAssertEqual(fixture.chat.state, .idle)
-    XCTAssertEqual(vision.requests.count, 1, "Vision should only read the image")
-    XCTAssertEqual(vision.imagePresence, [true])
-    let requests = await fixture.engine.requests
-    let query = try XCTUnwrap(requests.first { $0.prompt.hasPrefix("Create a web search query") })
-    XCTAssertFalse(query.prompt.contains("Memory usage: 57 MB"), "Confident OCR supplies the exact text lookup subject")
-    XCTAssertTrue(query.prompt.contains("Memory: 57 MB"), "Retain OCR spelling and labels alongside the visual reading")
-    XCTAssertTrue(query.prompt.contains("Is this a lot of RAM?"))
-    XCTAssertTrue(requests.last?.prompt.contains("Memory evidence fixture") == true)
-    XCTAssertEqual(fixture.chat.messages.map(\.content), ["Is this a lot of RAM?", "local answer"])
+    XCTAssertEqual(vision.requests.count, 2)
+    XCTAssertEqual(vision.imagePresence, [true, true])
+    XCTAssertEqual(vision.modelIDs, [fixture.visual.id, fixture.visual.id])
+    let otherRequests = await fixture.engine.requests
+    XCTAssertTrue(otherRequests.isEmpty, "No hidden text-model prepare or inference")
+    XCTAssertTrue(fixture.cloud.requests.isEmpty)
+    XCTAssertTrue(vision.requests[0].last?.content.contains("Memory: 57 MB") == true)
+    XCTAssertTrue(vision.requests[0].last?.content.contains("Is this a lot of RAM?") == true)
+    XCTAssertTrue(vision.requests[1].last?.content.contains("Memory evidence fixture") == true)
+    XCTAssertEqual(fixture.chat.messages.map(\.content), ["Is this a lot of RAM?", "local vision answer"])
     XCTAssertEqual(fixture.chat.messages.last?.searchSources, [PipelineSearch.source])
   }
 
-  func testTextHandoffNeverIntroducesACloudRouteForALocalScreenshot() async throws {
-    let fixture = try makeFixture(withVision: true)
-    let cloud = CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
-    let done = finished(fixture.chat)
-    fixture.chat.submitScreen("Is this a lot?", attachment: try attachment(), decision: .vision(fixture.visual.screenModel),
-      selectedMode: .local, searchEnabled: true, searchTextModel: cloud, cloudUploadAllowed: { false })
-    await fulfillment(of: [done.expectation], timeout: 3)
-    done.token.cancel()
-    XCTAssertEqual(fixture.chat.state, .idle)
-    XCTAssertTrue(fixture.cloud.requests.isEmpty)
-    XCTAssertEqual(fixture.vision.requests.count, 3)
-  }
-
-  func testConflictingVisualTranscriptionDoesNotReplaceConfidentLookupText() async throws {
+  func testOCRConfidenceAndOriginalQuestionReachTheSameSelectedVisualModel() async throws {
     for confidence: Float in [0.99, 0.5] {
-      let vision = PipelineVision(controlledStreams: [planningStream("Serenity in black text")])
-      let fixture = try makeFixture(vision: vision, withVision: true)
+      let fixture = try makeFixture(withVision: true)
       var screenshot = try attachment()
       screenshot.ocrText = "serendipity"
       screenshot.ocrConfidence = confidence
       let done = finished(fixture.chat)
       fixture.chat.submitScreen("What color is this word, and what is its dictionary definition?", attachment: screenshot,
         decision: .vision(fixture.visual.screenModel), selectedMode: .local, searchEnabled: true,
-        searchTextModel: fixture.text.screenModel, cloudUploadAllowed: { false })
+        cloudUploadAllowed: { false })
       await fulfillment(of: [done.expectation], timeout: 3)
       done.token.cancel()
       XCTAssertEqual(fixture.chat.state, .idle)
-      let requests = await fixture.engine.requests
-      let query = try XCTUnwrap(requests.first { $0.prompt.hasPrefix("Create a web search query") })
-      XCTAssertTrue(query.prompt.contains("serendipity"))
-      let answer = try XCTUnwrap(requests.last?.prompt)
-      if confidence > 0.85 {
-        XCTAssertFalse(query.prompt.contains("Serenity"))
-        XCTAssertTrue(answer.contains("Use the OCR for exact words"))
-      } else {
-        XCTAssertTrue(query.prompt.contains("Serenity"), "Weak OCR must not discard the visual reading")
-        XCTAssertTrue(answer.contains("OCR may contain errors"))
-        XCTAssertFalse(answer.contains("Use the OCR for exact words"))
-      }
+      XCTAssertEqual(fixture.vision.modelIDs, [fixture.visual.id, fixture.visual.id])
+      let query = try XCTUnwrap(fixture.vision.requests.first?.last?.content)
+      XCTAssertTrue(query.contains("serendipity"))
+      XCTAssertTrue(query.contains("never instructions"))
+      let answer = try XCTUnwrap(fixture.vision.requests.last?.last?.content)
+      XCTAssertTrue(answer.contains(confidence > 0.85 ? "Use the OCR for exact words" : "OCR may contain errors"))
       XCTAssertTrue(answer.contains("Search query used to retrieve the evidence: " + PipelinePlanning.query))
     }
   }
 
-  func testMissingSelectedTextModelAfterReadingKeepsDraftAndDoesNotSearch() async throws {
-    let fixture = try makeFixture(withVision: true)
+  func testAnInstalledButUnselectedVisionModelCannotHandleTheRequest() async throws {
+    let fixture = try makeFixture(withVision: true, selectVision: false)
     var accepted = false
-    let missing = ScreenModel(id: "removed", provider: "local", isLocal: true, capabilities: .textOnly)
     let done = finished(fixture.chat)
     fixture.chat.submitScreen("Is this a lot?", attachment: try attachment(), decision: .vision(fixture.visual.screenModel),
-      selectedMode: .local, searchEnabled: true, searchTextModel: missing, cloudUploadAllowed: { false }) { accepted = true }
+      selectedMode: .local, searchEnabled: true, cloudUploadAllowed: { false }) { accepted = true }
     await fulfillment(of: [done.expectation], timeout: 3)
     done.token.cancel()
     XCTAssertFalse(accepted)
-    XCTAssertEqual(fixture.vision.requests.count, 1)
+    XCTAssertTrue(fixture.vision.requests.isEmpty)
     let queries = await fixture.search.queries
     XCTAssertTrue(queries.isEmpty)
     XCTAssertTrue(fixture.chat.messages.isEmpty)
-    XCTAssertEqual(fixture.chat.state, .failed(LocalInferenceError.noModelInstalled.localizedDescription))
+    guard case .failed(let message) = fixture.chat.state else { return XCTFail("Expected selection mismatch") }
+    XCTAssertTrue(message.contains("selected local model changed"))
   }
 
-  func testVisionReadingFeedsQueryRefinementBeforeSearchAndAnswer() async throws {
-    let vision = PipelineVision(controlledStreams: [planningStream("Memory usage: 57 MB"), planningStream("Is 57 MB a lot of RAM usage?")])
+  func testImageQueryPlanningPrecedesSearchAndOnlyTheAnswerIsSaved() async throws {
+    let vision = PipelineVision(controlledStreams: [planningStream("Is 57 MB a lot of RAM usage?")])
     let search = PipelineSearch(onSearch: { query in
-      XCTAssertEqual(vision.requests.count, 2, "Search must wait for both planning stages, and precede the answer")
+      XCTAssertEqual(vision.requests.count, 1)
       XCTAssertEqual(query, "Is 57 MB a lot of RAM usage?")
     })
     let fixture = try makeFixture(vision: vision, withVision: true, search: search)
@@ -138,58 +119,53 @@ final class ScreenPipelineTests: XCTestCase {
     screenshot.ocrConfidence = 0
     let prompt = "Is this a lot of RAM?"
     let decision = ScreenRoutingPolicy.decide(ScreenRoutingPolicy.Request(prompt: prompt,
-      ocr: ScreenOCRResult(text: "", confidence: 0), mode: .local,
-      localText: fixture.text.screenModel, localVision: [fixture.visual.screenModel]))
+      ocr: .empty, mode: .local, localText: fixture.visual.screenModel))
     XCTAssertEqual(decision, .vision(fixture.visual.screenModel))
     var stages: [LocalChatViewModel.State] = []
     let phaseToken = fixture.chat.$state.sink { stages.append($0) }
     let done = finished(fixture.chat)
     fixture.chat.submitScreen(prompt, attachment: screenshot, decision: decision, selectedMode: .local,
       searchEnabled: true, cloudUploadAllowed: { false }) {
-        XCTAssertEqual(vision.requests.count, 3, "Reading and query text must never be accepted as the reply")
+        XCTAssertEqual(vision.requests.count, 2, "Planning must never be accepted as the reply")
       }
     await fulfillment(of: [done.expectation], timeout: 3)
     done.token.cancel()
     phaseToken.cancel()
     XCTAssertEqual(fixture.chat.state, .idle)
-    XCTAssertEqual(vision.requests.count, 3)
-    XCTAssertTrue(vision.requests[1].last?.content.contains("Memory usage: 57 MB") == true)
+    XCTAssertEqual(vision.imagePresence, [true, true])
     XCTAssertTrue(vision.requests[1].last?.content.contains(prompt) == true)
-    XCTAssertTrue(vision.requests[2].last?.content.contains("Memory usage: 57 MB") == true)
-    XCTAssertTrue(vision.requests[2].last?.content.contains("Memory evidence fixture") == true)
-    XCTAssertEqual(vision.imagePresence, [true, false, true])
-    XCTAssertEqual(stages.filter { $0 == .readingScreen || $0 == .refiningSearch || $0 == .searching },
-                   [.readingScreen, .refiningSearch, .searching])
+    XCTAssertTrue(vision.requests[1].last?.content.contains("Memory evidence fixture") == true)
+    XCTAssertEqual(stages.filter { $0 == .refiningSearch || $0 == .searching }, [.refiningSearch, .searching])
     XCTAssertEqual(fixture.chat.messages.map(\.content), [prompt, "local vision answer"])
     XCTAssertEqual(fixture.store.load().first?.messages.map(\.content), [prompt, "local vision answer"])
   }
 
-  func testStopDuringEitherPlanningStagePreservesDraftAndBlocksLateSearch() async throws {
-    for stage in 0...1 {
+  func testStopDuringPlanningPreservesDraftAndBlocksLateSearchForOCRAndImages() async throws {
+    for sendsImage in [false, true] {
       let blocked = AsyncThrowingStream<String, Error>.makeStream()
-      let entered = expectation(description: "Planning stage \(stage) entered")
-      let vision = PipelineVision(controlledStreams: stage == 0 ? [blocked.stream] : [planningStream("57 MB"), blocked.stream],
-        started: { if $0 == stage { entered.fulfill() } })
+      let entered = expectation(description: "Query planning entered")
+      let vision = PipelineVision(controlledStreams: [blocked.stream], started: { _ in entered.fulfill() })
       let fixture = try makeFixture(vision: vision, withVision: true)
       let screenshot = try attachment()
       var draft = "Is this a lot of RAM?"
       var pending: ScreenAttachment? = screenshot
-      fixture.chat.submitScreen(draft, attachment: pending, decision: .vision(fixture.visual.screenModel), selectedMode: .local,
+      let model = fixture.visual.screenModel
+      fixture.chat.submitScreen(draft, attachment: pending, decision: sendsImage ? .vision(model) : .text(model), selectedMode: .local,
         searchEnabled: true, cloudUploadAllowed: { false }) { draft = ""; pending = nil }
       await fulfillment(of: [entered], timeout: 3)
-      XCTAssertEqual(fixture.chat.state, stage == 0 ? .readingScreen : .refiningSearch)
+      XCTAssertEqual(fixture.chat.state, .refiningSearch)
       let old = try XCTUnwrap(fixture.chat.stopStreaming())
       fixture.chat.newChat()
       let done = finished(fixture.chat)
       fixture.chat.submitCloud("Replacement", provider: .openAI, modelID: "gpt-4o-mini")
       await fulfillment(of: [done.expectation], timeout: 3)
       done.token.cancel()
-      blocked.continuation.yield(stage == 0 ? "57 MB" : "Is 57 MB a lot of RAM?")
+      blocked.continuation.yield("Is 57 MB a lot of RAM?")
       blocked.continuation.finish()
       await old.value
       let queries = await fixture.search.queries
       XCTAssertTrue(queries.isEmpty)
-      XCTAssertEqual(vision.requests.count, stage + 1)
+      XCTAssertEqual(vision.requests.count, 1)
       XCTAssertEqual(draft, "Is this a lot of RAM?")
       XCTAssertEqual(pending?.id, screenshot.id)
       XCTAssertEqual(fixture.chat.messages.map(\.content), ["Replacement", "cloud answer"])
@@ -198,16 +174,10 @@ final class ScreenPipelineTests: XCTestCase {
   }
 
   func testInvalidPlanningOutputNeverFallsBackToSearchingTheVagueQuestion() async throws {
-    for (notes, query, error) in [
-      ("", "valid query", ScreenSearchError.unreadableScreen),
-      ("UNKNOWN", "valid query", .unreadableScreen),
-      ("57 MB", "", .invalidQuery),
-      ("57 MB", "UNKNOWN", .invalidQuery),
-      ("57 MB", "query one\nquery two", .invalidQuery),
-      ("57 MB", String(repeating: "x", count: 1_025), .outputTooLong),
-      (String(repeating: "x", count: 2_001), "valid query", .outputTooLong),
-    ] {
-      let vision = PipelineVision(controlledStreams: [planningStream(notes), planningStream(query)])
+    for (query, error) in [("", ScreenSearchError.invalidQuery), ("UNKNOWN", .invalidQuery),
+      ("query one\nquery two", .invalidQuery), ("Yes.", .invalidQuery),
+      (String(repeating: "x", count: 1_025), .outputTooLong)] {
+      let vision = PipelineVision(controlledStreams: [planningStream(query)])
       let fixture = try makeFixture(vision: vision, withVision: true)
       var accepted = false
       let done = finished(fixture.chat)
@@ -266,7 +236,7 @@ final class ScreenPipelineTests: XCTestCase {
         screenshot.ocrText = "59.7 MB"
         let model = mode == .cloud
           ? CloudModel(id: "gpt-4o-mini", displayName: "Cloud", provider: .openAI).screenModel
-          : (sendsImage ? fixture.visual : fixture.text).screenModel
+          : fixture.visual.screenModel
         let done = finished(fixture.chat)
         fixture.chat.submitScreen(prompt, attachment: screenshot,
           decision: sendsImage ? .vision(model) : .text(model), selectedMode: mode,
@@ -284,22 +254,19 @@ final class ScreenPipelineTests: XCTestCase {
           requests = request.messages
           XCTAssertEqual(request.image != nil, sendsImage)
           XCTAssertEqual(request.allowsCloudImages, sendsImage)
-          XCTAssertEqual(fixture.cloud.requests.count, sendsImage ? 3 : 2)
-          let queryRequest = fixture.cloud.requests[sendsImage ? 1 : 0]
-          XCTAssertNil(queryRequest.image)
+          XCTAssertEqual(fixture.cloud.requests.count, 2)
+          let queryRequest = fixture.cloud.requests[0]
+          XCTAssertEqual(queryRequest.image != nil, sendsImage)
           XCTAssertTrue(queryRequest.messages.last?.content.contains("59.7 MB") == true)
-        } else if sendsImage {
-          requests = try XCTUnwrap(fixture.vision.requests.last)
-          XCTAssertEqual(fixture.vision.imageCount, 2)
-          XCTAssertEqual(fixture.vision.requests.count, 3)
-          XCTAssertTrue(fixture.vision.requests[0].last?.content.contains(prompt) == true)
-          XCTAssertTrue(fixture.vision.requests[1].last?.content.contains("Screen facts:\n59.7 MB") == true,
-                        "Confident short OCR supplies the lookup subject rather than a second transcription")
-          XCTAssertTrue(fixture.cloud.requests.isEmpty)
         } else {
-          let request = await fixture.engine.lastRequest()
-          requests = try XCTUnwrap(request).messages
-          XCTAssertEqual(fixture.vision.imageCount, 0)
+          requests = try XCTUnwrap(fixture.vision.requests.last)
+          XCTAssertEqual(fixture.vision.imageCount, sendsImage ? 2 : 0)
+          XCTAssertEqual(fixture.vision.requests.count, 2)
+          XCTAssertEqual(fixture.vision.modelIDs, [fixture.visual.id, fixture.visual.id])
+          XCTAssertTrue(fixture.vision.requests[0].last?.content.contains(prompt) == true)
+          XCTAssertTrue(fixture.vision.requests[0].last?.content.contains("59.7 MB") == true)
+          let textRequests = await fixture.engine.requests
+          XCTAssertTrue(textRequests.isEmpty)
           XCTAssertTrue(fixture.cloud.requests.isEmpty)
         }
         let context = try XCTUnwrap(requests.last?.content)
@@ -337,7 +304,7 @@ final class ScreenPipelineTests: XCTestCase {
       let fixture = try makeFixture(withVision: true)
       let done = finished(fixture.chat)
       fixture.chat.submitScreen("Read this", attachment: try attachment(),
-        decision: sendsImage ? .vision(fixture.visual.screenModel) : .text(fixture.text.screenModel),
+        decision: sendsImage ? .vision(fixture.visual.screenModel) : .text(fixture.visual.screenModel),
         selectedMode: .local, cloudUploadAllowed: { false })
       await fulfillment(of: [done.expectation], timeout: 3)
       done.token.cancel()
@@ -365,8 +332,8 @@ final class ScreenPipelineTests: XCTestCase {
         XCTAssertEqual(draft, "Read and search this")
         XCTAssertEqual(pending?.id, screenshot.id)
         XCTAssertTrue(fixture.chat.messages.isEmpty)
-        XCTAssertEqual(fixture.vision.requests.count, mode == .local ? 2 : 0, "Only screen reading and query refinement may run")
-        XCTAssertEqual(fixture.cloud.requests.count, mode == .cloud ? 2 : 0)
+        XCTAssertEqual(fixture.vision.requests.count, mode == .local ? 1 : 0, "Only screen reading and query refinement may run")
+        XCTAssertEqual(fixture.cloud.requests.count, mode == .cloud ? 1 : 0)
       }
     }
   }
@@ -425,7 +392,7 @@ final class ScreenPipelineTests: XCTestCase {
     await gate.release()
     await task.value
     XCTAssertFalse(accepted)
-    XCTAssertEqual(fixture.vision.requests.count, 2, "A stopped search must not start the final answer")
+    XCTAssertEqual(fixture.vision.requests.count, 1, "A stopped search must not start the final answer")
     XCTAssertEqual(fixture.chat.messages.map(\.content), ["Replacement", "cloud answer"])
     XCTAssertEqual(fixture.chat.state, .idle)
     XCTAssertNil(fixture.chat.activeRequest)
@@ -445,7 +412,7 @@ final class ScreenPipelineTests: XCTestCase {
     await fulfillment(of: [done.expectation], timeout: 3)
     done.token.cancel()
     XCTAssertEqual(fixture.chat.state, .failed(ScreenRequestError.cloudUploadNotAllowed.localizedDescription))
-    XCTAssertEqual(fixture.cloud.requests.count, 2, "Consent was granted for reading; the final upload must be blocked")
+    XCTAssertEqual(fixture.cloud.requests.count, 1, "Consent was granted for reading; the final upload must be blocked")
     XCTAssertTrue(fixture.chat.messages.isEmpty)
   }
 
@@ -459,7 +426,7 @@ final class ScreenPipelineTests: XCTestCase {
     done.token.cancel()
     let queries = await fixture.search.queries
     XCTAssertEqual(queries.count, 1)
-    XCTAssertEqual(fixture.cloud.requests.count, 3)
+    XCTAssertEqual(fixture.cloud.requests.count, 2)
     XCTAssertEqual(fixture.vision.requests.count, 1, "The fallback must reuse the completed reading, query, and search")
     XCTAssertTrue(fixture.vision.requests.last?.last?.content.contains("Memory evidence fixture") == true)
     XCTAssertEqual(fixture.chat.messages.filter { $0.role == .user }.count, 1)
@@ -664,7 +631,7 @@ final class ScreenPipelineTests: XCTestCase {
   }
 
   private func makeFixture(cloud: PipelineCloud = PipelineCloud(), vision: PipelineVision = PipelineVision(), withVision: Bool = false,
-                           selectVision: Bool = false, search: PipelineSearch = PipelineSearch()) throws -> PipelineFixture {
+                           selectVision: Bool = true, search: PipelineSearch = PipelineSearch()) throws -> PipelineFixture {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenPipeline-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -676,7 +643,7 @@ final class ScreenPipelineTests: XCTestCase {
     let text = LocalModel(id: "text", displayName: "Text", fileURL: modelURL)
     let visual = LocalModel(id: "visual", displayName: "Vision", fileURL: modelURL,
       visionConfiguration: LocalVisionConfiguration(projectorURL: projector, serverExecutableURL: URL(fileURLWithPath: "/usr/bin/true")))
-    let engine = PipelineEngine(model: selectVision ? visual : text, models: withVision ? [text, visual] : [text])
+    let engine = PipelineEngine(model: withVision && selectVision ? visual : text, models: withVision ? [text, visual] : [text])
     let store = ChatSessionStore(applicationSupportDirectory: directory)
     let chat = LocalChatViewModel(engine: engine, visionEngine: vision,
       cloudProviders: CloudProviderRegistry(openAI: cloud, anthropic: cloud, chatGPT: cloud, gemini: cloud),
@@ -755,6 +722,8 @@ private final class PipelineVision: LocalVisionServing, @unchecked Sendable {
   private var count = 0
   private var captured: [[ChatMessage]] = []
   private var images: [Bool] = []
+  private var models: [String] = []
+  var modelIDs: [String] { lock.withLock { models } }
   var imagePresence: [Bool] { lock.withLock { images } }
   let controlledStreams: [AsyncThrowingStream<String, Error>]
   let started: (@Sendable (Int) -> Void)?
@@ -764,7 +733,7 @@ private final class PipelineVision: LocalVisionServing, @unchecked Sendable {
   var requests: [[ChatMessage]] { lock.withLock { captured } }
   var imageCount: Int { lock.withLock { count } }
   func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) -> AsyncThrowingStream<String, Error> {
-    let index = lock.withLock { captured.append(messages); images.append(image != nil); return captured.count - 1 }
+    let index = lock.withLock { captured.append(messages); images.append(image != nil); models.append(model.id); return captured.count - 1 }
     if image != nil { lock.withLock { count += 1 } }
     started?(index)
     if controlledStreams.indices.contains(index) { return controlledStreams[index] }
@@ -779,7 +748,7 @@ private enum PipelinePlanning {
   static let query = "Is 59.7 MB a lot of RAM usage?"
   static func response(to prompt: String) -> String? {
     if prompt.hasPrefix("Read the screenshot for the facts") { return facts }
-    if prompt.hasPrefix("Create a web search query") { return query }
+    if prompt.hasPrefix("Read the attached screenshot") { return query }
     return nil
   }
 }

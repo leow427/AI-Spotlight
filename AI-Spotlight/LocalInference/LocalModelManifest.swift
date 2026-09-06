@@ -21,6 +21,35 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
   let parameterBillions: Double
   let minimumMemory: Int64
   let recommendedMemory: Int64
+  // Optional for decoding existing text-only installations and old signed catalogs.
+  var projector: VerifiedModelArtifact? = nil
+  var runtimeBuild: Int? = nil
+
+  var downloadByteCount: Int64 {
+    expectedByteCount + (projector?.expectedByteCount ?? 0)
+      + (projector == nil ? 0 : LocalVisionRuntime.bundled.archive.expectedByteCount)
+  }
+
+  var packageRevision: String {
+    "\(revision):\(checksumSHA256):\(projector?.checksumSHA256 ?? "text"):\(runtimeBuild ?? 5046)"
+  }
+
+  func requiresUpdate(_ installed: LocalModel) -> Bool {
+    installed.id == id && (installed.catalogDescriptor?.packageRevision != packageRevision
+      || installed.catalogDescriptor?.expectedByteCount != expectedByteCount
+      || installed.catalogDescriptor?.projector?.expectedByteCount != projector?.expectedByteCount
+      || (supportsVision && (installed.visionConfiguration?.packageRevision != packageRevision
+        || installed.visionConfiguration?.contextWindow != recommendedContextSize
+        || !FileManager.default.isExecutableFile(atPath: installed.visionConfiguration?.serverExecutableURL.path ?? ""))))
+  }
+
+  var visionDescriptor: LocalVisionModelDescriptor? {
+    guard let projector else { return nil }
+    return LocalVisionModelDescriptor(id: id, displayName: displayName,
+      summary: "Text, images and visual reasoning in one model.",
+      model: VerifiedModelArtifact(url: downloadURL, expectedByteCount: expectedByteCount, checksumSHA256: checksumSHA256),
+      projector: projector, estimatedRuntimeMemory: estimatedRuntimeMemory)
+  }
 
   func validate() throws {
     let components = downloadURL.pathComponents
@@ -42,6 +71,21 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
           minimumMemory >= estimatedRuntimeMemory, recommendedMemory >= minimumMemory else {
       throw LocalModelCatalogError.invalidManifest(id)
     }
+    if let projector {
+      try visionDescriptor!.validate()
+      guard runtimeBuild == LocalVisionRuntime.build,
+            estimatedRuntimeMemory >= Self.multimodalMemory(weights: expectedByteCount,
+              projector: projector.expectedByteCount, parameters: parameterBillions, context: recommendedContextSize) else {
+        throw LocalModelCatalogError.invalidManifest(id)
+      }
+    } else if runtimeBuild != nil { throw LocalModelCatalogError.invalidManifest(id) }
+  }
+  static func multimodalMemory(weights: Int64, projector: Int64, parameters: Double, context: Int) -> Int64 {
+    // Qwen3-VL dense: 36 layers (4/8B), 64 (32B), 8 KV heads, 128 head dim.
+    // Full F16 K + V cache; 20% weight overhead plus 2 GiB for vision/compute/runtime.
+    let layers: Int64 = parameters > 8 ? 64 : 36
+    let kv = layers * 8 * 128 * 4 * Int64(context)
+    return Int64(Double(weights + projector) * 1.2) + kv + 2 * LocalHardwareProfile.gib
   }
 }
 
@@ -58,7 +102,7 @@ struct LocalModelManifest: Codable, Sendable, Equatable {
     try models.forEach { try $0.validate() }
   }
 
-  static let bundled = LocalModelManifest(version: 1, models: BundledLocalModels.models)
+  static let bundled = LocalModelManifest(version: 2, models: BundledLocalModels.models)
 }
 
 struct ModelDownloadProgress: Sendable, Equatable {
@@ -111,44 +155,23 @@ struct LocalModelCatalog: Sendable {
 
   func download(
     _ descriptor: LocalModelDescriptor,
+    runtime: LocalVisionRuntime = .bundled,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
   ) async throws -> LocalModel {
     try descriptor.validate()
+    guard descriptor.supportsVision else {
+      throw LocalInferenceError.bridgeFailure("Choose a recommended model that supports text and images. Existing text-only files remain available.")
+    }
     let hardware = detectHardware(installationStore.modelsDirectoryURL)
     let assessment = LocalModelSelector.assess(descriptor, hardware: hardware)
     guard assessment.fit.canRun else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
-    try FileManager.default.createDirectory(
-      at: installationStore.modelsDirectoryURL,
-      withIntermediateDirectories: true
-    )
-
-    let temporaryURL = installationStore.modelsDirectoryURL.appending(
-      path: ".downloading-\(UUID().uuidString).gguf"
-    )
-    defer { try? FileManager.default.removeItem(at: temporaryURL) }
-    try await VerifiedModelArtifact(url: descriptor.downloadURL,
-      expectedByteCount: descriptor.expectedByteCount, checksumSHA256: descriptor.checksumSHA256)
-      .download(to: temporaryURL, session: session, progress: progress)
-
-    try Task.checkCancellation()
-    // Recheck free space before the installer makes its second copy.
-    guard availableDisk(installationStore.modelsDirectoryURL)
-      >= descriptor.expectedByteCount + 2 * LocalHardwareProfile.gib else {
-      throw LocalInferenceError.bridgeFailure("Free disk space changed during the download. Free some space and try again.")
-    }
-    return try installationStore.install(
-      LocalModel(
-        id: descriptor.id,
-        displayName: descriptor.displayName,
-        fileURL: temporaryURL,
-        catalogDescriptor: descriptor
-      )
-    )
+    return try await downloadVision(descriptor.visionDescriptor!, runtime: runtime, catalogDescriptor: descriptor, progress: progress)
   }
 
   func downloadVision(
     _ descriptor: LocalVisionModelDescriptor,
     runtime: LocalVisionRuntime = .bundled,
+    catalogDescriptor: LocalModelDescriptor? = nil,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
   ) async throws -> LocalModel {
     try descriptor.validate()
@@ -156,7 +179,7 @@ struct LocalModelCatalog: Sendable {
     let directory = installationStore.modelsDirectoryURL
     let hardware = detectHardware(directory)
     guard hardware.inferenceMemoryBudget >= descriptor.estimatedRuntimeMemory else {
-      throw LocalInferenceError.bridgeFailure("This image model needs more available memory. Choose a smaller model or close other apps.")
+      throw LocalInferenceError.bridgeFailure("This model does not leave enough memory for macOS, image processing and context. Review Local Models for a suitable package.")
     }
     let total = descriptor.model.expectedByteCount + descriptor.projector.expectedByteCount + runtime.archive.expectedByteCount
     guard availableDisk(directory) >= total * 2 + 2 * LocalHardwareProfile.gib else {
@@ -191,9 +214,10 @@ struct LocalModelCatalog: Sendable {
                                            staging: staging, destination: runtimeDirectory)
     try Task.checkCancellation()
     let installed = try installationStore.install(LocalModel(id: descriptor.id, displayName: descriptor.displayName,
-      fileURL: staging.appending(path: "model.gguf"),
+      fileURL: staging.appending(path: "model.gguf"), catalogDescriptor: catalogDescriptor,
       visionConfiguration: LocalVisionConfiguration(projectorURL: staging.appending(path: "mmproj.gguf"),
-        serverExecutableURL: server, managedRuntimeDirectory: runtimeDirectory, packageRevision: descriptor.packageRevision)))
+        serverExecutableURL: server, contextWindow: catalogDescriptor?.recommendedContextSize ?? 8192,
+        managedRuntimeDirectory: runtimeDirectory, packageRevision: catalogDescriptor?.packageRevision ?? descriptor.packageRevision)))
     committed = true
     return installed
   }
@@ -201,7 +225,7 @@ struct LocalModelCatalog: Sendable {
 
 /// The same bounded, checksum-verified transfer is used for text models and
 /// every part of a vision download. Callers own staging and atomic installation.
-struct VerifiedModelArtifact: Sendable, Equatable {
+struct VerifiedModelArtifact: Codable, Sendable, Equatable {
   let url: URL
   let expectedByteCount: Int64
   let checksumSHA256: String
@@ -359,18 +383,18 @@ struct LocalVisionModelDescriptor: Sendable, Equatable, Identifiable {
   func requiresUpdate(_ installed: LocalModel) -> Bool {
     guard installed.id == id, let configuration = installed.visionConfiguration else { return false }
     if let revision = configuration.packageRevision { return revision != packageRevision }
-    // Keep the installed ID/selection when replacing original SmolVLM with
-    // SmolVLM2. Only this unversioned package has the missing image token.
-    return id == "smolvlm-2b-q4:vision"
+    return true
   }
 
   func validate() throws {
+    try model.validate()
+    try projector.validate()
     guard !id.isEmpty, !displayName.isEmpty, estimatedRuntimeMemory > model.expectedByteCount + projector.expectedByteCount,
           model.url != projector.url else { throw LocalModelCatalogError.invalidManifest(id) }
     for artifact in [model, projector] {
       try artifact.validate()
       let path = artifact.url.pathComponents
-      guard artifact.url.host == "huggingface.co", path.count == 6, path[1] == "ggml-org",
+      guard artifact.url.host == "huggingface.co", path.count == 6, ["ggml-org", "Qwen"].contains(path[1]),
             path[3] == "resolve", path[4].range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil,
             artifact.url.pathExtension == "gguf",
             artifact.url.deletingLastPathComponent() == model.url.deletingLastPathComponent() else {
@@ -379,20 +403,6 @@ struct LocalVisionModelDescriptor: Sendable, Equatable, Identifiable {
     }
   }
 
-  static let bundled: [LocalVisionModelDescriptor] = [
-    LocalVisionModelDescriptor(id: "smolvlm-500m-q8:vision", displayName: "SmolVLM 500M",
-      summary: "Small download · Start here for simple photos and objects.",
-      model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/72e986006ef53e37cdd3f6d4241c90b0f01df376/SmolVLM-500M-Instruct-Q8_0.gguf")!,
-        expectedByteCount: 436806912, checksumSHA256: "9d4612de6a42214499e301494a3ecc2be0abdd9de44e663bda63f1152fad1bf4"),
-      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM-500M-Instruct-GGUF/resolve/72e986006ef53e37cdd3f6d4241c90b0f01df376/mmproj-SmolVLM-500M-Instruct-Q8_0.gguf")!,
-        expectedByteCount: 108783360, checksumSHA256: "d1eb8b6b23979205fdf63703ed10f788131a3f812c7b1f72e0119d5d81295150"),
-      estimatedRuntimeMemory: 2 * LocalHardwareProfile.gib),
-    LocalVisionModelDescriptor(id: "smolvlm-2b-q4:vision", displayName: "SmolVLM2 2.2B",
-      summary: "Larger model · For more detailed image descriptions.",
-      model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91/SmolVLM2-2.2B-Instruct-Q4_K_M.gguf")!,
-        expectedByteCount: 1112602656, checksumSHA256: "0cf76814555b8665149075b74ab6b5c1d428ea1d3d01c1918c12012e8d7c9f58"),
-      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF/resolve/1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91/mmproj-SmolVLM2-2.2B-Instruct-Q8_0.gguf")!,
-        expectedByteCount: 592523200, checksumSHA256: "ae07ea1facd07dd3230c4483b63e8cda96c6944ad2481f33d531f79e892dd024"),
-      estimatedRuntimeMemory: 4 * LocalHardwareProfile.gib)
-  ]
+  // Internal package adapter; the ordinary catalog is the only recommendation source.
+  static var bundled: [LocalVisionModelDescriptor] { BundledLocalModels.models.compactMap(\.visionDescriptor) }
 }

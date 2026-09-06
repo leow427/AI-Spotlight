@@ -79,7 +79,6 @@
 		2F715B4E2EEB2D2248A01C88 /* ScreenProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C542D9E2DAF3988DEF908F68 /* ScreenProviderTests.swift */; };
 		7DA95EF27FA01D16D79D8564 /* ScreenTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFFAEF314B962C515678BC9 /* ScreenTestSupport.swift */; };
 		32E976745B12847D6DFF8EE0 /* LlamaServerVisionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5EF3ECB645A8E5BE4CCF4D /* LlamaServerVisionEngine.swift */; };
-		5726A0BE34B6CD98664604DE /* LocalVisionSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3D1D88088EDB79F125B1E10E /* LocalVisionSettingsView.swift */; };
 		82A42145C9B572B1BAFD7D74 /* LocalVisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83494E8BB06B4D31BD549663 /* LocalVisionTests.swift */; };
 		905F6E0F59B1620D167CED63 /* ScreenPromptContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BB01ACD0F227248768A381 /* ScreenPromptContext.swift */; };
 		B5173475932912D82BC87FC7 /* ScreenConnectivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EE3DCA5464103C0AD1533B9 /* ScreenConnectivity.swift */; };
@@ -174,7 +173,6 @@
 		C542D9E2DAF3988DEF908F68 /* ScreenProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenProviderTests.swift"; sourceTree = SOURCE_ROOT; };
 		6FFFAEF314B962C515678BC9 /* ScreenTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenTestSupport.swift"; sourceTree = SOURCE_ROOT; };
 		5B5EF3ECB645A8E5BE4CCF4D /* LlamaServerVisionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift"; sourceTree = SOURCE_ROOT; };
-		3D1D88088EDB79F125B1E10E /* LocalVisionSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/LocalInference/LocalVisionSettingsView.swift"; sourceTree = SOURCE_ROOT; };
 		83494E8BB06B4D31BD549663 /* LocalVisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/LocalVisionTests.swift"; sourceTree = SOURCE_ROOT; };
 		94BB01ACD0F227248768A381 /* ScreenPromptContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenPromptContext.swift"; sourceTree = SOURCE_ROOT; };
 		1EE3DCA5464103C0AD1533B9 /* ScreenConnectivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenConnectivity.swift"; sourceTree = SOURCE_ROOT; };
@@ -213,7 +211,6 @@
 				1EE3DCA5464103C0AD1533B9 /* ScreenConnectivity.swift */,
 				94BB01ACD0F227248768A381 /* ScreenPromptContext.swift */,
 				83494E8BB06B4D31BD549663 /* LocalVisionTests.swift */,
-				3D1D88088EDB79F125B1E10E /* LocalVisionSettingsView.swift */,
 				5B5EF3ECB645A8E5BE4CCF4D /* LlamaServerVisionEngine.swift */,
 				6FFFAEF314B962C515678BC9 /* ScreenTestSupport.swift */,
 				C542D9E2DAF3988DEF908F68 /* ScreenProviderTests.swift */,
@@ -463,7 +460,6 @@
 			files = (
 				B5173475932912D82BC87FC7 /* ScreenConnectivity.swift in Sources */,
 				905F6E0F59B1620D167CED63 /* ScreenPromptContext.swift in Sources */,
-				5726A0BE34B6CD98664604DE /* LocalVisionSettingsView.swift in Sources */,
 				32E976745B12847D6DFF8EE0 /* LlamaServerVisionEngine.swift in Sources */,
 				3380FAAA1FD88010F2C908EE /* LocalMultimodalClient.swift in Sources */,
 				F368AD14CC3718DC0F973BFC /* GeminiContentClient.swift in Sources */,

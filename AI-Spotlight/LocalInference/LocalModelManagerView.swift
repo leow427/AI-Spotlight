@@ -16,7 +16,7 @@ struct LocalModelChoiceCard: View {
         VStack(alignment: .leading, spacing: 5) {
           Text(role).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
           Text(assessment.model.displayName).font(.headline)
-          Text("\(assessment.model.expectedByteCount, format: .byteCount(style: .file)) download · \(assessment.fit.rawValue)")
+          Text("\(assessment.model.downloadByteCount, format: .byteCount(style: .file)) download · \(assessment.fit.rawValue)")
             .font(.subheadline)
           Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
           Text(assessment.model.license).font(.caption2).foregroundStyle(.secondary)
@@ -50,7 +50,7 @@ struct LocalModelOnboardingView: View {
     VStack(alignment: .leading, spacing: 18) {
       VStack(alignment: .leading, spacing: 8) {
         Label("Your Mac. Your AI.", systemImage: "desktopcomputer").font(.title2.weight(.semibold))
-        Text("Choose a model for private, offline conversations. We leave room for macOS and your other apps.")
+        Text("Choose one model for private text chat and screenshots. We leave room for macOS and your other apps.")
           .foregroundStyle(.secondary)
         if let hardware = advisor.hardware {
           Text("\(hardware.chip) · \(hardware.physicalMemory, format: .byteCount(style: .memory)) memory")
@@ -75,22 +75,23 @@ struct LocalModelOnboardingView: View {
             }
           } else {
             ContentUnavailableView("No responsive model found", systemImage: "memorychip",
-              description: Text("Free some disk space or review the model manager in Advanced Settings. Cloud is also available."))
+              description: Text("No supported text-and-image model comfortably fits this Mac’s memory, speed or disk budget. Review Local Models for the specific limits. Cloud is also available."))
           }
         }
         .padding(1)
         .disabled(chat.isBusy)
       }
       LocalModelOperationView(chat: chat, advisor: advisor)
-      Text("Downloads come from Hugging Face. A short performance check runs on this Mac after installation.")
+      Text("One download includes the model, matching image support and runtime. Every component is verified before installation.")
         .font(.caption).foregroundStyle(.secondary)
       HStack {
         Button(chat.installedModels.isEmpty ? "Set Up Later" : "Done") { advisor.dismissOnboarding() }
           .disabled(chat.isBusy)
         Spacer()
         if let selected {
-          let installed = chat.installedModels.contains { $0.id == selected.id }
-          Button(installed ? "Use Model" : "Download · \(ByteCountFormatter.string(fromByteCount: selected.model.expectedByteCount, countStyle: .file))") {
+          let existing = chat.installedModels.first { $0.id == selected.id }
+          let installed = existing.map { !selected.model.requiresUpdate($0) } ?? false
+          Button(installed ? "Use Model" : "\(existing == nil ? "Download" : "Update") · \(ByteCountFormatter.string(fromByteCount: selected.model.downloadByteCount, countStyle: .file))") {
             if installed {
               chat.selectModel(id: selected.id)
               advisor.dismissOnboarding()
@@ -120,7 +121,7 @@ struct LocalModelOperationView: View {
       case .downloading(let progress):
         ProgressView(value: progress.fractionCompleted)
         HStack {
-          Text("Downloading \(progress.fractionCompleted, format: .percent.precision(.fractionLength(0)))")
+          Text(progress.fractionCompleted < 1 ? "Downloading \(Int(progress.fractionCompleted * 100))%" : "Verifying and installing package…")
           Spacer()
           Button("Cancel") { chat.cancelInstallation() }
         }
@@ -166,8 +167,14 @@ struct LocalModelManagerSection: View {
         Text("\(hardware.chip) · \(hardware.inferenceMemoryBudget, format: .byteCount(style: .memory)) available for inference")
           .font(.caption).foregroundStyle(.secondary)
       }
-      if chat.visionDownloadID == nil && (chat.state != .idle || chat.benchmarkNotice != nil || advisor.latestBenchmark(for: chat.installedModel) != nil || advisor.notice != nil) {
+      if chat.state != .idle || chat.benchmarkNotice != nil || advisor.latestBenchmark(for: chat.installedModel) != nil || advisor.notice != nil {
         LocalModelOperationView(chat: chat, advisor: advisor)
+      }
+      Text("One selected model handles chat, screenshots and search answers. Every recommended package includes image support.")
+        .font(.caption).foregroundStyle(.secondary)
+      if chat.installedModel?.supportsVision == false {
+        Text("Your selected model supports text and OCR only. Install a recommended package to answer visual questions. Your existing files stay available below.")
+          .font(.caption).foregroundStyle(.orange)
       }
       HStack {
         Button("Refresh Recommendations") {
@@ -177,7 +184,7 @@ struct LocalModelManagerSection: View {
           }
         }
         Button("Check Performance") { chat.runModelBenchmark() }
-          .disabled(chat.installedModel == nil || chat.installedModel?.supportsVision == true)
+          .disabled(chat.installedModel == nil)
       }
       .disabled(chat.isBusy || advisor.isDetecting)
       ForEach(recommendations.assessments.sorted { lhs, rhs in
@@ -192,20 +199,21 @@ struct LocalModelManagerSection: View {
           HStack(alignment: .top) {
             Text(assessment.model.displayName).font(.subheadline.weight(.medium))
             Spacer(minLength: 8)
-            if chat.installedModels.contains(where: { $0.id == assessment.id }) {
+            if let installed = chat.installedModels.first(where: { $0.id == assessment.id }),
+               !assessment.model.requiresUpdate(installed) {
               Button(chat.installedModel?.id == assessment.id ? "Selected" : "Use") {
                 chat.selectModel(id: assessment.id)
               }
               .disabled(chat.isBusy || !assessment.fit.canRun || chat.installedModel?.id == assessment.id)
             } else {
-              Button("Install") { chat.downloadModel(assessment.model) }
+              Button(chat.installedModels.contains { $0.id == assessment.id } ? "Update" : "Install") { chat.downloadModel(assessment.model) }
                 .disabled(chat.isBusy || !assessment.fit.canRun)
             }
           }
           Text(assessment.id == recommendations.recommended?.id ? "Recommended · \(assessment.fit.rawValue)" : assessment.fit.rawValue)
             .font(.caption.weight(.medium))
             .foregroundStyle(assessment.fit.canRun ? Color.secondary : .orange)
-          Text("\(assessment.model.expectedByteCount, format: .byteCount(style: .file)) · \(assessment.model.license)")
+          Text("\(assessment.model.downloadByteCount, format: .byteCount(style: .file)) · \(assessment.model.license)")
             .font(.caption).foregroundStyle(.secondary)
           Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
           DisclosureGroup("Model details") {
@@ -218,19 +226,19 @@ struct LocalModelManagerSection: View {
         }
         .padding(.vertical, 5)
       }
-      let imported = chat.installedModels.filter { model in !model.supportsVision && !advisor.manifest.models.contains { $0.id == model.id } }
+      let imported = chat.installedModels.filter { model in !advisor.manifest.models.contains { $0.id == model.id } }
       ForEach(imported) { model in
         HStack {
           VStack(alignment: .leading) {
             Text(model.displayName)
-            Text(model.supportsVision ? "Local vision · GGUF + mmproj" : "Imported GGUF · Compatibility checked when loaded").font(.caption).foregroundStyle(.secondary)
+            Text(model.supportsVision ? "Legacy/imported image model · Select to use for all requests" : "Legacy/imported text-only model · OCR available, images unsupported").font(.caption).foregroundStyle(.secondary)
           }
           Spacer()
           Button(chat.installedModel?.id == model.id ? "Selected" : "Use") { chat.selectModel(id: model.id) }
             .disabled(chat.isBusy || chat.installedModel?.id == model.id)
         }
       }
-      Button("Import GGUF File…") { isImporterPresented = true }.disabled(chat.isBusy)
+      Button("Advanced: Import Text GGUF…") { isImporterPresented = true }.disabled(chat.isBusy)
       Text("Approved model catalog · Version \(advisor.manifest.version)")
         .font(.caption).foregroundStyle(.secondary)
     }

@@ -35,19 +35,35 @@ final class ScreenNativeSmokeTests: XCTestCase {
     let prompts = config.prompts ?? ["Describe the shapes and colors in this image in one sentence."]
     XCTAssertFalse(prompts.isEmpty)
     var reports: [String] = []
+    let runtime = LlamaServerVisionEngine()
+    var residentPID: Int32?
     for prompt in prompts {
       var answer = ""
       let start = Date()
-      for try await text in LlamaServerVisionEngine().stream(
+      for try await text in runtime.stream(
         messages: [ChatMessage(role: .user, content: prompt)], image: image, model: installed) {
         answer += text
       }
+      let pid = await runtime.runtimeProcessIdentifier()
+      if let residentPID { XCTAssertEqual(pid, residentPID, "The real model must remain loaded") }
+      else { residentPID = pid }
       XCTAssertFalse(answer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
       for term in config.expectedAnswerTerms ?? [] {
         XCTAssertTrue(answer.localizedCaseInsensitiveContains(term), "Missing \(term): \(answer)")
       }
       reports.append("Question: \(prompt)\nElapsed: \(Date().timeIntervalSince(start)) s\nAnswer: \(answer)\n")
     }
+    let textAnswer = try await ScreenSearchContext.collect(runtime.stream(
+      messages: [ChatMessage(role: .user, content: "What is 19 plus 23? Answer with only the number.")], image: nil, model: installed), maximumBytes: 200)
+    XCTAssertTrue(textAnswer.contains("42"), textAnswer)
+    let textPID = await runtime.runtimeProcessIdentifier()
+    XCTAssertEqual(textPID, residentPID)
+    reports.append("Text-only arithmetic: " + textAnswer)
+    let metrics = try await runtime.benchmark(model: installed)
+    XCTAssertTrue(metrics?.isValid == true)
+    XCTAssertEqual(metrics?.generatedTokenCount, 64)
+    reports.append("Native benchmark: \(String(describing: metrics))")
+    await runtime.unload()
     let report = "Production llama-server vision smoke test\n" + reports.joined(separator: "\n")
     try report.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Vision-Smoke-Result.txt"), atomically: true, encoding: .utf8)
     let attachment = XCTAttachment(string: report)
@@ -66,11 +82,12 @@ final class ScreenSearchNativeSmokeTests: XCTestCase {
     guard FileManager.default.fileExists(atPath: configURL.path) else {
       throw XCTSkip("Opt-in real-model check: see docs/Screen-Skill.md.")
     }
-    struct Config: Decodable { let modelsDirectory: URL; let visionModelID: String; let useTextModel: Bool; let liveSearch: Bool? }
+    struct Config: Decodable { let modelsDirectory: URL; let modelID: String; let liveSearch: Bool? }
     let config = try JSONDecoder().decode(Config.self, from: Data(contentsOf: configURL))
     let store = LocalModelInstallationStore(modelsDirectory: config.modelsDirectory)
     let textModel = try XCTUnwrap(store.installedModel())
-    let visionModel = try XCTUnwrap(store.installedModels().first { $0.id == config.visionModelID })
+    XCTAssertEqual(textModel.id, config.modelID, "The test must use the normally selected model")
+    let visionModel = try XCTUnwrap(store.installedModels().first { $0.id == config.modelID })
     let log = NativeSmokeLog()
     let engine = NativeSmokeEngine(base: LlamaCPPModelEngine(installationStore: store), log: log)
     let directory = FileManager.default.temporaryDirectory.appending(path: "ScreenSearchNative-\(UUID())")
@@ -85,6 +102,7 @@ final class ScreenSearchNativeSmokeTests: XCTestCase {
       ("HTTP 404", "What does this mean? Search for an explanation.", "404", "HTTP error meaning", "HTTP 404 Not Found means the server cannot find the requested resource. Check the URL for mistakes or whether the resource was moved or removed.", "https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Status/404"),
       ("HTTP 429", "Look up what this error means and how to fix it.", "429", "HTTP error fix", "HTTP 429 Too Many Requests means the client has sent too many requests in a given time. A Retry-After header can indicate how long to wait before retrying.", "https://www.rfc-editor.org/rfc/rfc6585#section-4"),
     ]
+    let mainRuntime = NativeSmokeVision(log: log)
     for (visible, prompt, subject, intent, excerpt, url) in cases {
       let image = try fixtureImage(text: visible)
       var screenshot = try ScreenAttachment(image: image)
@@ -93,7 +111,7 @@ final class ScreenSearchNativeSmokeTests: XCTestCase {
       screenshot.ocrConfidence = ocr.confidence
       let search = NativeSmokeSearch(result: WebSearchResult(source: WebSearchSource(title: intent, url: URL(string: url)!), snippets: [excerpt]), live: config.liveSearch == true)
       log.clear()
-      let chat = LocalChatViewModel(engine: engine, visionEngine: NativeSmokeVision(log: log), webSearch: search,
+      let chat = LocalChatViewModel(engine: engine, visionEngine: mainRuntime, webSearch: search,
         sessionStore: ChatSessionStore(applicationSupportDirectory: directory.appending(path: UUID().uuidString)))
       await chat.refreshInstalledModel()
       var phases: [String] = []
@@ -106,12 +124,11 @@ final class ScreenSearchNativeSmokeTests: XCTestCase {
         }
       }
       let start = Date()
-      let decision = config.useTextModel
-        ? ScreenRoutingPolicy.decide(ScreenRoutingPolicy.Request(prompt: prompt, ocr: ocr, mode: .local,
-          localText: textModel.screenModel, localVision: [visionModel.screenModel]))
-        : .vision(visionModel.screenModel)
+      let decision = ScreenRoutingPolicy.decide(ScreenRoutingPolicy.Request(prompt: prompt,
+        ocr: ScreenOCRResult(text: screenshot.ocrText, confidence: screenshot.ocrConfidence), mode: .local,
+        localText: visionModel.screenModel))
       chat.submitScreen(prompt, attachment: screenshot, decision: decision, selectedMode: .local,
-        searchEnabled: true, searchTextModel: config.useTextModel ? textModel.screenModel : nil, cloudUploadAllowed: { false })
+        searchEnabled: true, cloudUploadAllowed: { false })
       await fulfillment(of: [done], timeout: 180)
       token.cancel()
       if chat.isBusy {
@@ -208,8 +225,10 @@ private final class NativeSmokeLog: @unchecked Sendable {
 
 private struct NativeSmokeVision: LocalVisionServing {
   let log: NativeSmokeLog
+  let runtime = LlamaServerVisionEngine()
+  func unload() async { await runtime.unload() }
   func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) -> AsyncThrowingStream<String, Error> {
-    log.wrap(LlamaServerVisionEngine().stream(messages: messages, image: image, model: model), label: "Vision")
+    log.wrap(runtime.stream(messages: messages, image: image, model: model), label: "Selected model")
   }
 }
 

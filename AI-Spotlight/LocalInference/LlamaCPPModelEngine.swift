@@ -43,12 +43,6 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     return try await catalog.download(model, progress: progress)
   }
 
-  func downloadVision(_ model: LocalVisionModelDescriptor,
-    progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel {
-    releaseEngine()
-    return try await catalog.downloadVision(model, progress: progress)
-  }
-
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
     try Task.checkCancellation()
     let handle = try loadEngineIfNeeded()
@@ -210,8 +204,10 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     var requestedContext = contextSize
     if let descriptor = installedModel.catalogDescriptor {
       let hardware = LocalHardwareProfile.detect(modelsDirectory: installationStore.modelsDirectoryURL)
-      let assessment = LocalModelSelector.assess(descriptor, hardware: hardware, installed: true)
-      guard assessment.fit.canRun else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
+      guard LocalModelCompatibility.supports(descriptor), hardware.physicalMemory >= descriptor.minimumMemory,
+            hardware.inferenceMemoryBudget >= descriptor.estimatedRuntimeMemory else {
+        throw LocalInferenceError.bridgeFailure("The installed text model no longer fits this Mac or runtime. Choose a supported model in Local Models.")
+      }
       requestedContext = Int32(descriptor.recommendedContextSize)
     }
     let newHandle = installedModel.fileURL.path.withCString { path in

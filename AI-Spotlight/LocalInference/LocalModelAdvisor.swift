@@ -85,7 +85,7 @@ final class LocalModelAdvisor: ObservableObject {
     guard let hardware, metrics.isValid else { return }
     let descriptor = model.catalogDescriptor
     let record = LocalModelBenchmark(
-      version: LocalModelBenchmark.version, llamaBuild: LocalModelCompatibility.llamaBuild,
+      version: LocalModelBenchmark.version, llamaBuild: model.catalogDescriptor?.runtimeBuild ?? LocalModelCompatibility.llamaBuild,
       hardwareFingerprint: hardware.fingerprint, lowPowerMode: hardware.lowPowerMode,
       modelID: model.id, modelChecksum: descriptor?.checksumSHA256 ?? "unverified-import",
       modelByteCount: descriptor?.expectedByteCount ?? 0, parameterBillions: descriptor?.parameterBillions ?? 0,

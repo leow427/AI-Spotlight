@@ -1,198 +1,151 @@
-# Automatic local model selection
+# One local model for text and images
 
-AI Spotlight detects the Mac before first-run model setup and recommends a
-curated GGUF download. Advanced Settings → Local Models uses the same catalog,
-compatibility checks, measurements, and installation state. Developer Tools has
-**Detect Mac Capabilities** and **Test First-Run Model Selection** buttons.
-The latter replays setup without clearing the installed library or preferences.
+AI Spotlight detects the Mac and recommends one complete model package for chat,
+screenshots, reasoning and search answers. Use **Find a Model for This Mac** in the
+normal model picker or **Settings → Local Models**. Recommended, Faster and Smarter
+use the same hardware assessment. There is no separate image-model selection.
 
-## Hardware and safety policy
+**Install** downloads the model, its matching vision encoder/projector, and the
+reviewed llama.cpp runtime with its libraries. All components have immutable URLs,
+exact byte counts and SHA-256 checksums. Users never select component files during
+normal setup. The complete package becomes selected only after installation commits.
+The same picker also labels existing text-only models honestly.
 
-`LocalHardwareProfile` reads physical memory, Apple Silicon support, Metal and
-unified-memory availability, chip/model strings, active CPU and performance-core
-counts, non-purgeable free disk space on the model volume, low-power mode, and
-Metal's recommended working set and maximum buffer length. No serial number is
-collected. Detection runs off the main actor. A report is saved locally and is
-refreshed on launch, by the developer button, and before a download.
+![Local model setup](images/local-model-manager.png)
 
-The inference budget is the smallest of:
+## Catalog reviewed on 2026-09-06
+
+The catalog contains official **Qwen3-VL Instruct** GGUF packages, using Q4_K_M
+language weights and the matching F16 vision encoder. All three are Apache-2.0.
+The Instruct variants support ordinary text as well as images; the runtime uses
+the model's Jinja chat template. Thinking output is disabled for bounded,
+user-facing answers and hidden query planning.
+
+| Package | Complete download¹ | Estimated runtime memory² | Minimum Mac memory |
+|---|---:|---:|---:|
+| Qwen3-VL 4B Instruct | 3.34 GB | 6.85 GiB | 12 GiB |
+| Qwen3-VL 8B Instruct | 6.20 GB | 10.04 GiB | 24 GiB |
+| Qwen3-VL 32B Instruct | 20.97 GB | 27.42 GiB | 64 GiB |
+
+¹ Decimal bytes, including the arm64 runtime; x64 differs by less than 0.1 MB.
+² Capacity estimates, not measurements of currently free memory or model quality.
+Every candidate must also pass the actual Mac's memory, Metal, speed and disk gates.
+An 8 GB Mac receives an explanation instead of a limited starter vision download.
+
+Qwen's model cards describe general text generation, document understanding,
+spatial interpretation and visual reasoning, and publish separate text and visual
+evaluations. The catalog uses these capabilities and the runtime's implemented
+`qwen3vl` architecture, not a name containing “VL”. Editorial quality priorities
+76/84/90 rank this selected family; they are not benchmark scores and do not imply
+that parameter count guarantees better answers. F16 vision encoders avoid adding
+another quantization variable to visual processing. The 4B package is the smallest
+reviewed choice in this release; no SmolVLM package is newly recommended.
+
+Other families, quantizations, and newer releases require their own review of
+licenses, exact artifacts, templates, memory and runtime behavior before admission.
+The 8B and 32B packages share the implemented dense Qwen3-VL runtime path, with
+separate architecture metadata and matched encoders. Their download metadata was
+verified; they have not both been executed on this developer Mac. The controlled
+4B results and remaining quality limits are in [verification](Screen-Search-Verification.md).
+
+Primary sources:
+
+- [Qwen 4B official GGUF card and files](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/tree/1cd86afb9a95c410a6038ab3b40d8b578c892266)
+- [Qwen 8B official GGUF card and files](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/tree/f982a07559d4a2f6c8744d840bf6fccab30eea96)
+- [Qwen 32B official GGUF card and files](https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct-GGUF/tree/e3e1fe0c76de7ee58ea65db420c643adfe2e457c)
+- [Qwen3-VL documentation and Apache license](https://github.com/QwenLM/Qwen3-VL)
+- [4B architecture configuration](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct/blob/main/config.json), [8B configuration](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct/blob/main/config.json), [32B configuration](https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct/blob/main/config.json)
+- [llama.cpp b10797 release and publisher SHA-256 digests](https://github.com/ggml-org/llama.cpp/releases/tag/b10797)
+- [Pinned Qwen3-VL implementation](https://github.com/ggml-org/llama.cpp/blob/b10797/src/models/qwen3vl.cpp)
+- [Pinned server protocol and options](https://github.com/ggml-org/llama.cpp/blob/b10797/tools/server/README.md), [multimodal documentation](https://github.com/ggml-org/llama.cpp/blob/b10797/docs/multimodal.md)
+
+## Hardware policy
+
+Detection reads physical memory, Apple Silicon, Metal/unified memory, CPU resources,
+non-purgeable free disk, low-power mode and Metal working-set/buffer limits. No
+serial number is collected. The inference budget remains the smallest of:
 
 - 60% of physical memory;
-- physical memory minus the larger of 4 GiB or 25% for macOS/other applications;
-- 80% of Metal's recommended working set, when available.
+- physical memory minus the larger of 4 GiB or 25% for macOS and other apps;
+- 80% of Metal's recommended working set, when present.
 
-The budget is deliberately a conservative capacity estimate, not a promise of
-free RAM under arbitrary memory pressure. macOS may still impose pressure when
-other applications grow. Runtime estimates include weights, a full 4,096-token
-F16 KV cache, and allocation/compute headroom. They are calculated as
-`1.2 × GGUF size + KV bytes at the selected context + 0.75 GiB` for this catalog.
-Measured peak memory can increase a model's memory requirement, never decrease it.
-Native context allocation uses the installed candidate's context, so a larger
-context from a future catalog is not silently evaluated at a smaller setting.
+For these packages, estimated memory is `1.2 × (language weights + vision weights)
++ full F16 KV cache + 2 GiB`. The cache uses the actual 8,192-token allocation:
+`layers × 8 KV heads × 128 head dimension × 4 bytes for K+V × context`.
+4B/8B have 36 layers; 32B has 64. The additional reserve covers vision activations,
+compute buffers, runtime and application overhead. Image input is bounded to
+4,096 tokens and the preprocessor's existing 1,568-pixel longest edge. The runtime
+cannot silently increase context or allocate a separate 8 GiB prompt cache.
 
-Before ranking, candidates must pass descriptor validation, the native
-compatibility allowlist, minimum Mac memory, runtime memory budget, Metal buffer
-limits, and disk space. The download needs `2 × download size + 2 GiB` because the
-existing atomic installer copies the verified file. Installed candidates do not
-need another download's disk allowance. Disk space is checked again immediately
-before the installation copy. The downloader rejects excess bytes, checks the
-exact size and SHA-256, and cleans partial files on failure or cancellation.
-Inference also rechecks hardware fit before loading a curated model.
+Weights, encoder and runtime all count toward disk admission:
+`2 × complete download + 2 GiB`. Free disk is checked again before installation.
+Installed candidates avoid a new-download disk gate for selection, while an actual
+update still checks the full required space. Apple unified-memory Metal and CPU
+execution are supported; discrete Metal remains excluded from recommendations.
+Metal buffer limits apply to a conservative largest-tensor bound.
 
-Apple unified-memory Metal and CPU-only inference are supported. Discrete Metal
-GPU configurations are conservatively excluded from automatic catalog selection
-until a separate CPU/GPU memory policy is reviewed. The bridge chooses CPU
-execution when its compiled runtime has no GPU offload support. Maximum Metal
-buffer length is checked against a conservative largest-tensor estimate, not the
-total GGUF size (large models can consist of many smaller tensors).
+Safety gates precede ranking. Recommended requires an estimated/measured 8 tokens/s
+and a first token within 5 seconds; Faster must use less memory and be at least
+20% faster. Smarter permits 3 tokens/s and 12 seconds. Missing tiers stay absent.
+The speed estimate is a conservative CPU/acceleration/weight-size heuristic for a
+reference text prompt. Image encoding and cold model loading add latency.
 
-## Ranking and measurements
+After installation, **Check Performance** measures a fixed public text prompt on
+the selected runtime with 64 generated tokens and a 60-second generation deadline.
+The multimodal runtime reports actual prompt/generation token counts and speeds;
+first-token timing starts after loading. Combined application/server resident
+memory is sampled every 20 ms and after completion. This conservative RSS sum can
+double-count shared library pages; it is not a continuous OS high-water mark or a
+measurement of every possible image. The image/cache memory floor still applies.
 
-Quality scores are **editorial relative priorities**, not claimed benchmark
-results or universal intelligence measurements. The current priorities are 38,
-52, 70, 83, and 91 for the Qwen 2.5 1.5B, 3B, 7B, 14B, and 32B families. Q5_K_M
-adds one point and Q8_0 two points over Q4_K_M. Review these scores when adding
-models; changing a score must not bypass a safety gate.
+Benchmark failures/cancellation keep the verified installation. Measurements are
+stored locally and scoped to runtime build, hardware, power mode, checksum and
+context; they expire after 90 days. Exact measurements override speed estimates and
+can increase the memory requirement. Same-architecture calibration is bounded to
+twice the resource prior. The embedded engine remains for legacy text models only.
 
-Performance starts with a conservative heuristic based on CPU resources,
-acceleration, weight size, parameter count, and low-power mode. It is not a
-chip-name lookup or a specification for the Mac's memory bandwidth. UI text
-explicitly distinguishes estimates from measurements.
+## Installation, upgrades and migration
 
-- **Recommended:** highest-quality safe candidate predicted to produce at least
-  8 tokens/second and a first token within 5 seconds for the reference prompt.
-- **Faster:** highest-quality responsive alternative with less runtime memory
-  and at least 20% faster generation.
-- **Smarter:** highest-quality safe candidate above Recommended's quality,
-  allowing at least 3 tokens/second and at most 12 seconds to the first token.
-- Missing alternatives remain absent. If nothing is responsive, onboarding
-  explains this rather than offering an unsafe default. The manager still shows
-  memory-safe slow candidates with their warning labels.
+Transfers report cumulative received bytes across all three artifacts, reject
+oversized responses while receiving, and verify exact size and checksum. After
+100% received, the UI says it is verifying/installing. Cancel remains available
+through verification. Runtime extraction validates paths and symlinks, checks
+executable support and retains its accompanying libraries.
 
-After installation, the shared view model blocks other model/chat operations
-while the native benchmark runs. Version 1 uses a fixed public home-office
-prompt, greedy decoding, and up to 64 actual llama.cpp output tokens. It requires
-at least 16 output tokens, checks cancellation between tokens, and stops at a
-60-second generation deadline. Native loading and an individual synchronous
-prompt decode cannot be interrupted mid-call. Failures and cancellation retain
-the verified installation; Settings offers **Check Performance** to retry.
+The installer copies into fresh immutable filenames. An atomic metadata write is
+the commit point. Cancellation is checked between copies and before committing.
+Failures remove uncommitted files/runtime and keep the previous selection and bytes.
+A successful same-ID update keeps the existing main selection and retires only the
+replaced package's app-owned files. Different legacy models are never deleted.
+A fully committed package remains installed if cancellation arrives after commit.
+An interrupted process cannot expose a partial package as installed; retrying is
+safe. A hard crash can leave unused staging files, which are never selected.
 
-Recorded values:
+Existing single-record and library metadata still decode. The obsolete
+`screen.localVisionModelID` preference is retired without changing the normal
+selection, consent settings or model files. A selected text-only model continues
+text chat and suitable OCR requests. Visual questions explain how to install and
+select a capable package in the existing Local Models tab. Already installed
+compatible image packages remain selectable for all requests, with legacy labels.
+The known incompatible original SmolVLM 2.2B image package gets explicit replacement
+guidance; its text/OCR use and files are retained. No migration downloads anything.
 
-- First-token latency starts before prompt preparation and excludes model load.
-- Generation tokens/second uses actual generated token count and time spent in
-  native token sampling/decoding, not text fragments or character counts.
-- Prompt tokens/second uses the native formatted/tokenized prompt count divided
-  by preparation and prompt evaluation time.
-- Memory is the highest sampled total app memory at load, after prompt
-  processing, and after each token. Each sample is the greater of Mach physical
-  footprint and resident size, avoiding double-counting shared allocations. It
-  includes app overhead and mapped weights; it is not isolated model memory or
-  a continuous OS high-water measurement.
-- Model load time, prompt/output token counts, context, checksum, hardware
-  fingerprint, power mode, benchmark version, and llama.cpp build are also kept.
+Signed remote updates retain signature verification, bounded responses, monthly
+checks, anti-rollback caching and offline fallback. Bundled catalog version 2
+replaces the old text recommendations. Older text descriptors still decode but
+cannot become new recommendations/downloads. A signed catalog cannot expand the
+reviewed architecture, context, runtime or artifact validation. Remote publishing
+is still unconfigured; activation requires `LocalModelCatalogURL` and the base64
+Ed25519 `LocalModelCatalogPublicKey` in Info.plist. Never bundle the private key.
 
-Results live in `~/Library/Application Support/AI Spotlight/Model Recommendations/`
-as `hardware.json` and `benchmarks.json`. At most 100 benchmark records are kept.
-Recommendations use compatible records from this Mac and power mode for 90 days.
-Exact checksum/context measurements override estimates. The latest compatible
-same-architecture measurement also calibrates other candidates by weight and
-parameter ratios. Upward extrapolation is limited to twice the initial resource
-estimate; downward corrections are not suppressed. A measured slowdown can
-therefore favor a smaller model, and strong results can favor a smarter one.
+## Runtime lifecycle
 
-Generation below 60% of its prediction, or first-token latency above both
-5 seconds and 175% of its prediction, triggers a Faster suggestion when one is
-available. Recommendations never download, replace, or select a model by
-themselves. Imported GGUFs retain their existing manual workflow; their native
-template is checked on load and benchmark results are stored, but unverified
-imports do not calibrate curated model recommendations.
-
-## Bundled catalog and compatibility
-
-There are 15 separately pinned candidates: Q4_K_M, Q5_K_M, and Q8_0 for each of
-Qwen 2.5 1.5B/3B/7B/14B/32B Instruct. `BundledLocalModels.swift` records the exact
-Hugging Face LFS sizes/checksums and repository commits reviewed on 2026-09-04.
-The original 1.5B Q4_K_M ID, revision, and checksum are preserved for installed
-library compatibility. Curated metadata is persisted with installed models;
-legacy libraries decode without migration or file movement.
-
-The bridge remains pinned to **llama.cpp b5046**. This catalog admits `qwen2`,
-`chatml`, and the three named quantizations, with context from 4,096 through
-32,768 tokens. A signed catalog cannot expand those native capabilities. Qwen3
-and other newer architectures need an explicit bridge/app compatibility review.
-Qwen 2.5 3B carries the Qwen Research License; the other listed sizes carry
-Apache-2.0. Each model's license and model-card link appear in Settings.
-
-Primary metadata and compatibility sources:
-
-- [1.5B GGUF repository](https://huggingface.co/bartowski/Qwen2.5-1.5B-Instruct-GGUF)
-- [3B GGUF repository](https://huggingface.co/bartowski/Qwen2.5-3B-Instruct-GGUF)
-- [7B GGUF repository](https://huggingface.co/bartowski/Qwen2.5-7B-Instruct-GGUF)
-- [14B GGUF repository](https://huggingface.co/bartowski/Qwen2.5-14B-Instruct-GGUF)
-- [32B GGUF repository](https://huggingface.co/bartowski/Qwen2.5-32B-Instruct-GGUF)
-- [Qwen's 7B GGUF model card](https://huggingface.co/Qwen/Qwen2.5-7B-Instruct-GGUF)
-- [Qwen's 3B GGUF model card and license](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct-GGUF)
-- [Embedded llama.cpp release](https://github.com/ggml-org/llama.cpp/tree/b5046)
-
-## Trusted remote updates
-
-The app always has a bundled fallback. Remote publishing is **not configured**
-because no publisher endpoint or signing identity has been supplied. To activate
-the implemented update path, the app publisher must add these Info.plist values:
-
-- `LocalModelCatalogURL`: an HTTPS endpoint serving a signed envelope.
-- `LocalModelCatalogPublicKey`: the base64-encoded 32-byte Ed25519 public key.
-
-Keep the private signing key outside the repository and application. The response
-is a JSON `SignedLocalModelCatalog` with base64 `payload` and `signature` fields.
-The signature covers the exact payload bytes. The payload is the Codable JSON
-representation of `LocalModelManifest`: an increasing integer `version` and
-`models` with the same required fields as the bundled descriptors. Model URLs
-must use Hugging Face HTTPS, a 40-character repository revision, and one GGUF
-file. Every file requires its exact SHA-256 and size. Multipart GGUF downloads
-are not currently supported.
-
-Responses are capped at 1 MiB, signatures are verified before parsing the model
-catalog, duplicate IDs/checksums and invalid metadata are rejected, and lower or
-same remote versions cannot replace the active catalog. Signed cached envelopes
-are verified again on load. Only successfully verified updates are atomically
-cached. Offline, HTTP, decoding, signature, and compatibility problems preserve
-the cache or bundled fallback. Cached unknown architectures remain visibly
-Unsupported and cannot be downloaded through the manager.
-
-A configured source is checked at launch and when the panel is presented, at
-most once every 30 days. Failed attempts are also throttled. **Refresh
-Recommendations** explicitly retries sooner. No background OS service, account,
-analytics upload, or new package dependency is required.
-
-## Verification
-
-The shared Xcode scheme covers deterministic resource matrices, quality ordering,
-CPU/Metal behavior, unsupported candidates, metadata/signature tampering,
-rollback/offline fallback, successful remote caching, native-install metadata,
-download truncation/oversize/checksum/HTTP/disk failures, onboarding persistence,
-developer replay, benchmark persistence, performance calibration, and
-installation/benchmark cancellation and failure. Native SwiftUI previews are
-rendered into XCTest attachments and `docs/images/`.
-
-Hosted unit tests suppress normal app startup so they do not open first-run UI,
-register global shortcuts, or request the developer's real Keychain credentials.
-The existing controller, shortcut, storage, and conversation tests still run.
-
-Real benchmark smoke verification used the existing SmolLM2 135M Q4_K_M file in
-a temporary library, through the production Swift `LlamaCPPModelEngine.benchmark`
-and the embedded C++ bridge. It produced 64 tokens from a 146-token prompt,
-0.045-second first-token latency, 329 tokens/second generation, 3,444 prompt
-tokens/second, and about 280 MiB peak process memory. These numbers validate the
-measurement plumbing on this Mac, not the latency estimates of the 15 Qwen
-candidates. Running every multi-gigabyte candidate on every hardware class
-remains a catalog-release validation responsibility.
-
-Local validation on 2026-09-04: Xcode 26.6, shared `AI-Spotlight` scheme,
-macOS destination, `CODE_SIGNING_ALLOWED=NO`: **build passed; all 176 tests
-passed; static analysis passed; diff whitespace checks passed**. The only build
-warning was the existing AppIntents metadata extraction notice. The first full
-run was stopped while the existing app startup was blocked on Keychain access;
-the test-host isolation described above resolved it without changing credentials.
-GitHub CI status is reported on the pull request.
+A single authenticated loopback-only llama-server serves the selected package.
+Text, OCR, image planning and final-answer requests reuse the process and weights.
+Each request supplies its prepared conversation; prompt-cache reuse is disabled,
+and no conversation or screenshots are saved by the server. Switching models,
+request cancellation/failure, application termination, and explicit unloading close that child and its
+network session. Idle unloading occurs after five minutes without generation.
+Cleanup from an older request cannot terminate a newer model process. Startup and
+shutdown are bounded, with forced child termination if graceful shutdown stalls.
+The embedded b5046 bridge remains only for existing text-only installations.

@@ -561,7 +561,7 @@ private actor PanelScreenEngine: LocalModelEngine {
   func selectModel(id: String) {}
   func download(_ model: LocalModelDescriptor, progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) -> LocalModel { self.model }
   nonisolated func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> {
-    if request.prompt.hasPrefix("Create a web search query") {
+    if request.prompt.hasPrefix("Read the attached screenshot") {
       return AsyncThrowingStream { $0.yield("Swift values.count meaning"); $0.finish() }
     }
     started()

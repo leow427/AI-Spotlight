@@ -52,6 +52,7 @@ struct LocalModelInstallationStore: Sendable {
     Self.libraryLock.lock()
     defer { Self.libraryLock.unlock() }
 
+    try Task.checkCancellation()
     let sourceURL = model.fileURL.standardizedFileURL
     guard sourceURL.pathExtension.lowercased() == "gguf",
           FileManager.default.isReadableFile(atPath: sourceURL.path) else {
@@ -92,10 +93,12 @@ struct LocalModelInstallationStore: Sendable {
       }
     }
     try fileOperations.copyItem(sourceURL, temporaryURL)
+    try Task.checkCancellation()
     try fileOperations.moveItem(temporaryURL, destinationURL)
     movedModel = true
     if let vision = installedVision {
       try fileOperations.copyItem(vision.projectorURL, projectorTemporary)
+      try Task.checkCancellation()
       try fileOperations.moveItem(projectorTemporary, projectorDestination)
       movedProjector = true
       installedVision = LocalVisionConfiguration(projectorURL: projectorDestination,
@@ -108,7 +111,13 @@ struct LocalModelInstallationStore: Sendable {
     do {
       library.models.removeAll { $0.id == record.id }
       library.models.append(record)
-      if !model.supportsVision || library.selectedModelID == nil { library.selectedModelID = record.id }
+      // Multimodal upgrades preserve the current selection. A new main package
+      // becomes selected only at the same atomic commit as its complete files.
+      if library.selectedModelID == nil || !model.supportsVision
+        || (model.catalogDescriptor?.supportsVision == true && replacedRecords.isEmpty) {
+        library.selectedModelID = record.id
+      }
+      try Task.checkCancellation()
       try saveLibrary(library)
       committed = true
     } catch {

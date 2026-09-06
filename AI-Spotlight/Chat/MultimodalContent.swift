@@ -16,7 +16,7 @@ enum ScreenRequestError: LocalizedError, Equatable {
   var errorDescription: String? {
     switch self {
     case .cloudUploadNotAllowed: "Screenshot upload is disabled. Use local vision or allow screenshots in Screen settings."
-    case .textOnlyModel: "This model cannot process images. Select a vision-capable model in Screen settings."
+    case .textOnlyModel: "This model cannot process images. Select a model with image support in the normal model picker."
     case .invalidImage: "The screenshot payload is invalid. Please retake it."
     case .invalidLocalEndpoint: "Local vision must use a loopback address on this Mac."
     }
