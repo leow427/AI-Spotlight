@@ -2,13 +2,19 @@ import Combine
 import Foundation
 
 protocol WebSearchCredentialStore: Sendable {
+  func containsAPIKey() throws -> Bool
   func apiKey() throws -> String?
   func setAPIKey(_ value: String) throws
   func removeAPIKey() throws
 }
 
+extension WebSearchCredentialStore {
+  func containsAPIKey() throws -> Bool { try apiKey()?.isEmpty == false }
+}
+
 struct KeychainSearchCredentialStore: WebSearchCredentialStore {
   private let store = KeychainCredentialStore(service: "com.leow427.AISpotlight.web-search")
+  func containsAPIKey() throws -> Bool { try store.containsAPIKey(account: "brave") }
   func apiKey() throws -> String? { try store.apiKey(account: "brave") }
   func setAPIKey(_ value: String) throws { try store.setAPIKey(value, account: "brave") }
   func removeAPIKey() throws { try store.removeAPIKey(account: "brave") }
@@ -22,7 +28,7 @@ final class WebSearchSettings: ObservableObject {
 
   init(credentials: any WebSearchCredentialStore = KeychainSearchCredentialStore()) {
     self.credentials = credentials
-    hasAPIKey = (try? credentials.apiKey())?.isEmpty == false
+    hasAPIKey = (try? credentials.containsAPIKey()) ?? false
   }
 
   func saveAPIKey(_ value: String) throws {

@@ -53,7 +53,9 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   private let panel: SpotlightPanel
   private let sizeStore: PanelSizeStore
 
-  var isVisible: Bool { panel.isVisible }
+  private(set) var isCapturingScreen = false
+  private var captureHiddenWindows: [NSWindow] = []
+  var isVisible: Bool { panel.isVisible && !isCapturingScreen }
 
   init(
     glassAppearance: GlassAppearanceSettings,
@@ -88,6 +90,9 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       rootView: AppShellView(glassAppearance: glassAppearance)
     )
 
+    NotificationCenter.default.addObserver(self, selector: #selector(beginScreenCapture), name: .screenCaptureBegan, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(endScreenCapture), name: .screenCaptureEnded, object: nil)
+
     panel.onHide = { [weak self] in
       self?.hide()
     }
@@ -97,9 +102,34 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func show() {
+    guard !isCapturingScreen else { return }
     centerOnActiveDisplay()
     panel.orderFrontRegardless()
     panel.makeKey()
+    NotificationCenter.default.post(name: .panelPresented, object: nil)
+  }
+
+  @objc private func beginScreenCapture() {
+    guard !isCapturingScreen else { return }
+    isCapturingScreen = true
+    captureHiddenWindows = NSApp.windows.filter { $0 !== panel && $0.isVisible }
+    captureHiddenWindows.forEach { $0.orderOut(nil) }
+    // Removing the panel from the window server avoids capturing it and gives
+    // SwiftUI a fresh compositor surface when the panel is restored. Keeping an
+    // ordered window at zero alpha can leave that surface transparent after the
+    // system screenshot picker disconnects on macOS 26.
+    panel.orderOut(nil)
+  }
+
+  @objc private func endScreenCapture() {
+    guard isCapturingScreen else { return }
+    captureHiddenWindows.forEach { $0.orderFrontRegardless() }
+    captureHiddenWindows = []
+    isCapturingScreen = false
+    panel.orderFrontRegardless()
+    panel.makeKey()
+    panel.contentView?.needsLayout = true
+    panel.contentView?.needsDisplay = true
     NotificationCenter.default.post(name: .panelPresented, object: nil)
   }
 
@@ -109,6 +139,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func toggle() {
+    guard !isCapturingScreen else { return }
     panel.isVisible ? hide() : show()
   }
 
@@ -142,6 +173,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       NotificationCenter.default.post(name: .recentChatCycleRequested, object: nil)
     case .settings:
       NotificationCenter.default.post(name: .settingsRequested, object: nil)
+    case .hideInactiveTools:
+      NotificationCenter.default.post(name: .hideInactiveToolsRequested, object: nil)
     }
   }
 }

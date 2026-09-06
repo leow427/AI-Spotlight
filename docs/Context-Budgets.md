@@ -70,7 +70,12 @@ rather than silently truncating C strings.
 Every completion clears its KV cache and replays only the prepared conversation,
 which prevents cross-chat/model leakage. The native boundary also checks the full
 output reserve, so callers cannot squeeze input in by silently reducing output.
-Explicit Local uses only installed files and the embedded llama.cpp runtime.
+Explicit Local uses installed files only. Legacy text-only models use the
+embedded bridge. Recommended multimodal packages use the pinned local server with
+8,192 tokens, a 512-token output reserve, 256 protocol tokens and up to 4,096 image
+tokens. Text is conservatively charged one token per UTF-8 byte plus message
+framing. Context shifting and prompt-cache reuse are disabled. See
+[the current local model policy](Local-Model-Selection.md).
 
 ## References checked 2026-09-04
 

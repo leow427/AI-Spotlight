@@ -67,8 +67,12 @@ enum CloudModelCapabilities {
     case .chatGPT:
       // The API alias is not a verified Codex model identifier.
       return openAITextModels.first { $0.supportsCodex && $0.ids.first == id }
+    case .gemini:
+      return visionModelIDs(for: .gemini).contains(id)
+        ? Metadata(ids: [id], contextWindow: 1_048_576, maximumOutputTokens: 4_096) : nil
     case .anthropic:
-      return nil
+      return visionModelIDs(for: .anthropic).contains(id)
+        ? Metadata(ids: [id], contextWindow: 200_000, maximumOutputTokens: 4_096) : nil
     }
   }
 

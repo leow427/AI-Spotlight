@@ -6,6 +6,7 @@ enum PanelShortcut: Equatable {
   case stopStreaming
   case cycleRecentChat
   case settings
+  case hideInactiveTools
 
   static func resolve(
     characters: String?,
@@ -15,6 +16,9 @@ enum PanelShortcut: Equatable {
     let relevantModifiers = modifiers.intersection(shortcutModifiers)
     if relevantModifiers == .control, characters == "\t" {
       return .cycleRecentChat
+    }
+    if relevantModifiers == [.command, .shift], characters?.lowercased() == "h" {
+      return .hideInactiveTools
     }
     guard relevantModifiers == .command else { return nil }
 

@@ -1,17 +1,64 @@
 import AppKit
+import Combine
 import SwiftUI
 import UniformTypeIdentifiers
+
+/// Observe native layout without feeding measurements back into SwiftUI state.
+private struct ConversationScrollObserver: NSViewRepresentable {
+  func makeNSView(context: Context) -> ObserverView { ObserverView() }
+  func updateNSView(_ view: ObserverView, context: Context) {}
+
+  final class ObserverView: NSView {
+    private var pendingScroll: DispatchWorkItem?
+
+    override func setFrameSize(_ newSize: NSSize) {
+      let changed = frame.size != newSize
+      super.setFrameSize(newSize)
+      if changed { scheduleScroll() }
+    }
+
+    override func viewDidMoveToWindow() {
+      super.viewDidMoveToWindow()
+      pendingScroll?.cancel()
+      if window != nil { scheduleScroll() }
+    }
+
+    private func scheduleScroll() {
+      pendingScroll?.cancel()
+      let work = DispatchWorkItem { [weak self] in
+        guard let self, self.window != nil, let scroll = self.enclosingScrollView,
+              let document = scroll.documentView else { return }
+        let clip = scroll.contentView
+        let bottom = document.isFlipped
+          ? max(document.bounds.minY, document.bounds.maxY - clip.bounds.height)
+          : document.bounds.minY
+        clip.scroll(to: NSPoint(x: clip.bounds.minX, y: bottom))
+        scroll.reflectScrolledClipView(clip)
+      }
+      pendingScroll = work
+      // Lazy rows can be measured repeatedly while a single frame settles.
+      DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(30), execute: work)
+    }
+  }
+}
 
 struct AppShellView: View {
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
-  @ObservedObject private var modelAdvisor = LocalModelAdvisor.shared
-  @State private var draft = ""
+  @ObservedObject private var modelAdvisor: LocalModelAdvisor
+  @StateObject private var screen: ScreenComposerCoordinator
+  @ObservedObject private var screenSettings = ScreenSettings.shared
+  @ObservedObject private var connectivity = ScreenConnectivity.shared
+  @State private var isScreenPermissionPresented = false
+  private var draft: String {
+    get { screen.draft }
+    nonmutating set { screen.draft = newValue }
+  }
   @State private var isSearchEnabled = false
   @State private var isSearchPresented = false
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
-  @ObservedObject private var searchSettings = WebSearchSettings.shared
+  @ObservedObject private var searchSettings: WebSearchSettings
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
@@ -22,12 +69,19 @@ struct AppShellView: View {
     glassAppearance: GlassAppearanceSettings,
     localEngine: (any LocalModelEngine)? = nil,
     cloudSettings: CloudSettingsModel = .shared,
-    cloudProviders: CloudProviderRegistry = .live
+    cloudProviders: CloudProviderRegistry = .live,
+    localChat: LocalChatViewModel? = nil,
+    screen: ScreenComposerCoordinator = ScreenComposerCoordinator(),
+    modelAdvisor: LocalModelAdvisor = .shared,
+    searchSettings: WebSearchSettings = .shared
   ) {
     self.glassAppearance = glassAppearance
     self.cloudSettings = cloudSettings
+    self.modelAdvisor = modelAdvisor
+    self.searchSettings = searchSettings
+    _screen = StateObject(wrappedValue: screen)
     _localChat = StateObject(
-      wrappedValue: localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
+      wrappedValue: localChat ?? localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
     )
   }
 
@@ -83,33 +137,51 @@ struct AppShellView: View {
         .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
         .navigationTitle("Recent")
       } detail: {
-        VStack(spacing: 0) {
-          conversation
+        // The native split view measures its columns with an unconstrained
+        // proposal. Wrapped composer notices must not become the panel's
+        // minimum height and move its controls outside the visible window.
+        GeometryReader { _ in
+          VStack(spacing: 0) {
+            conversation
 
-          VStack(alignment: .trailing, spacing: 8) {
-            routeStatus
-            if let notice = localChat.contextNotice {
-              Text(notice)
+            VStack(alignment: .trailing, spacing: 8) {
+              routeStatus
+              if let notice = localChat.contextNotice {
+                Text(notice)
+                  .font(.caption)
+                  .foregroundStyle(.secondary)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+              if let decision = localChat.screenRouteDecision {
+                Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              if isSearchEnabled {
+                HStack(spacing: 6) {
+                  Text(searchSettings.hasAPIKey
+                    ? "Web Search · Queries sent to Brave may include screen details."
+                    : "Add a Brave Search API key to search the web.")
+                  if !searchSettings.hasAPIKey {
+                    Button("Settings", action: openSettings).buttonStyle(.plain)
+                  }
+                }
                 .font(.caption)
                 .foregroundStyle(.secondary)
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            if isSearchEnabled {
-              HStack(spacing: 6) {
-                Text(searchSettings.hasAPIKey
-                  ? "Web Search · Your question is sent to Brave."
-                  : "Add a Brave Search API key to search the web.")
-                if !searchSettings.hasAPIKey {
-                  Button("Settings", action: openSettings).buttonStyle(.plain)
-                }
               }
-              .font(.caption)
-              .foregroundStyle(.secondary)
+              compactModeControls
+              if let attachment = screen.attachment {
+                ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
+                                     isBusy: localChat.isBusy || screen.isBusy,
+                                     remove: screen.removeAttachment, retake: captureScreen)
+              }
+              if let error = screen.error {
+                Text(error).font(.caption).foregroundStyle(.orange)
+                  .fixedSize(horizontal: false, vertical: true)
+              }
+              composer
             }
-            compactModeControls
-            composer
+            .padding(20)
           }
-          .padding(20)
         }
       }
 
@@ -124,7 +196,7 @@ struct AppShellView: View {
         .stroke(.white.opacity(0.14), lineWidth: 0.5)
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
-      draft = ""
+      screen.clearDraft()
       isSearchEnabled = false
       isSearchPresented = false
       localChat.newChat()
@@ -160,6 +232,29 @@ struct AppShellView: View {
     .sheet(isPresented: $modelAdvisor.isOnboardingPresented, onDismiss: { modelAdvisor.dismissOnboarding() }) {
       LocalModelOnboardingView(advisor: modelAdvisor, chat: localChat)
     }
+    .alert("Allow screenshot uploads?", isPresented: $isScreenPermissionPresented) {
+      Button("Allow & Send") {
+        screenSettings.answerCloudPermission(allow: true)
+        submitDraft()
+      }
+      Button("Keep Screenshots Local", role: .cancel) {
+        screenSettings.answerCloudPermission(allow: false)
+        screen.error = "Screenshot kept on this Mac. Use a local vision model, or enable uploads in Screen settings."
+      }
+    } message: { Text(ScreenSettings.permissionExplanation) }
+    .onChange(of: localChat.isBusy) { _, busy in
+      // A disabled TextField cannot take focus at first-token acceptance.
+      // Restore its editor only after the owning request has finished.
+      isComposerFocused = !busy
+    }
+    .onChange(of: localChat.selectedSessionID) { _, _ in
+      if localChat.activeRequest == nil { screen.removeAttachment() }
+    }
+    .onChange(of: screenSettings.allowCloudScreenshots) { _, allowed in
+      if !allowed, localChat.screenRouteDecision?.sendsImage == true, localChat.activeRequest?.route.mode == .cloud {
+        localChat.stopStreaming()
+      }
+    }
     .sheet(isPresented: $isHelpPresented) {
       KeyboardShortcutsHelpView()
     }
@@ -178,10 +273,11 @@ struct AppShellView: View {
       await modelAdvisor.start(installedModels: localChat.installedModels)
     }
     .onChange(of: draft) { _, value in
-      guard let remainder = SearchCommand.remainder(in: value) else { return }
+      let commands = ComposerCommands(value)
+      guard commands.search, value == draft else { return }
       isSearchPresented = true
       isSearchEnabled = true
-      draft = remainder
+      draft = commands.screen ? commands.captureDraft : commands.prompt
     }
     .onChange(of: isSearchPresented) { _, _ in
       isComposerFocused = true
@@ -214,16 +310,19 @@ struct AppShellView: View {
 
   private var composer: some View {
     HStack(spacing: 10) {
-      WebSearchControls(
-        isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
-        isBusy: localChat.isBusy, openSettings: openSettings
-      )
+      HStack(spacing: 0) {
+        WebSearchControls(
+          isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
+          isBusy: localChat.isBusy || screen.isBusy, openSettings: openSettings, captureScreen: captureScreen
+        )
+        ScreenToolButton(coordinator: screen, isBusy: localChat.isBusy, capture: captureScreen)
+      }
 
-      TextField("Ask anything", text: $draft, axis: .vertical)
+      TextField("Ask anything", text: $screen.draft, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($isComposerFocused)
-        .disabled(!canSubmit)
+        .disabled(localChat.isBusy || screen.isBusy)
         .onSubmit(submitDraft)
 
       Menu {
@@ -242,6 +341,7 @@ struct AppShellView: View {
       .fixedSize()
     }
     .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: isSearchPresented)
+    .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: screen.isPresented)
     .padding(.horizontal, 14)
     .padding(.vertical, 12)
     .background {
@@ -283,21 +383,19 @@ struct AppShellView: View {
 
       Spacer()
     } else {
-      ScrollViewReader { proxy in
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 18) {
-            ForEach(localChat.messages) { message in
-              LocalMessageView(message: message)
-                .id(message.id)
-            }
+      ScrollView {
+        LazyVStack(alignment: .leading, spacing: 18) {
+          ForEach(localChat.messages) { message in
+            LocalMessageView(message: message)
+              .id(message.id)
           }
-          .padding(24)
         }
-        .onChange(of: localChat.messages) { _, messages in
-          guard let lastMessage = messages.last else { return }
-          proxy.scrollTo(lastMessage.id, anchor: .bottom)
-        }
+        .padding(24)
+        .background(ConversationScrollObserver().allowsHitTesting(false))
       }
+      .defaultScrollAnchor(.bottom, for: .initialOffset)
+      .defaultScrollAnchor(.top, for: .alignment)
+      .id(localChat.selectedSessionID)
     }
   }
 
@@ -322,6 +420,7 @@ struct AppShellView: View {
 
   private var requestPhase: String {
     switch localChat.state {
+    case .refiningSearch: "Preparing search query"
     case .searching: "Searching with Brave"
     case .streaming: "Streaming"
     default: "Preparing"
@@ -345,7 +444,7 @@ struct AppShellView: View {
           ProgressView(value: progress.fractionCompleted)
             .frame(width: 72)
           Text("Downloading \(progress.fractionCompleted, format: .percent.precision(.fractionLength(0)))")
-        case .preparing, .searching:
+        case .preparing, .refiningSearch, .searching:
           ProgressView()
             .controlSize(.small)
           Text("Loading local model…")
@@ -389,7 +488,7 @@ struct AppShellView: View {
           Button("Advanced Settings", action: openSettings)
         } else {
           switch localChat.state {
-          case .preparing, .searching:
+          case .preparing, .refiningSearch, .searching:
             ProgressView()
               .controlSize(.small)
             Text("Connecting to \(cloudSettings.preferredProvider.displayName)…")
@@ -591,7 +690,7 @@ struct AppShellView: View {
               localChat.selectModel(id: model.id)
             } label: {
               Label(
-                model.displayName,
+                model.displayName + (model.supportsVision ? " · Text + images" : " · Text only"),
                 systemImage: localChat.installedModel?.id == model.id ? "checkmark" : "cpu"
               )
             }
@@ -605,7 +704,7 @@ struct AppShellView: View {
       Button("Manage Models in Settings…", action: openSettings)
 
       Divider()
-      Button("Choose GGUF File…") {
+      Button("Advanced: Import Text GGUF…") {
         isModelImporterPresented = true
       }
     } label: {
@@ -626,7 +725,7 @@ struct AppShellView: View {
               cloudSettings.preferredModelID = model.id
             } label: {
               Label(
-                model.displayName,
+                model.displayName + (model.supportsVision ? " · Text + images" : " · Text only"),
                 systemImage: cloudSettings.preferredModelID == model.id ? "checkmark" : "cloud"
               )
             }
@@ -648,7 +747,37 @@ struct AppShellView: View {
     .disabled(localChat.isBusy)
   }
 
+  private func captureScreen() {
+    guard !localChat.isBusy else { return }
+    Task {
+      _ = await screen.capture()
+      isComposerFocused = true
+    }
+  }
+
   private func submitDraft() {
+    guard !localChat.isBusy, !screen.isBusy else { return }
+    // Capture can finish and submit again before SwiftUI delivers onChange.
+    // Resolve all requested tools now; no view-update timing controls routing.
+    let commands = ComposerCommands(draft)
+    if commands.search {
+      isSearchPresented = true
+      isSearchEnabled = true
+    }
+    if commands.screen {
+      draft = commands.captureDraft
+      Task {
+        let automaticPrompt = await screen.capture(submittedCommand: true)
+        isComposerFocused = true
+        if automaticPrompt != nil { submitDraft() }
+      }
+      return
+    }
+    if commands.search { draft = commands.prompt }
+    if screen.isEnabled, let attachment = screen.attachment {
+      submitScreenAttachment(attachment)
+      return
+    }
     guard canSubmit else { return }
     let prompt = draft
     let accepted: @MainActor () -> Void = {
@@ -670,6 +799,49 @@ struct AppShellView: View {
     }
   }
 
+  private func submitScreenAttachment(_ attachment: ScreenAttachment) {
+    guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    let cloudText = cloudSettings.isConfigured
+      ? CloudModel(id: cloudSettings.preferredModelID, displayName: cloudSettings.preferredModelID,
+                   provider: cloudSettings.preferredProvider).screenModel : nil
+    let automatic = selectedMode == .auto ? AutoRouter.decide(AutoRouter.Request(
+      selectedMode: .auto, webSearchEnabled: isSearchEnabled, prompt: draft,
+      contextMessages: localChat.messages, localModel: localChat.installedModel,
+      additionalInputTokens: attachment.ocrText.utf8.count + 512
+        + (ScreenRoutingPolicy.requiresVision(prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText,
+          confidence: attachment.ocrConfidence)) ? 4096 : 0),
+      cloud: connectivity.isOffline ? nil : autoCloudConfiguration)) : nil
+    if let limitation = automatic?.limitation {
+      screen.error = limitation.message
+      return
+    }
+    let request = ScreenRoutingPolicy.Request(
+      prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText, confidence: attachment.ocrConfidence),
+      mode: selectedMode, localText: localChat.installedModel?.screenModel, cloudText: cloudText,
+      autoRoute: automatic?.route,
+      allowCloudScreenshots: screenSettings.allowCloudScreenshots,
+      hasExplainedCloudPermission: screenSettings.hasExplainedCloudPermission, isOffline: connectivity.isOffline
+    )
+    let decision = ScreenRoutingPolicy.decide(request)
+    screen.updateDecision(decision)
+    screen.error = nil
+    switch decision {
+    case .needsCloudPermission:
+      isScreenPermissionPresented = true
+    case .blocked(let reason):
+      screen.error = reason
+    case .text, .vision:
+      let prompt = draft
+      localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
+        searchEnabled: isSearchEnabled,
+        cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
+          if draft == prompt { draft = "" }
+          if screen.attachment?.id == attachment.id { screen.removeAttachment() }
+          isComposerFocused = true
+        }
+    }
+  }
+
   private var autoCloudConfiguration: AutoRouter.CloudConfiguration? {
     guard cloudSettings.isConfigured else { return nil }
     let modelID = cloudSettings.preferredModelID
@@ -688,7 +860,7 @@ struct AppShellView: View {
   }
 }
 
-private struct LocalMessageView: View {
+struct LocalMessageView: View {
   let message: ChatMessage
 
   var body: some View {
@@ -696,6 +868,10 @@ private struct LocalMessageView: View {
       Text(message.role == .user ? "You" : "AI Spotlight")
         .font(.caption.weight(.semibold))
         .foregroundStyle(.secondary)
+
+      if message.role == .user, let data = message.imagePreview, let image = NSImage(data: data) {
+        SentImagePreview(image: image)
+      }
 
       if message.content.isEmpty {
         ProgressView()
@@ -730,6 +906,21 @@ private struct LocalMessageView: View {
 
   private var renderedMarkdown: AttributedString {
     (try? AttributedString(markdown: message.content)) ?? AttributedString(message.content)
+  }
+}
+
+struct SentImagePreview: View {
+  let image: NSImage
+
+  var body: some View {
+    let scale = min(1, 120 / max(1, image.size.width), 96 / max(1, image.size.height))
+    Image(nsImage: image)
+      .resizable()
+      .scaledToFit()
+      .frame(width: image.size.width * scale, height: image.size.height * scale)
+      .clipShape(RoundedRectangle(cornerRadius: 8))
+      .overlay(RoundedRectangle(cornerRadius: 8).strokeBorder(.primary.opacity(0.1)))
+      .accessibilityLabel("Image attached to your message")
   }
 }
 
@@ -769,7 +960,11 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Next recent chat", keys: "⌃ Tab")
           shortcut("Open Settings", keys: "⌘ ,")
           shortcut("Send from the message field", keys: "Return")
+          shortcut("Hide inactive tools", keys: "⇧ ⌘ H")
           shortcut("Enable Web Search", keys: "/search")
+          shortcut("Capture a screen region", keys: "/screen")
+          Text("/screen with a question captures and sends. /screen alone attaches a screenshot and waits for a question.")
+            .font(.caption).foregroundStyle(.secondary)
 
           Divider()
 
@@ -875,6 +1070,7 @@ struct SettingsView: View {
   @ObservedObject private var settings: CloudSettingsModel
   @State private var openAIAPIKey = ""
   @State private var anthropicAPIKey = ""
+  @State private var geminiAPIKey = ""
   @State private var formError: String?
 
   init(settings: CloudSettingsModel = .shared) {
@@ -883,7 +1079,9 @@ struct SettingsView: View {
 
   var body: some View {
     TabView {
-      Form { LocalModelManagerSection() }
+      Form {
+        LocalModelManagerSection()
+      }
         .formStyle(.grouped)
         .tabItem { Label("Local Models", systemImage: "desktopcomputer") }
       cloudForm
@@ -947,6 +1145,8 @@ struct SettingsView: View {
           Text(accountError).font(.caption).foregroundStyle(.red)
         }
       }
+
+      ScreenSettingsSection(settings: .shared)
 
       WebSearchSettingsSection(settings: .shared)
 
@@ -1038,6 +1238,13 @@ struct SettingsView: View {
 
         credentialButtons(provider: .anthropic, apiKey: $anthropicAPIKey)
         connectionStatus(for: .anthropic)
+      }
+
+      Section("Gemini API Key") {
+        SecureField(settings.hasAPIKey(for: .gemini) ? "Replace stored API key" : "API key", text: $geminiAPIKey)
+          .textFieldStyle(.roundedBorder)
+        credentialButtons(provider: .gemini, apiKey: $geminiAPIKey)
+        connectionStatus(for: .gemini)
       }
 
       if let formError {

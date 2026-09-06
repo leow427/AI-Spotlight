@@ -38,6 +38,17 @@ final class ChatPersistenceTests: XCTestCase {
     }
   }
 
+  func testImagePreviewIsExcludedFromEncodedMessages() throws {
+    var message = ChatMessage(role: .user, content: "Describe this image")
+    message.imagePreview = Data("session-only image bytes".utf8)
+    let data = try JSONEncoder().encode(message)
+    let object = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    XCTAssertEqual(Set(object.keys), ["id", "role", "content", "createdAt"])
+    let restored = try JSONDecoder().decode(ChatMessage.self, from: data)
+    XCTAssertEqual(restored.content, message.content)
+    XCTAssertNil(restored.imagePreview)
+  }
+
   private func makeTemporaryDirectory() throws -> URL {
     let directory = FileManager.default.temporaryDirectory
       .appending(path: "ChatPersistenceTests-\(UUID().uuidString)", directoryHint: .isDirectory)

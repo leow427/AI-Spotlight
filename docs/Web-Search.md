@@ -7,26 +7,67 @@ preferences or chat history. Brave API usage is separate from model-provider usa
 The search icon starts hidden. Add and enable it with **+ → Web Search** or a
 leading **/search** command. It pops into place with a short spring animation as
 the text field moves over. Its expanding slot keeps the icon clear of the text
-throughout the animation; Reduce Motion disables the spring.
+throughout the animation; Reduce Motion disables the spring. Leading tool commands
+can be combined in either order: `/screen /search question` or
+`/search /screen question`. Submission resolves both commands together before
+capture or generation, including immediate Return after pasting. Commands inside
+the actual question remain literal text.
 
 Once added, the icon toggles grey when off and light green when on. Search stays
 selected for subsequent messages until turned off. **+ → Remove Web Search**
 disables search and hides the icon; a new chat also resets it. The composer keeps
 the same height whether the icon is hidden or visible.
 
+Press **⌘⇧H** while typing to hide Web Search and Screen icons that are switched
+off. Active tools stay visible; the shortcut preserves the draft and any attached
+screenshot, and is inactive during a request or screen capture. You can also use
+**+ → Hide Inactive Tools**. Add tools again through **+**, **/search**, or
+**/screen**. Each hidden icon returns 40 points of space to the text field.
+
+The plus menu uses 16-point copies of the tool images, so native menu items stay
+compact without changing the icons in the composer.
+
+![Compact tool menu labels](images/compact-tool-icons.png)
+
 ![Composer with Web Search off and on](images/web-search-composer.png)
 
 This screenshot is an intentional checked-in UI reference; build outputs and test
 result bundles remain outside the repository.
 
-In Local mode, Brave receives the current question and the local model generates
-the answer. Cloud mode passes the retrieved evidence to the selected provider,
+For requests without Screen, Local mode sends the current question to Brave and
+the local model generates the answer. Cloud mode passes evidence to the provider,
 including ChatGPT via the existing Codex bridge. Auto uses the same Brave search
 and keeps choosing the model based on task complexity and context size. Merely
 mentioning web search in ordinary text does not enable the tool.
 
-Only the current question is sent to Brave, normalized to its 400-character /
-50-word query limit. The model still receives the full question. Conversation
+With Screen attached, the ordinarily selected model resolves the question using
+local OCR or the image and generates one focused query. Brave retrieves evidence,
+then that same model answers the original question with the screenshot context and
+sources. Readable OCR avoids sending pixels when visual interpretation is not
+needed. Visual questions use the image in planning and answering. Search controls
+retrieval, not model selection; there is no cross-model handoff.
+
+The panel shows Preparing search query and Searching with Brave. Intermediate
+planning is hidden and is never saved as a chat turn. Empty, invalid or oversized
+queries retain the draft/image rather than silently searching a vague question.
+Stop applies throughout. See [Screen](Screen-Skill.md) for consent, context and
+migration behavior, and [local model setup](Local-Model-Selection.md) for packages.
+
+Derived queries can contain relevant screen details. Prompts instruct the model
+to treat screen content as untrusted data and omit unrelated or sensitive details.
+These instructions do not guarantee perfect relevance or redaction. Full OCR,
+pixels and history are never attached to Brave. Evidence is fitted to the selected
+model's context before the final answer. There is one extra model call for a
+screenshot query; its model stays loaded across both stages.
+
+![A Screen reply with Web Search sources](images/screen-search.png)
+
+This native panel regression uses deterministic screenshot, search, and response
+fixtures; it demonstrates tool integration rather than model answer quality.
+
+Without Screen, only the current question is sent to Brave, normalized to its
+400-character / 50-word query limit. With Screen, the refined query must fit the
+same limits; trivial answers such as "Yes." are rejected. The final model still receives the full original question. Conversation
 history and model credentials are not sent to Brave. Search uses an ephemeral
 URLSession with redirects disabled and a 30-second timeout.
 

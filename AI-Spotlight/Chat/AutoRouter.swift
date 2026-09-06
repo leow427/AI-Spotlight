@@ -92,6 +92,7 @@ struct AutoRouter: Sendable {
     let contextMessages: [ChatMessage]
     let localModel: LocalModel?
     let localCapabilities: ModelCapabilities
+    let additionalInputTokens: Int
     let cloud: CloudConfiguration?
 
     init(
@@ -100,7 +101,8 @@ struct AutoRouter: Sendable {
       prompt: String,
       contextMessages: [ChatMessage],
       localModel: LocalModel?,
-      localCapabilities: ModelCapabilities = .localDefault,
+      localCapabilities: ModelCapabilities? = nil,
+      additionalInputTokens: Int = 0,
       cloud: CloudConfiguration?
     ) {
       self.selectedMode = selectedMode
@@ -108,7 +110,13 @@ struct AutoRouter: Sendable {
       self.prompt = prompt
       self.contextMessages = contextMessages
       self.localModel = localModel
-      self.localCapabilities = localCapabilities
+      self.additionalInputTokens = max(0, min(additionalInputTokens, 1_000_000))
+      self.localCapabilities = localCapabilities ?? ModelCapabilities(
+        maximumContextTokens: localModel?.visionConfiguration?.contextWindow
+          ?? localModel?.catalogDescriptor?.recommendedContextSize ?? ModelContextPolicy.localContextWindow,
+        supportsCoding: localModel?.catalogDescriptor?.supportsVision == true,
+        supportsWebSearch: false,
+        reasoningLevel: localModel?.catalogDescriptor?.supportsVision == true ? .advanced : .basic)
       self.cloud = cloud
     }
   }
@@ -204,7 +212,7 @@ struct AutoRouter: Sendable {
     )
     // This is a cheap conservative routing estimate. Local acceptance uses the
     // selected GGUF's real template/tokenizer and effective runtime context.
-    let localInputCount = candidateMessages.reduce(0) { $0 + $1.content.utf8.count + 32 }
+    let localInputCount = candidateMessages.reduce(request.additionalInputTokens) { $0 + $1.content.utf8.count + 32 }
     if localInputCount > localBudget.availableInputTokens {
       var cloudBudget = ModelContextPolicy.cloud(provider: cloud.provider, modelID: cloud.modelID)
       cloudBudget = ContextBudget(

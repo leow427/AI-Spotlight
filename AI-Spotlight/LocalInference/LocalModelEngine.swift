@@ -5,6 +5,7 @@ struct LocalModel: Codable, Sendable, Equatable, Identifiable {
   let displayName: String
   let fileURL: URL
   var catalogDescriptor: LocalModelDescriptor? = nil
+  var visionConfiguration: LocalVisionConfiguration? = nil
 }
 
 struct LocalModelRequest: Sendable, Equatable {

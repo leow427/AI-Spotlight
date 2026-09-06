@@ -62,6 +62,30 @@
 		AB0200000000000000000006 /* BundledLocalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000006 /* BundledLocalModels.swift */; };
 		AB0200000000000000000007 /* LocalModelManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000007 /* LocalModelManagerView.swift */; };
 		AB0300000000000000000002 /* LocalModelSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0300000000000000000001 /* LocalModelSelectionTests.swift */; };
+		D837B30691584362AC890087 /* ScreenAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C914AEA42F47A9209266F278 /* ScreenAttachment.swift */; };
+		9FD261360A6825094B8FB5CA /* ScreenCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFFE38743C4F2899C932DC /* ScreenCaptureService.swift */; };
+		BADDBDB66366EC60115687D5 /* ScreenComposerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3AE294B06E2598E6419AF1E /* ScreenComposerCoordinator.swift */; };
+		E616EB8F602796CEECD7DDD4 /* ScreenControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F225835FFF11A442B82A63B4 /* ScreenControls.swift */; };
+		3ED4FD09347F3C0EA6A0C43D /* ScreenCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60390EBB47C5984E535868B3 /* ScreenCaptureTests.swift */; };
+		E113237281A050519B8D8C0C /* ScreenOCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19D9F55C151327EBB896CDD /* ScreenOCRService.swift */; };
+		4A1B110A0BF0B8AED87B3572 /* ScreenImagePreprocessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC739E5346C6C117334001F2 /* ScreenImagePreprocessor.swift */; };
+		8D4A4990E8B9E4E923600F9E /* ScreenOCRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3760C4828242374C1E75975C /* ScreenOCRTests.swift */; };
+		83D50AC929DE904DAFAD9A60 /* ScreenRoutingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 719D8CBD719A760BFDB4DF71 /* ScreenRoutingPolicy.swift */; };
+		4305A94A1AB1814FEA59FBFB /* ScreenSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D078BE01A99A60B0E8E696A /* ScreenSettings.swift */; };
+		0A2F49485CA3846EE1AC4B0E /* ScreenRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95BC0902BF24E66AE8E86868 /* ScreenRoutingTests.swift */; };
+		85E2E0F86DCBFAAE24CCDACC /* MultimodalContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 703B0466136101680BB0167F /* MultimodalContent.swift */; };
+		F368AD14CC3718DC0F973BFC /* GeminiContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31C7C96CC8B68E10665AB266 /* GeminiContentClient.swift */; };
+		3380FAAA1FD88010F2C908EE /* LocalMultimodalClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27CB37860D9B990072ECD9D /* LocalMultimodalClient.swift */; };
+		2F715B4E2EEB2D2248A01C88 /* ScreenProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C542D9E2DAF3988DEF908F68 /* ScreenProviderTests.swift */; };
+		7DA95EF27FA01D16D79D8564 /* ScreenTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFFAEF314B962C515678BC9 /* ScreenTestSupport.swift */; };
+		32E976745B12847D6DFF8EE0 /* LlamaServerVisionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5EF3ECB645A8E5BE4CCF4D /* LlamaServerVisionEngine.swift */; };
+		82A42145C9B572B1BAFD7D74 /* LocalVisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83494E8BB06B4D31BD549663 /* LocalVisionTests.swift */; };
+		905F6E0F59B1620D167CED63 /* ScreenPromptContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BB01ACD0F227248768A381 /* ScreenPromptContext.swift */; };
+		B5173475932912D82BC87FC7 /* ScreenConnectivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EE3DCA5464103C0AD1533B9 /* ScreenConnectivity.swift */; };
+		0AF3BC1AE08E378481D15AE6 /* ScreenPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D267E54BF81B4240CEC2339 /* ScreenPipelineTests.swift */; };
+		52FB913A027D7DEBFD96E69D /* ScreenViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF75EE2F32B58204588607B5 /* ScreenViewTests.swift */; };
+		749A74810619BC2371A900AB /* ScreenNativeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B9B38819695DE62E80CBE1 /* ScreenNativeSmokeTests.swift */; };
+		0C22F41F6C6A79FFFDD2AB4C /* AppBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8423E65D659544F0E0BC57F6 /* AppBundleTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -132,6 +156,30 @@
 		AB0100000000000000000006 /* BundledLocalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledLocalModels.swift; sourceTree = "<group>"; };
 		AB0100000000000000000007 /* LocalModelManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManagerView.swift; sourceTree = "<group>"; };
 		AB0300000000000000000001 /* LocalModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelSelectionTests.swift; sourceTree = "<group>"; };
+		C914AEA42F47A9209266F278 /* ScreenAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenAttachment.swift"; sourceTree = SOURCE_ROOT; };
+		4CDFFE38743C4F2899C932DC /* ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenCaptureService.swift"; sourceTree = SOURCE_ROOT; };
+		E3AE294B06E2598E6419AF1E /* ScreenComposerCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenComposerCoordinator.swift"; sourceTree = SOURCE_ROOT; };
+		F225835FFF11A442B82A63B4 /* ScreenControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenControls.swift"; sourceTree = SOURCE_ROOT; };
+		60390EBB47C5984E535868B3 /* ScreenCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenCaptureTests.swift"; sourceTree = SOURCE_ROOT; };
+		F19D9F55C151327EBB896CDD /* ScreenOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenOCRService.swift"; sourceTree = SOURCE_ROOT; };
+		DC739E5346C6C117334001F2 /* ScreenImagePreprocessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenImagePreprocessor.swift"; sourceTree = SOURCE_ROOT; };
+		3760C4828242374C1E75975C /* ScreenOCRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenOCRTests.swift"; sourceTree = SOURCE_ROOT; };
+		719D8CBD719A760BFDB4DF71 /* ScreenRoutingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenRoutingPolicy.swift"; sourceTree = SOURCE_ROOT; };
+		9D078BE01A99A60B0E8E696A /* ScreenSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenSettings.swift"; sourceTree = SOURCE_ROOT; };
+		95BC0902BF24E66AE8E86868 /* ScreenRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenRoutingTests.swift"; sourceTree = SOURCE_ROOT; };
+		703B0466136101680BB0167F /* MultimodalContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Chat/MultimodalContent.swift"; sourceTree = SOURCE_ROOT; };
+		31C7C96CC8B68E10665AB266 /* GeminiContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Cloud/GeminiContentClient.swift"; sourceTree = SOURCE_ROOT; };
+		E27CB37860D9B990072ECD9D /* LocalMultimodalClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/LocalInference/LocalMultimodalClient.swift"; sourceTree = SOURCE_ROOT; };
+		C542D9E2DAF3988DEF908F68 /* ScreenProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenProviderTests.swift"; sourceTree = SOURCE_ROOT; };
+		6FFFAEF314B962C515678BC9 /* ScreenTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenTestSupport.swift"; sourceTree = SOURCE_ROOT; };
+		5B5EF3ECB645A8E5BE4CCF4D /* LlamaServerVisionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift"; sourceTree = SOURCE_ROOT; };
+		83494E8BB06B4D31BD549663 /* LocalVisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/LocalVisionTests.swift"; sourceTree = SOURCE_ROOT; };
+		94BB01ACD0F227248768A381 /* ScreenPromptContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenPromptContext.swift"; sourceTree = SOURCE_ROOT; };
+		1EE3DCA5464103C0AD1533B9 /* ScreenConnectivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenConnectivity.swift"; sourceTree = SOURCE_ROOT; };
+		5D267E54BF81B4240CEC2339 /* ScreenPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenPipelineTests.swift"; sourceTree = SOURCE_ROOT; };
+		AF75EE2F32B58204588607B5 /* ScreenViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenViewTests.swift"; sourceTree = SOURCE_ROOT; };
+		41B9B38819695DE62E80CBE1 /* ScreenNativeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenNativeSmokeTests.swift"; sourceTree = SOURCE_ROOT; };
+		8423E65D659544F0E0BC57F6 /* AppBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/AppBundleTests.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -156,6 +204,30 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				8423E65D659544F0E0BC57F6 /* AppBundleTests.swift */,
+				41B9B38819695DE62E80CBE1 /* ScreenNativeSmokeTests.swift */,
+				AF75EE2F32B58204588607B5 /* ScreenViewTests.swift */,
+				5D267E54BF81B4240CEC2339 /* ScreenPipelineTests.swift */,
+				1EE3DCA5464103C0AD1533B9 /* ScreenConnectivity.swift */,
+				94BB01ACD0F227248768A381 /* ScreenPromptContext.swift */,
+				83494E8BB06B4D31BD549663 /* LocalVisionTests.swift */,
+				5B5EF3ECB645A8E5BE4CCF4D /* LlamaServerVisionEngine.swift */,
+				6FFFAEF314B962C515678BC9 /* ScreenTestSupport.swift */,
+				C542D9E2DAF3988DEF908F68 /* ScreenProviderTests.swift */,
+				E27CB37860D9B990072ECD9D /* LocalMultimodalClient.swift */,
+				31C7C96CC8B68E10665AB266 /* GeminiContentClient.swift */,
+				703B0466136101680BB0167F /* MultimodalContent.swift */,
+				95BC0902BF24E66AE8E86868 /* ScreenRoutingTests.swift */,
+				9D078BE01A99A60B0E8E696A /* ScreenSettings.swift */,
+				719D8CBD719A760BFDB4DF71 /* ScreenRoutingPolicy.swift */,
+				3760C4828242374C1E75975C /* ScreenOCRTests.swift */,
+				DC739E5346C6C117334001F2 /* ScreenImagePreprocessor.swift */,
+				F19D9F55C151327EBB896CDD /* ScreenOCRService.swift */,
+				60390EBB47C5984E535868B3 /* ScreenCaptureTests.swift */,
+				F225835FFF11A442B82A63B4 /* ScreenControls.swift */,
+				E3AE294B06E2598E6419AF1E /* ScreenComposerCoordinator.swift */,
+				4CDFFE38743C4F2899C932DC /* ScreenCaptureService.swift */,
+				C914AEA42F47A9209266F278 /* ScreenAttachment.swift */,
 				A70000000000000000000002 /* AI-Spotlight */,
 				A70000000000000000000005 /* AI-SpotlightTests */,
 				A70000000000000000000006 /* Products */,
@@ -386,6 +458,20 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				B5173475932912D82BC87FC7 /* ScreenConnectivity.swift in Sources */,
+				905F6E0F59B1620D167CED63 /* ScreenPromptContext.swift in Sources */,
+				32E976745B12847D6DFF8EE0 /* LlamaServerVisionEngine.swift in Sources */,
+				3380FAAA1FD88010F2C908EE /* LocalMultimodalClient.swift in Sources */,
+				F368AD14CC3718DC0F973BFC /* GeminiContentClient.swift in Sources */,
+				85E2E0F86DCBFAAE24CCDACC /* MultimodalContent.swift in Sources */,
+				4305A94A1AB1814FEA59FBFB /* ScreenSettings.swift in Sources */,
+				83D50AC929DE904DAFAD9A60 /* ScreenRoutingPolicy.swift in Sources */,
+				4A1B110A0BF0B8AED87B3572 /* ScreenImagePreprocessor.swift in Sources */,
+				E113237281A050519B8D8C0C /* ScreenOCRService.swift in Sources */,
+				E616EB8F602796CEECD7DDD4 /* ScreenControls.swift in Sources */,
+				BADDBDB66366EC60115687D5 /* ScreenComposerCoordinator.swift in Sources */,
+				9FD261360A6825094B8FB5CA /* ScreenCaptureService.swift in Sources */,
+				D837B30691584362AC890087 /* ScreenAttachment.swift in Sources */,
 				C10000000000000000000002 /* ChatContext.swift in Sources */,
 				B60000000000000000000101 /* BraveSearchClient.swift in Sources */,
 				B60000000000000000000102 /* WebSearchSettings.swift in Sources */,
@@ -432,6 +518,16 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0C22F41F6C6A79FFFDD2AB4C /* AppBundleTests.swift in Sources */,
+				749A74810619BC2371A900AB /* ScreenNativeSmokeTests.swift in Sources */,
+				52FB913A027D7DEBFD96E69D /* ScreenViewTests.swift in Sources */,
+				0AF3BC1AE08E378481D15AE6 /* ScreenPipelineTests.swift in Sources */,
+				82A42145C9B572B1BAFD7D74 /* LocalVisionTests.swift in Sources */,
+				7DA95EF27FA01D16D79D8564 /* ScreenTestSupport.swift in Sources */,
+				2F715B4E2EEB2D2248A01C88 /* ScreenProviderTests.swift in Sources */,
+				0A2F49485CA3846EE1AC4B0E /* ScreenRoutingTests.swift in Sources */,
+				8D4A4990E8B9E4E923600F9E /* ScreenOCRTests.swift in Sources */,
+				3ED4FD09347F3C0EA6A0C43D /* ScreenCaptureTests.swift in Sources */,
 				B30000000000000000000002 /* RequestLifecycleTests.swift in Sources */,
 				B60000000000000000000402 /* WebSearchTests.swift in Sources */,
 				C20000000000000000000002 /* ChatContextTests.swift in Sources */,
@@ -515,6 +611,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.leow427.AISpotlight;
 				PRODUCT_NAME = PrimaryAgent;
@@ -532,6 +629,7 @@
 				DEAD_CODE_STRIPPING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/../Frameworks";
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.leow427.AISpotlight;
 				PRODUCT_NAME = PrimaryAgent;

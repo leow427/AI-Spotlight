@@ -102,12 +102,15 @@ actor CloudModelCatalog {
   }
 
   private func makeRequest(provider: CloudProviderID, apiKey: String) throws -> URLRequest {
-    let url = provider == .openAI ? openAIModelsURL : anthropicModelsURL
+    let url = provider == .gemini ? URL(string: "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000")!
+      : (provider == .openAI ? openAIModelsURL : anthropicModelsURL)
     var request = URLRequest(url: url)
     request.httpMethod = "GET"
     switch provider {
     case .chatGPT:
       throw CodexError.invalidResponse
+    case .gemini:
+      request.setValue(apiKey, forHTTPHeaderField: "x-goog-api-key")
     case .openAI:
       request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
     case .anthropic:
@@ -124,6 +127,16 @@ actor CloudModelCatalog {
     switch provider {
     case .chatGPT:
       throw CodexError.invalidResponse
+    case .gemini:
+      struct Response: Decodable {
+        struct Model: Decodable { let name: String; let displayName: String?; let supportedGenerationMethods: [String]? }
+        let models: [Model]
+      }
+      let response = try JSONDecoder().decode(Response.self, from: data)
+      return response.models.filter { $0.supportedGenerationMethods?.contains("generateContent") == true }.map {
+        let id = $0.name.hasPrefix("models/") ? String($0.name.dropFirst(7)) : $0.name
+        return CloudModel(id: id, displayName: $0.displayName ?? id, provider: .gemini)
+      }
     case .openAI:
       struct Response: Decodable {
         struct Model: Decodable { let id: String }

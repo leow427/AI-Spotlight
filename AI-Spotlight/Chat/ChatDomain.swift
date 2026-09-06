@@ -21,6 +21,8 @@ struct ChatRequest: Sendable, Equatable {
   let sessionID: UUID
   let messages: [ChatMessage]
   let route: Route
+  var image: PreparedScreenImage? = nil
+  var allowsCloudImages = false
 }
 
 enum ChatEvent: Sendable, Equatable {
@@ -43,6 +45,12 @@ struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   var content: String
   var searchSources: [WebSearchSource]?
   let createdAt: Date
+  // Session-only UI data: never serialize screenshot pixels or send them as chat text.
+  var imagePreview: Data? = nil
+
+  private enum CodingKeys: String, CodingKey {
+    case id, role, content, searchSources, createdAt
+  }
 
   init(id: UUID = UUID(), role: Role, content: String, createdAt: Date = .now, searchSources: [WebSearchSource]? = nil) {
     self.id = id

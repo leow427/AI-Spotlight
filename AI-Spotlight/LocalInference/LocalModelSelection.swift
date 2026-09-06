@@ -7,7 +7,14 @@ enum LocalModelCompatibility {
   static let minimumContext = 4_096
 
   static func supports(_ model: LocalModelDescriptor) -> Bool {
-    model.minimumLlamaBuild <= llamaBuild && model.architecture == "qwen2"
+    if model.supportsVision {
+      guard let profile = model.resolvedProfile else { return false }
+      return model.runtimeBuild == LocalVisionRuntime.build && model.minimumLlamaBuild <= LocalVisionRuntime.build
+        && model.architecture == profile.architecture && model.chatTemplate == profile.chatTemplate
+        && model.parameterBillions == profile.parameters
+        && profile.quantizations.contains(model.quantization) && model.recommendedContextSize == 8192
+    }
+    return model.minimumLlamaBuild <= llamaBuild && model.architecture == "qwen2"
       && model.chatTemplate == "chatml"
       && ["Q4_K_M", "Q5_K_M", "Q8_0"].contains(model.quantization)
       && model.recommendedContextSize >= minimumContext
@@ -49,6 +56,16 @@ struct LocalModelRecommendations: Sendable {
   let faster: LocalModelAssessment?
   let smarter: LocalModelAssessment?
 
+  /// Best suitable choices only; unavailable entries never fill the top ten.
+  var rankedChoices: [LocalModelAssessment] {
+    Array(assessments.filter(\.fit.canRun).sorted(by: LocalModelSelector.hardwareOrder).prefix(10))
+  }
+
+  var otherAssessments: [LocalModelAssessment] {
+    let visible = Set(rankedChoices.map(\.id))
+    return assessments.filter { !visible.contains($0.id) }.sorted(by: LocalModelSelector.hardwareOrder)
+  }
+
   func fasterAlternative(to modelID: String) -> LocalModelAssessment? {
     guard let current = assessments.first(where: { $0.id == modelID }) else { return nil }
     return assessments.filter {
@@ -86,6 +103,12 @@ enum LocalModelSelector {
                                      faster: faster, smarter: smarter)
   }
 
+  static func hardwareOrder(_ lhs: LocalModelAssessment, _ rhs: LocalModelAssessment) -> Bool {
+    if lhs.fit.canRun != rhs.fit.canRun { return lhs.fit.canRun }
+    if lhs.isResponsive != rhs.isResponsive { return lhs.isResponsive }
+    return qualityOrder(lhs, rhs)
+  }
+
   static func qualityOrder(_ lhs: LocalModelAssessment, _ rhs: LocalModelAssessment) -> Bool {
     if lhs.model.qualityScore != rhs.model.qualityScore {
       return lhs.model.qualityScore > rhs.model.qualityScore
@@ -108,7 +131,7 @@ enum LocalModelSelector {
       LocalModelAssessment(model: model, fit: fit, reason: reason, tokensPerSecond: speed,
                            timeToFirstToken: ttft, isMeasured: exact != nil)
     }
-    guard (try? model.validate()) != nil, LocalModelCompatibility.supports(model) else {
+    guard model.supportsVision, (try? model.validate()) != nil, LocalModelCompatibility.supports(model) else {
       return result(.unsupported, "Requires an unsupported architecture, chat format, context, or llama.cpp build.")
     }
     // The bridge uses GPU offload when Metal exists. Discrete GPU memory needs
@@ -126,7 +149,7 @@ enum LocalModelSelector {
       return result(.memory, "Does not leave enough memory for macOS and other apps.")
     }
     // Installation copies the verified download before committing the library.
-    let requiredDisk = model.expectedByteCount * 2 + 2 * LocalHardwareProfile.gib
+    let requiredDisk = model.downloadByteCount * 2 + 2 * LocalHardwareProfile.gib
     guard installed || hardware.availableDiskBytes >= requiredDisk else {
       return result(.disk, "Needs room for the download, installation copy, and 2 GB of free space.")
     }

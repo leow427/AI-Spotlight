@@ -193,6 +193,9 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     guard let installedModel = installationStore.installedModel() else {
       throw LocalInferenceError.noModelInstalled
     }
+    guard !installedModel.supportsVision else {
+      throw LocalInferenceError.bridgeFailure("This vision profile uses llama-server instead of the embedded text engine.")
+    }
     if let engineHandle, loadedModelURL == installedModel.fileURL {
       return engineHandle
     }
@@ -201,8 +204,10 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     var requestedContext = contextSize
     if let descriptor = installedModel.catalogDescriptor {
       let hardware = LocalHardwareProfile.detect(modelsDirectory: installationStore.modelsDirectoryURL)
-      let assessment = LocalModelSelector.assess(descriptor, hardware: hardware, installed: true)
-      guard assessment.fit.canRun else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
+      guard LocalModelCompatibility.supports(descriptor), hardware.physicalMemory >= descriptor.minimumMemory,
+            hardware.inferenceMemoryBudget >= descriptor.estimatedRuntimeMemory else {
+        throw LocalInferenceError.bridgeFailure("The installed text model no longer fits this Mac or runtime. Choose a supported model in Local Models.")
+      }
       requestedContext = Int32(descriptor.recommendedContextSize)
     }
     let newHandle = installedModel.fileURL.path.withCString { path in
