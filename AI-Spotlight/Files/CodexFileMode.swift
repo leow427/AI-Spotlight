@@ -18,17 +18,17 @@ enum CodexFileMode {
       "config": .object(["project_doc_max_bytes": .number(0), "features.skip_host_skill_discovery": .bool(true),
         "features.shell_tool": .bool(false), "features.unified_exec": .bool(false),
         "features.workspace_dependencies": .bool(false), "features.code_mode": .bool(false),
-        "features.code_mode_host": .bool(false), "features.artifact": .bool(false), "features.memories": .bool(false)]),
+        "features.code_mode_host": .bool(true), "features.artifact": .bool(false), "features.memories": .bool(false)]),
     ])
   }
 
   static func sandboxPolicy(selection: WorkspaceSelection) -> CodexValue {
     // Single-file attachments never grant their parent to a model. The directory cwd is only
     // thread metadata: environments=[] leaves all file access with AgentFileTools.
+    // Do not send the retired workspaceWrite.readOnlyAccess field. Read restrictions
+    // are enforced by WorkspaceAccess, independently of native sandbox schema versions.
     .object(["type": .string("workspaceWrite"),
       "writableRoots": .array(selection.attachments.map { .string($0.url.path) }),
-      "readOnlyAccess": .object(["type": .string("restricted"), "includePlatformDefaults": .bool(false),
-        "readableRoots": .array(selection.attachments.map { .string($0.url.path) })]),
       "networkAccess": .bool(false), "excludeSlashTmp": .bool(true), "excludeTmpdirEnvVar": .bool(true)])
   }
 
@@ -59,13 +59,20 @@ enum CodexFileMode {
 enum CodexFileModeSupport {
   static func validateSchema(at directory: URL) throws {
     let thread = directory.appendingPathComponent("v2/ThreadStartParams.json")
-    let call = directory.appendingPathComponent("v2/DynamicToolCallParams.json")
+    // Server-initiated requests are emitted at the schema root by current CLIs.
+    // Older bundles can place them under v2; validate the contract in either layout.
+    let call = ["DynamicToolCallParams.json", "v2/DynamicToolCallParams.json"]
+      .map { directory.appendingPathComponent($0) }
+      .first { FileManager.default.fileExists(atPath: $0.path) }
+    let callSchema = try call.map { try JSONDecoder().decode(CodexValue.self, from: Data(contentsOf: $0)) }
+    let required = Set(callSchema?["required"].array?.compactMap(\.string) ?? [])
     let schema = try JSONDecoder().decode(CodexValue.self, from: Data(contentsOf: thread))
     guard schema["properties"]["environments"]["description"].string?.contains("Empty disables environment access") == true,
           schema["properties"]["dynamicTools"] != .null,
           schema["definitions"]["DynamicToolSpec"] != .null,
-          FileManager.default.fileExists(atPath: call.path) else {
-      throw FileModeError.operation("Update Codex to use File Mode safely. This version cannot isolate file tools. Ordinary chat is still available.")
+          Set(["arguments", "callId", "threadId", "tool", "turnId"]).isSubset(of: required),
+          ["callId", "threadId", "tool", "turnId"].allSatisfy({ callSchema?["properties"][$0]["type"].string == "string" }) else {
+      throw FileModeError.operation("This Codex version does not expose the isolated file tools AI Spotlight needs. Ordinary chat is still available.")
     }
   }
 }

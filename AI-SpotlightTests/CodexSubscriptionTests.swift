@@ -19,6 +19,9 @@ final class CodexSubscriptionTests: XCTestCase {
     XCTAssertNil(configuration.environment["OPENAI_API_KEY"])
     XCTAssertNil(configuration.environment["CODEX_API_KEY"])
     XCTAssertNil(configuration.environment["OPENAI_BASE_URL"])
+    XCTAssertTrue(configuration.arguments.contains("features.code_mode_host=false"))
+    XCTAssertTrue(CodexRuntimeConfiguration.fileMode.arguments.contains("features.code_mode_host=true"))
+    XCTAssertEqual(CodexRuntimeConfiguration.fileMode.directory, CodexRuntimeConfiguration.live.directory)
     for setting in [
       "forced_login_method=\"chatgpt\"", "cli_auth_credentials_store=\"keyring\"",
       "model_provider=\"openai\"", "web_search=\"disabled\"", "history.persistence=\"none\"",
@@ -57,6 +60,68 @@ final class CodexSubscriptionTests: XCTestCase {
     await server.disconnect()
   }
 
+  func testFileModeProbeUsesIsolatedEnvironmentAndWorkingDirectory() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let executable = try makeExecutable(in: root, script: """
+      #!/bin/sh
+      [ "$1" = app-server ] && [ "$2" = generate-json-schema ] || exit 20
+      [ "$CODEX_HOME" = "\(root.path)/runtime" ] || exit 21
+      [ "$PWD" -ef "$4" ] || exit 22
+      [ -z "$DYLD_INSERT_LIBRARIES" ] || exit 23
+      /bin/mkdir -p "$4/v2"
+      /usr/bin/printf '%s' '{"properties":{"environments":{"description":"Empty disables environment access"},"dynamicTools":{}},"definitions":{"DynamicToolSpec":{}}}' > "$4/v2/ThreadStartParams.json"
+      /usr/bin/printf '%s' '{"required":["arguments","callId","threadId","tool","turnId"],"properties":{"callId":{"type":"string"},"threadId":{"type":"string"},"tool":{"type":"string"},"turnId":{"type":"string"}}}' > "$4/DynamicToolCallParams.json"
+      """)
+    let server = CodexAppServer(configuration: .init(directory: root.appending(path: "runtime")), executable: { executable })
+    try await server.prepareFileMode()
+  }
+
+  func testFileModeSchemaAcceptsBothLayoutsAndRejectsMissingSafetyContracts() throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    try FileManager.default.createDirectory(at: root.appending(path: "v2"), withIntermediateDirectories: true)
+    let thread = root.appending(path: "v2/ThreadStartParams.json")
+    let validThread = #"{"properties":{"environments":{"description":"Empty disables environment access"},"dynamicTools":{}},"definitions":{"DynamicToolSpec":{}}}"#
+    try Data(validThread.utf8).write(to: thread)
+    XCTAssertThrowsError(try CodexFileModeSupport.validateSchema(at: root))
+    for layout in ["DynamicToolCallParams.json", "v2/DynamicToolCallParams.json"] {
+      let call = root.appending(path: layout)
+      try Data(#"{"required":["arguments","callId","threadId","tool","turnId"],"properties":{"callId":{"type":"string"},"threadId":{"type":"string"},"tool":{"type":"string"},"turnId":{"type":"string"}}}"#.utf8).write(to: call)
+      XCTAssertNoThrow(try CodexFileModeSupport.validateSchema(at: root))
+      try Data(validThread.replacingOccurrences(of: "environments", with: "unsupported").utf8).write(to: thread)
+      XCTAssertThrowsError(try CodexFileModeSupport.validateSchema(at: root))
+      try Data(validThread.utf8).write(to: thread)
+      try Data("{}".utf8).write(to: call)
+      XCTAssertThrowsError(try CodexFileModeSupport.validateSchema(at: root))
+      try FileManager.default.removeItem(at: call)
+    }
+  }
+
+  func testFileModeStartupFailureIdentifiesTheCheckWithoutPrescribingAnUpdate() async throws {
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let executable = try makeExecutable(in: root, script: "#!/bin/sh\nexit 42\n")
+    let server = CodexAppServer(configuration: .init(directory: root.appending(path: "runtime")), executable: { executable })
+    do { try await server.prepareFileMode(); XCTFail("Expected a startup error") }
+    catch {
+      XCTAssertEqual(error as? CodexError, .fileModePreparationFailed(42))
+      XCTAssertFalse(error.localizedDescription.contains("Update"))
+    }
+  }
+
+  func testInstalledCodexFileModePreparation() async throws {
+    guard let path = ProcessInfo.processInfo.environment["AI_SPOTLIGHT_CODEX_TEST_PATH"] else {
+      throw XCTSkip("Set AI_SPOTLIGHT_CODEX_TEST_PATH to check the installed CLI through the app-hosted File Mode path.")
+    }
+    let root = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: root) }
+    let server = CodexAppServer(configuration: .init(directory: root.appending(path: "runtime")),
+      executable: { URL(fileURLWithPath: path) })
+    try await server.prepareFileMode()
+    try await server.prepareFileMode()
+  }
+
   func testAppServerEOFAndTimeoutDoNotLeaveRequestsHanging() async throws {
     let root = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -82,6 +147,16 @@ final class CodexSubscriptionTests: XCTestCase {
       XCTFail("Expected disconnection")
     } catch { XCTAssertEqual(error as? CodexError, .disconnected) }
     await server.disconnect()
+  }
+
+  func testSignInAndSignOutInvalidateTheSeparateFileModeConnection() async throws {
+    let changed = expectation(description: "File Mode authentication invalidated")
+    changed.expectedFulfillmentCount = 2
+    let client = CodexSubscriptionClient(transport: MockCodexTransport(loginSuccess: true),
+      authenticationChanged: { changed.fulfill() })
+    _ = try await client.signIn { _ in true }
+    try await client.signOut()
+    await fulfillment(of: [changed], timeout: 1)
   }
 
   func testAPIKeyAccountIsRejectedBySubscriptionRoute() async {

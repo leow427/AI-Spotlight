@@ -79,7 +79,7 @@ final class LocalChatViewModel: ObservableObject {
     engine: any LocalModelEngine,
     files: FileModeCoordinator? = nil,
     fileInference: (any LocalToolInference)? = nil,
-    fileCodex: CodexSubscriptionClient = .live,
+    fileCodex: CodexSubscriptionClient = .fileMode,
     fileCloudAvailability: WorkspaceWritePolicy.CloudCheck? = nil,
     visionEngine: any LocalVisionServing = LlamaServerVisionEngine(),
     modelAdvisor: LocalModelAdvisor? = nil,

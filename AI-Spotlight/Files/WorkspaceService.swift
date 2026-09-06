@@ -106,10 +106,7 @@ actor WorkspaceService {
             let extracted = document.string else { throw FileModeError.unsafeFile }
       text = extracted
     } else {
-      guard !data.contains(0), let decoded = String(data: data, encoding: .utf8) else {
-        throw FileModeError.operation("This file is not readable text or a supported PDF. Choose a text export to analyze it.")
-      }
-      text = decoded
+      text = try WorkspaceDocument.text(path: path, data: data)
     }
     return text
   }
@@ -201,18 +198,17 @@ actor WorkspaceService {
       case .create(let path, let content):
         let value = try current(path)
         guard value.data == nil else { throw FileModeError.conflict }
-        after[path] = WorkspaceFileState(data: Data(content.utf8), mode: 0o600, permissions: .newFile, createdBySpotlight: true)
+        after[path] = WorkspaceFileState(data: try WorkspaceDocument.create(path: path, content: content), mode: 0o600, permissions: .newFile, createdBySpotlight: true)
       case .write(let path, let content):
         let value = try current(path)
-        guard let existing = value.data, !existing.contains(0), String(data: existing, encoding: .utf8) != nil else {
-          throw FileModeError.operation("Only UTF-8 text files can be replaced. Export this document as text to edit it safely.")
-        }
-        after[path] = WorkspaceFileState(data: Data(content.utf8), mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
+        guard let existing = value.data else { throw FileModeError.invalidArguments }
+        after[path] = WorkspaceFileState(data: try WorkspaceDocument.edit(path: path, data: existing, content: content),
+          mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
       case .patch(let path, let old, let new):
         let value = try current(path)
-        guard !old.isEmpty, let data = value.data, !data.contains(0), let text = String(data: data, encoding: .utf8),
-              text.components(separatedBy: old).count == 2 else { throw FileModeError.invalidArguments }
-        after[path] = WorkspaceFileState(data: Data(text.replacingOccurrences(of: old, with: new).utf8), mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
+        guard let data = value.data else { throw FileModeError.invalidArguments }
+        after[path] = WorkspaceFileState(data: try WorkspaceDocument.edit(path: path, data: data, oldText: old, content: new),
+          mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
       case .move(let from, let to):
         guard from != to else { throw FileModeError.invalidArguments }
         let source = try current(from)

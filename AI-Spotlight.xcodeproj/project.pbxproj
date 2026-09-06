@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		14069C4454E33368512BA2E9 /* WorkspaceDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */; };
+		5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */; };
 		0009134391031E5AE19F8236 /* WorkspaceWritePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCD3B0B99B28590527862FF /* WorkspaceWritePolicyTests.swift */; };
 		119F917FD36890D94019A810 /* WorkspaceWritePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139FA002CA94953FE2BB73CF /* WorkspaceWritePolicy.swift */; };
 		41785BB5B087C2B0E954509E /* FileModeRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */; };
@@ -113,6 +115,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceDocumentTests.swift"; sourceTree = SOURCE_ROOT; };
+		933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceDocument.swift"; sourceTree = SOURCE_ROOT; };
 		0FCD3B0B99B28590527862FF /* WorkspaceWritePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceWritePolicyTests.swift"; sourceTree = SOURCE_ROOT; };
 		139FA002CA94953FE2BB73CF /* WorkspaceWritePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceWritePolicy.swift"; sourceTree = SOURCE_ROOT; };
 		E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileModeRuntimeTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -232,6 +236,8 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */,
+				933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */,
 				0FCD3B0B99B28590527862FF /* WorkspaceWritePolicyTests.swift */,
 				139FA002CA94953FE2BB73CF /* WorkspaceWritePolicy.swift */,
 				E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */,
@@ -500,6 +506,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */,
 				119F917FD36890D94019A810 /* WorkspaceWritePolicy.swift in Sources */,
 				7558BA92C2D5C3CE65628DD2 /* LocalFileRuntimeSetup.swift in Sources */,
 				A8D1A4BB12B6A723B10D5435 /* FileModeControls.swift in Sources */,
@@ -569,6 +576,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				14069C4454E33368512BA2E9 /* WorkspaceDocumentTests.swift in Sources */,
 				0009134391031E5AE19F8236 /* WorkspaceWritePolicyTests.swift in Sources */,
 				41785BB5B087C2B0E954509E /* FileModeRuntimeTests.swift in Sources */,
 				32FDB12D7B19D9FC87A3B01D /* FileModeUITests.swift in Sources */,

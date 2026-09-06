@@ -27,7 +27,7 @@ enum WorkspaceWriteClassifier {
     let suffix = (name as NSString).pathExtension
     guard documentExtensions.contains(suffix) || noteNames.contains(name) else { return .protectedWrite }
     let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-    if trimmed.hasPrefix("#!") || trimmed.hasPrefix("<?xml")
+    if WorkspaceDocument.isRTF(path: path, data: data) || trimmed.hasPrefix("#!") || trimmed.hasPrefix("<?xml")
       || ((trimmed.hasPrefix("{") || trimmed.hasPrefix("[")) && (try? JSONSerialization.jsonObject(with: data)) != nil) {
       return .protectedWrite
     }

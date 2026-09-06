@@ -137,6 +137,7 @@ final class FileAgentTests: XCTestCase {
     let turn = try XCTUnwrap(requests.first { $0.0 == "turn/start" }?.1)
     XCTAssertEqual(turn["sandboxPolicy"]["type"].string, "workspaceWrite")
     XCTAssertEqual(turn["sandboxPolicy"]["networkAccess"].bool, false)
+    XCTAssertEqual(turn["sandboxPolicy"]["readOnlyAccess"], .null)
     XCTAssertEqual(turn["sandboxPolicy"]["excludeSlashTmp"].bool, true)
     let changes = await workspace.changeSet()
     XCTAssertEqual(changes.count, 1)
@@ -172,6 +173,7 @@ final class FileAgentTests: XCTestCase {
     let payload = try LocalFileRuntime.payload(messages: [.init(role: "user", content: "Inspect")],
       tools: AgentFileTools.definitions(access: .readOnly), alias: "test")
     XCTAssertEqual(payload["parallel_tool_calls"].bool, false)
+    XCTAssertEqual(payload["temperature"], .number(0))
     XCTAssertEqual(payload["tools"].array?.count, 4)
     XCTAssertEqual(payload["messages"].array?.first?["content"].string, "Inspect")
     XCTAssertThrowsError(try LocalFileRuntime.response(Data(#"{"choices":[{"finish_reason":"length","message":{"role":"assistant","content":"partial"}}]}"#.utf8)))
@@ -185,6 +187,12 @@ final class FileAgentTests: XCTestCase {
     XCTAssertEqual(availability, .available(modelID: "configured-codex"))
     let methods = await transport.methods
     XCTAssertEqual(Set(methods), ["account/read", "model/list"])
+  }
+
+  func testLocalFallbackRetainsTheUnderlyingCodexError() async {
+    let transport = FileAvailabilityTransport(supportsFiles: false)
+    let availability = await CodexSubscriptionClient(transport: transport).fileEditingAvailability(preferredModelID: "codex")
+    XCTAssertEqual(availability, .unavailable(reason: FileModeError.inactive.localizedDescription))
   }
 
   func testMissingAccountUnsupportedRuntimeAndNoModelsAllowLocalFallback() async {

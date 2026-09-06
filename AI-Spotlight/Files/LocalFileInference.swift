@@ -28,7 +28,7 @@ enum LocalFileRuntime {
     let encoded = try JSONEncoder().encode(messages)
     return .object(["model": .string(alias), "messages": try JSONDecoder().decode(CodexValue.self, from: encoded),
       "tools": .array(tools.map(\.llama)), "tool_choice": .string("auto"), "parallel_tool_calls": .bool(false),
-      "stream": .bool(false), "max_tokens": .number(1_024), "temperature": .number(0.2), "cache_prompt": .bool(false)])
+      "stream": .bool(false), "max_tokens": .number(1_024), "temperature": .number(0), "cache_prompt": .bool(false)])
   }
 
   static func response(_ data: Data) throws -> AgentInferenceMessage {

@@ -58,6 +58,7 @@ enum CodexError: LocalizedError, Equatable {
   case notInstalled
   case notSignedIn
   case invalidResponse
+  case fileModePreparationFailed(Int32)
   case disconnected
   case timedOut
   case browserUnavailable
@@ -70,7 +71,9 @@ enum CodexError: LocalizedError, Equatable {
     case .notSignedIn:
       "Sign in with ChatGPT in Settings to use your plan's Codex allowance."
     case .invalidResponse:
-      "Codex returned an unsupported response. Update the Codex CLI and try again."
+      "AI Spotlight could not read the Codex response. Try again."
+    case .fileModePreparationFailed(let status):
+      "AI Spotlight could not prepare Codex File Mode (startup check exited with code \(status)). Restart AI Spotlight and try again."
     case .disconnected:
       "The Codex connection closed. Try again; if it persists, update the Codex CLI."
     case .timedOut:
@@ -88,13 +91,17 @@ struct CodexRuntimeConfiguration: Sendable {
       .appending(path: "AI Spotlight/Codex", directoryHint: .isDirectory)
   )
 
+  static let fileMode = CodexRuntimeConfiguration(directory: live.directory, allowsFileTools: true)
+
   let directory: URL
+  var allowsFileTools = false
 
   static func executableURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let candidates = [environment["AI_SPOTLIGHT_CODEX_PATH"]].compactMap { $0 }
       + ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "\(home)/.local/bin/codex",
-         "/Applications/Codex.app/Contents/Resources/codex"]
+         "/Applications/Codex.app/Contents/Resources/codex",
+         "/Applications/ChatGPT.app/Contents/Resources/codex"]
       + (environment["PATH"] ?? "").split(separator: ":").map { "\($0)/codex" }
     return candidates.first { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) }
       .map { URL(fileURLWithPath: $0) }
@@ -121,7 +128,7 @@ struct CodexRuntimeConfiguration: Sendable {
       "features.computer_use=false", "features.image_generation=false", "features.view_image=false",
       "features.skill_search=false", "tools.view_image=false", "project_doc_max_bytes=0",
       "features.skip_host_skill_discovery=true", "features.workspace_dependencies=false",
-      "features.code_mode=false", "features.code_mode_host=false", "features.artifact=false",
+      "features.code_mode=false", "features.code_mode_host=\(allowsFileTools)", "features.artifact=false",
       "features.memories=false", "features.tool_suggest=false", "features.goals=false",
     ]
     return ["app-server", "--listen", "stdio://"] + overrides.flatMap { ["-c", $0] }
@@ -144,6 +151,7 @@ extension CodexRPCTransport {
 
 actor CodexAppServer: CodexRPCTransport {
   static let shared = CodexAppServer()
+  static let fileMode = CodexAppServer(configuration: .fileMode)
 
   private let configuration: CodexRuntimeConfiguration
   private let executable: @Sendable () -> URL?
@@ -201,6 +209,12 @@ actor CodexAppServer: CodexRPCTransport {
     let process = Process()
     process.executableURL = executableURL
     process.arguments = ["app-server", "generate-json-schema", "--out", directory.path, "--experimental"]
+    // Match the app-server isolation. Xcode's injected libraries and the user's CLI
+    // environment must not leak into this short-lived compatibility check.
+    try FileManager.default.createDirectory(at: configuration.directory, withIntermediateDirectories: true)
+    process.environment = configuration.environment
+    process.currentDirectoryURL = directory
+    process.standardInput = FileHandle.nullDevice
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     try process.run()
@@ -211,7 +225,7 @@ actor CodexAppServer: CodexRPCTransport {
         guard ContinuousClock.now < deadline else { throw CodexError.timedOut }
         try await Task.sleep(for: .milliseconds(50))
       }
-      guard process.terminationStatus == 0 else { throw CodexError.invalidResponse }
+      guard process.terminationStatus == 0 else { throw CodexError.fileModePreparationFailed(process.terminationStatus) }
       try CodexFileModeSupport.validateSchema(at: directory)
       fileModeVerified = true
     } catch {

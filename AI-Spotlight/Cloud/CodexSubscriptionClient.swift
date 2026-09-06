@@ -10,18 +10,29 @@ struct CodexSubscriptionClient: ChatProvider {
   static let defaultThinkingCapacity: CodexThinkingCapacity = .high
   static let live = CodexSubscriptionClient(
     transport: CodexAppServer.shared,
+    thinkingCapacity: { CloudPreferencesStore().preferredCodexThinkingCapacity() },
+    authenticationChanged: { await CodexAppServer.fileMode.disconnect() }
+  )
+
+  // Current models may require the isolated JS tool runner. File Mode uses its own
+  // native connection; ordinary chat keeps the existing runner-disabled configuration.
+  static let fileMode = CodexSubscriptionClient(
+    transport: CodexAppServer.fileMode,
     thinkingCapacity: { CloudPreferencesStore().preferredCodexThinkingCapacity() }
   )
 
   let transport: any CodexRPCTransport
   let thinkingCapacity: @Sendable () -> CodexThinkingCapacity
+  let authenticationChanged: @Sendable () async -> Void
 
   init(
     transport: any CodexRPCTransport,
-    thinkingCapacity: @escaping @Sendable () -> CodexThinkingCapacity = { defaultThinkingCapacity }
+    thinkingCapacity: @escaping @Sendable () -> CodexThinkingCapacity = { defaultThinkingCapacity },
+    authenticationChanged: @escaping @Sendable () async -> Void = {}
   ) {
     self.transport = transport
     self.thinkingCapacity = thinkingCapacity
+    self.authenticationChanged = authenticationChanged
   }
 
   func account() async throws -> CodexAccount? {
@@ -58,6 +69,7 @@ struct CodexSubscriptionClient: ChatProvider {
         throw CodexError.server(notification.params["error"].string ?? "ChatGPT sign-in was not completed.")
       }
       guard let account = try await account() else { throw CodexError.notSignedIn }
+      await authenticationChanged()
       return account
     }
     try Task.checkCancellation()
@@ -66,6 +78,7 @@ struct CodexSubscriptionClient: ChatProvider {
 
   func signOut() async throws {
     _ = try await transport.request("account/logout", params: .object([:]))
+    await authenticationChanged()
   }
 
   func models() async throws -> [CloudModel] {
@@ -103,7 +116,7 @@ struct CodexSubscriptionClient: ChatProvider {
       }
       return .available(modelID: selected.id)
     } catch {
-      return .unavailable(reason: "Codex could not be reached or does not support file editing.")
+      return .unavailable(reason: error.localizedDescription)
     }
   }
 

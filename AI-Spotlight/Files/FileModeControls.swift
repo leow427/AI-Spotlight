@@ -109,8 +109,8 @@ struct FileChangesReview: View {
           ForEach(changeSet.changes.filter { $0.before != $0.after }) { change in
             DisclosureGroup("\(change.kind) · \(change.path)") {
               VStack(alignment: .leading, spacing: 8) {
-                preview("Before", data: change.before.data)
-                preview("After", data: change.after.data)
+                preview("Before", path: change.path, data: change.before.data)
+                preview("After", path: change.path, data: change.after.data)
               }.padding(.top, 8)
             }.padding(12).background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 10))
           }
@@ -123,10 +123,10 @@ struct FileChangesReview: View {
       }
     }.padding(24).frame(width: 660, height: 480)
   }
-  private func preview(_ title: String, data: Data?) -> some View {
+  private func preview(_ title: String, path: String, data: Data?) -> some View {
     VStack(alignment: .leading, spacing: 4) {
       Text(title).font(.caption.weight(.semibold))
-      Text(data.flatMap { String(data: $0, encoding: .utf8) }.map { String($0.prefix(12_000)) }
+      Text(data.flatMap { try? WorkspaceDocument.text(path: path, data: $0) }.map { String($0.prefix(12_000)) }
            ?? (data == nil ? "File does not exist" : "Binary file"))
         .font(.system(.caption, design: .monospaced)).textSelection(.enabled)
         .frame(maxWidth: .infinity, alignment: .leading)

@@ -39,9 +39,9 @@ This is a boundary against model-requested access and link/path escapes. It does
 
 `environments: []` disables built-in filesystem/execution environments. Edits travel through native dynamic tools to the shared journal; built-in `apply_patch` and shell execution cannot bypass it. The app declines direct command/file-change approvals and returns no additional filesystem/network grants. Deletion through `delete_file` requires a visible user confirmation. Native call IDs are deduplicated within a thread, and handlers are removed when the turn ends.
 
-Before enabling File Mode, the app generates the installed app-server's experimental JSON schema and checks the documented environment-disable and dynamic-tool contract. Older incompatible runtimes fail closed with an update message. Ordinary chat keeps its text-only, read-only parameters and has no File Mode handler or attachment cwd. Plugins, hooks, host skill discovery, project instructions and other execution surfaces are disabled in the app's isolated Codex configuration.
+Before enabling File Mode, the app generates the installed app-server's experimental JSON schema using the same isolated environment as the connection, with a disposable working directory and no inherited Xcode injection settings. It checks the documented environment-disable and dynamic-tool contract, accepting both root-level and versioned server-request schema layouts. Incompatible runtimes fail closed with a specific compatibility message; process startup failures identify the failed check. Local fallback notices retain the underlying cause instead of reporting every failure as an unavailable/outdated CLI. Ordinary chat keeps its text-only, read-only parameters and has no File Mode handler or attachment cwd. Plugins, hooks, host skill discovery, project instructions and shell/environment access remain disabled. File Mode uses a separate native app-server connection with the same isolated ChatGPT credential store, enabling only the standalone Code Mode tool runner needed by current models. That runner evaluates JavaScript in a bare V8 isolate and forwards registered calls back through `item/tool/call`; it has no filesystem, network or Node APIs. Ordinary chat keeps its runner-disabled connection. Sign-in/sign-out invalidate the File Mode connection so it cannot retain stale authentication.
 
-Some app-server versions do not implement the newer `readOnlyAccess` sandbox field. The filesystem boundary does **not** depend on that field: disabling native environment access and validating every dynamic tool operation in `WorkspaceAccess` are required on all supported versions. Workspace sandboxing alone would otherwise permit broad reads.
+The retired `workspaceWrite.readOnlyAccess` field is omitted: current CLIs reject it. The filesystem boundary does **not** depend on that field: disabling native environment access and validating every dynamic tool operation in `WorkspaceAccess` are required on all supported versions. Workspace sandboxing alone would otherwise permit broad reads. The live integration test covers the actual signed-in Swift client, including compatibility preparation, thread/turn parameters, tool calls and Undo.
 
 References: [Codex app-server](https://learn.chatgpt.com/docs/app-server). The executable's generated schema is the runtime authority; experimental fields may change.
 
@@ -49,7 +49,7 @@ References: [Codex app-server](https://learn.chatgpt.com/docs/app-server). The e
 
 `LocalFileAgent` owns the bounded inference/tool loop. `LlamaCPPModelEngine` remains unchanged and inference-only. `LlamaServerVisionEngine` implements `LocalToolInference` for both text GGUF and existing vision models, using llama-server's native OpenAI-compatible `tools` and `tool_calls` with `--jinja`. Assistant text is never parsed for embedded JSON commands.
 
-Each step counts the actual rendered prompt tokens, limits the completion and rejects incomplete responses. Tool outputs return as structured tool messages. IDs are normalized for history, including runtimes that reuse an ID in separate completions. The loop permits at most 16 steps and eight calls in one response. Inference and filesystem dispatch remain separate.
+Each step counts the actual rendered prompt tokens, limits the completion and rejects incomplete responses. Tool outputs return as structured tool messages. File tasks use temperature zero and stable JSON schema/property ordering so native chat templates remain consistent across launches. This reduces sampling variation, but does not guarantee model accuracy. Invalid exact-match patches are rejected without changing the file. IDs are normalized for history, including runtimes that reuse an ID in separate completions. The loop permits at most 16 steps and eight calls in one response. Inference and filesystem dispatch remain separate.
 
 `LocalFileCapabilities.production` exposes the full file-tool capability to selected local models, including imported models without catalog metadata. Model size and a trust allowlist do not determine editing permission. `WorkspaceWriteClassifier` and `WorkspaceWritePolicy` centrally decide each mutation inside `WorkspaceService.apply`, before snapshots or writes. Both providers use this service; no backend maintains its own file-type list.
 
@@ -73,6 +73,16 @@ Settings → Local Models → **Install Local File Tools** installs the existing
 
 Reference: [llama.cpp function calling](https://github.com/ggml-org/llama.cpp/blob/master/docs/function-calling.md).
 
+## Rich-text documents
+
+`WorkspaceDocument` handles UTF-8 and text-only RTF for both backends, after the shared access layer has authorized and read the file. RTF reads, search and Review expose visible text instead of RTF control codes. The native AppKit RTF importer/exporter operates on in-memory data only; it receives no URLs or filesystem authority.
+
+`apply_patch` matches a unique substring in the visible text. Unchanged text keeps its fonts, colors and paragraph formatting; replacement text inherits the style at the edited range. `write_file` can replace all visible text while retaining unchanged leading/trailing formatting; separate targeted patches are preferred for multiple edits. `create_file` with an `.rtf` path writes a valid rich-text document from plain text. RTF signatures are recognized even under a text extension and classified centrally as protected unless verified app-created provenance applies.
+
+Malformed RTF and RTF containing embedded images/objects, dynamic fields or tables are rejected before writing because the native text exporter may discard them. These need a text-only copy. Snapshots retain original document bytes and metadata, so Undo restores the exact original RTF, not a re-export. The same rollback and cloud-consent policy applies to RTF as other protected files.
+
+Reference: [Apple RTF export](https://developer.apple.com/documentation/foundation/nsattributedstring/rtf(from:documentattributes:)).
+
 ## Changes and undo
 
 Before the first mutation of each affected path, the service writes a durable before/after journal in `~/Library/Application Support/AI Spotlight/File Changes`. Recovery files have mode `0600` inside a `0700` directory. These local recovery copies can contain sensitive file contents and remain until removed; this version does not prune them automatically. Bookmarks and conversation IDs are included; full attachment contents are not stored in chat messages by default.
@@ -83,9 +93,9 @@ After a task, **N files changed → Review / Undo** appears in its conversation.
 
 ## Initial limits
 
-- At most 16 attachments; regular files up to 2 MiB; UTF-8 text and text extraction from PDFs up to 200 pages. Office/binary document editing is not supported. A text export can be attached instead.
+- At most 16 attachments; regular files up to 2 MiB; UTF-8 text, text-only RTF, and text extraction from PDFs up to 200 pages. Office/binary document editing is not supported. A text export can be attached instead.
 - `read_file` returns up to 32,000 characters per call with an offset for continuation. Search reads on demand, with a 4 MiB text budget, 2,000 entries, 500 entries per directory, depth 16 and 100 matches. Large results must be narrowed by path. Listings are capped at 500 entries.
-- Writes create/replace UTF-8 files; parent directories must already exist. Moves/deletes affect regular files, not entire directory trees. The journal is capped at 64 MiB of file data and attributes per task. A move counts both affected paths.
+- Writes create/replace UTF-8 or text-only RTF files; parent directories must already exist. Moves/deletes affect regular files, not entire directory trees. The journal is capped at 64 MiB of file data and attributes per task. A move counts both affected paths.
 - File Mode runs separately from Screen/Web Search for now. Enabling it clears those draft tools; combining them later is blocked with a clear message.
 - There is no shell, test runner, arbitrary network tool or automatic repository upload. Local safe writes, protected local fallback and Codex edits all stay within explicitly attached locations.
 
@@ -99,9 +109,9 @@ scripts/verify-xcode.sh test
 scripts/verify-xcode.sh analyze
 ```
 
-`WorkspaceTests`, `WorkspaceWritePolicyTests`, `FileAgentTests` and `FileModeUITests` cover picker flows, files/folders, the native panel shortcut including Option-F's `ƒ`, conversation persistence, local/cloud tool dispatch, ordinary chat, Local/Auto editing with Undo, traversal/symlinks/hardlinks, explicit read-only grants, safe/protected classification, metadata-only availability, cloud consent handoff, local fallback, provenance, preflight, rollback, snapshots, restart recovery, modified/deleted/new/moved files, metadata, conflicts and native UI rendering. The screenshot is rendered from native SwiftUI fixtures.
+`WorkspaceTests`, `WorkspaceDocumentTests`, `WorkspaceWritePolicyTests`, `FileAgentTests` and `FileModeUITests` cover picker flows, files/folders, the native panel shortcut including Option-F's `ƒ`, conversation persistence, local/cloud tool dispatch, ordinary chat, Local/Auto editing with Undo, traversal/symlinks/hardlinks, explicit read-only grants, safe/protected classification, metadata-only availability, cloud consent handoff, local fallback, provenance, preflight, rollback, snapshots, restart recovery, modified/deleted/new/moved files, metadata, conflicts and native UI rendering. The screenshot is rendered from native SwiftUI fixtures.
 
-`scripts/verify-file-mode-codex.py` exercises a real installed app-server with an isolated configuration and a loopback fixture Responses provider. It verifies native dynamic-tool dispatch, returning tool results to the next model step, turn completion and the absence of direct filesystem/shell tools. It requires no cloud account or user file contents. Set `AI_SPOTLIGHT_CODEX_PATH` to select the executable.
+`scripts/verify-file-mode-codex.py` exercises a real installed app-server with an isolated configuration and a loopback fixture Responses provider. It verifies native dynamic-tool dispatch, returning tool results to the next model step, turn completion and the absence of direct filesystem/shell tools. It requires no cloud account or user file contents. Set `AI_SPOTLIGHT_CODEX_PATH` to select the executable. Run it again with `--code-mode` to verify the required isolated runner: no process/require/fetch globals, blocked Node filesystem imports, no unregistered file/shell tools, and successful native dynamic-tool dispatch.
 
 The optional real llama.cpp smoke test is enabled with:
 
@@ -110,4 +120,15 @@ TEST_RUNNER_AI_SPOTLIGHT_FILE_TEST_MODEL_PATH=/absolute/path/to/model.gguf \
   scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/FileModeRuntimeTests'
 ```
 
-The tests use production local access and per-file policies, read disposable fixtures, write precisely specified edits through the shared tools and verify Undo. They cover a safe text file with no cloud check, and a protected source-file fixture with an explicitly unavailable-cloud fallback. Qwen 2.5 3B Q8 is used for local integration verification. Model output quality still depends on tool-calling support and instructions; Review and Undo remain available for local edits. Cloud integration tests use deterministic native transport fixtures and the real app-server probe, rather than paid/live cloud inference.
+The tests use production local access and per-file policies, read disposable fixtures, write precisely specified edits through the shared tools and verify Undo. They cover a safe text file with no cloud check, plus protected source and RTF fixtures with an explicitly unavailable-cloud fallback. Exact-content assertions remain strict, including the unchanged source-file syntax and final newline. Qwen 2.5 3B Q8 is used for local integration verification. Model output quality still depends on tool-calling support and instructions; Review and Undo remain available for local edits. Cloud integration tests normally use deterministic native transport fixtures and the real app-server probe. Two explicit opt-ins also exercise the app-hosted native CLI check and a real signed-in Codex RTF edit:
+
+```sh
+TEST_RUNNER_AI_SPOTLIGHT_CODEX_TEST_PATH=/absolute/path/to/codex \
+  scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/CodexSubscriptionTests/testInstalledCodexFileModePreparation'
+TEST_RUNNER_AI_SPOTLIGHT_CODEX_FILE_SMOKE=1 \
+  scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/FileModeRuntimeTests/testRealCodexEditsRichTextAndUndoes'
+```
+
+The second opt-in uses AI Spotlight's existing ChatGPT sign-in and Codex allowance. It attaches only a disposable synthetic RTF sentence, confirms a precise edit, checks that it remains valid RTF, and verifies byte-for-byte Undo. It never reads the user's test documents.
+
+The Qwen 2.5 3B Q8 focused text/source/RTF smoke tests pass, but a full opt-in run also reproduced an intermittent completion-length failure on the plain-text fixture. This limitation remains visible in the tests: incomplete responses are rejected before their tool calls execute, and any earlier completed edits remain recoverable. Review/Undo and the protected-write Codex preference remain necessary; these smoke tests do not certify model output quality.

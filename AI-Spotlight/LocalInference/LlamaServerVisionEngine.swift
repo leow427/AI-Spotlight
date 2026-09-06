@@ -248,7 +248,10 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.setValue("Bearer \(session.key)", forHTTPHeaderField: "Authorization")
-    request.httpBody = try JSONEncoder().encode(payload)
+    // Stable schema/property order keeps native chat templates consistent across launches.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    request.httpBody = try encoder.encode(payload)
     guard request.httpBody!.count <= 2 * 1_024 * 1_024 else { throw FileModeError.tooLarge }
     let result = try await URLSessionCloudTransport(session: session.network).data(for: request)
     guard result.statusCode == 200 else {

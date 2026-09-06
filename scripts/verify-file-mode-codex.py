@@ -11,6 +11,7 @@ import os
 import queue
 import shutil
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -18,6 +19,21 @@ import time
 codex_path = os.environ.get('AI_SPOTLIGHT_CODEX_PATH') or shutil.which('codex')
 if not codex_path:
     raise SystemExit('Install Codex or set AI_SPOTLIGHT_CODEX_PATH first.')
+
+code_mode = '--code-mode' in sys.argv
+code_source = """
+if (typeof process !== "undefined" || typeof require !== "undefined" || typeof fetch !== "undefined") {
+  throw new Error("Unexpected host IO globals");
+}
+const allowed = new Set(["read_file", "request_user_input", "skills__list", "skills__read"]);
+const unexpected = ALL_TOOLS.map(tool => tool.name).filter(name => !allowed.has(name));
+if (unexpected.length) throw new Error("Unexpected tools: " + unexpected.join(","));
+let blocked = false;
+try { await import("node:fs"); } catch { blocked = true; }
+if (!blocked) throw new Error("Node filesystem imports must be unavailable");
+text("ISOLATED_TOOL_RUNNER_VERIFIED");
+text(await tools.read_file({path: "fixture.txt"}));
+"""
 
 captures=[]
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -27,6 +43,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
         captures.append(data)
         if len(captures)==1:
             item={'type':'function_call','id':'fc_1','call_id':'call_1','name':'read_file','arguments':'{"path":"fixture.txt"}'}
+            if code_mode:
+                item={'type':'custom_tool_call','id':'fc_1','call_id':'call_1','name':'exec','input':code_source}
         else:
             item={'type':'message','id':'msg_1','role':'assistant','status':'completed','content':[{'type':'output_text','text':'Fixture read.','annotations':[]}]}
         response={'id':'resp_'+str(len(captures)),'object':'response','status':'completed','output':[item],
@@ -51,6 +69,8 @@ with tempfile.TemporaryDirectory(prefix='ai-codex-probe-') as directory:
       'features.workspace_dependencies=false','features.code_mode=false','features.code_mode_host=false',
       'features.artifact=false','features.memories=false','features.tool_suggest=false','features.goals=false',
       'features.enable_request_compression=false','web_search="disabled"','project_doc_max_bytes=0']
+    if code_mode:
+        config += ['features.code_mode=true', 'features.code_mode_only=true', 'features.code_mode_host=true']
     args=[codex_path,'app-server','--listen','stdio://']
     for value in config: args+=['-c',value]
     process=subprocess.Popen(args,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
@@ -98,10 +118,12 @@ with tempfile.TemporaryDirectory(prefix='ai-codex-probe-') as directory:
         unsafe={'exec_command','shell','shell_command','write_stdin','view_image','read_file','apply_patch',
           'filesystem','terminal','computer','browser'}
         assert calls==1 and len(captures)==2
-        assert any(item.get('type') == 'function_call_output' and 'Fixture contents' in str(item.get('output'))
+        assert any(item.get('type') in {'function_call_output', 'custom_tool_call_output'} and 'Fixture contents' in str(item.get('output'))
                    for item in captures[1].get('input', [])), 'Tool output did not reach the next model step'
         assert all(name not in unsafe or (name=='read_file' and kind=='function') for kind,name in offered)
-        print('NATIVE CODEX FILE TOOL CONTRACT PASSED')
+        if code_mode:
+            assert 'ISOLATED_TOOL_RUNNER_VERIFIED' in json.dumps(captures[1].get('input', []))
+        print('NATIVE CODEX FILE TOOL CONTRACT PASSED' + (' (isolated code mode)' if code_mode else ' (direct tools)'))
     finally:
         process.terminate()
         try: process.wait(timeout=5)
