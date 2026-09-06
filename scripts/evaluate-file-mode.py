@@ -149,8 +149,17 @@ def main():
         result = subprocess.run(["scripts/verify-xcode.sh", "test",
             "-only-testing:AI SpotlightTests/FileModeReliabilityEvaluationTests"],
             cwd=repository, env=environment, stdout=stream, stderr=subprocess.STDOUT)
-    if output.exists():
-        summarize([output])
+    if not output.exists():
+        print("No evaluation records were produced. Check the log and test-runner environment.")
+        raise SystemExit(result.returncode or 1)
+    summarize([output])
+    rows = [json.loads(line) for line in output.read_text().splitlines()]
+    started = [row["id"] for row in rows if row.get("event") == "attempt_started"]
+    finished = [row for row in rows if row.get("event") == "attempt_finished"]
+    complete = bool(started) and len(started) == len(set(started)) == len(finished) and set(started) == {row["id"] for row in finished}
+    if not complete or any(not completed_success(row) for row in finished):
+        print("The evaluation contains failed, missing or unfinished attempts. All records were retained.")
+        raise SystemExit(result.returncode or 1)
     raise SystemExit(result.returncode)
 
 
