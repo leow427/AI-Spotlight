@@ -35,7 +35,12 @@ real resource use have not been measured here. The pre-existing two optional
 native tests remain intact. The prior Qwen 4B results below describe the earlier
 unified runtime verification, not a new benchmark of this expanded catalog.
 
-The exact committed revision and GitHub CI outcome are recorded on
+The first catalog CI run (`b4d8c79`) had one failure: OCR in the UI fixture read
+“Google Gemma 4 E4B” as “Goocle Gemma 4e48”. All other automated tests passed.
+The UI fixture now renders at an explicit 3× scale independent of the runner's
+backing scale; the exact model-name and description assertions are retained.
+
+The exact committed revision and final GitHub CI outcome are recorded on
 [draft PR #3](https://github.com/leow427/AI-Spotlight/pull/3).
 
 ## Prior unified-runtime local checks (`577fad3`)

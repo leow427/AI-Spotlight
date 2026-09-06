@@ -450,8 +450,15 @@ final class LocalVisionTests: XCTestCase {
     view.frame = NSRect(x: 0, y: 0, width: 680, height: 950)
     await Task.yield()
     view.layoutSubtreeIfNeeded()
-    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    // CI can render at a lower backing scale than a Retina Mac, making exact
+    // model names ambiguous to OCR. Keep assertions exact and render at 3x.
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+      pixelsWide: Int(view.bounds.width * 3), pixelsHigh: Int(view.bounds.height * 3),
+      bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+      colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+    bitmap.size = view.bounds.size
     view.cacheDisplay(in: view.bounds, to: bitmap)
+    XCTAssertEqual(bitmap.pixelsWide, Int(view.bounds.width * 3))
     let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
     attachment.name = "Guided image-model downloads"
@@ -500,8 +507,15 @@ final class LocalVisionTests: XCTestCase {
     view.frame = NSRect(x: 0, y: 0, width: 680, height: 1200)
     await Task.yield()
     view.layoutSubtreeIfNeeded()
-    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    // CI can render at a lower backing scale than a Retina Mac, making exact
+    // model names ambiguous to OCR. Keep assertions exact and render at 3x.
+    let bitmap = try XCTUnwrap(NSBitmapImageRep(bitmapDataPlanes: nil,
+      pixelsWide: Int(view.bounds.width * 3), pixelsHigh: Int(view.bounds.height * 3),
+      bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+      colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+    bitmap.size = view.bounds.size
     view.cacheDisplay(in: view.bounds, to: bitmap)
+    XCTAssertEqual(bitmap.pixelsWide, Int(view.bounds.width * 3))
     let text = try await ScreenOCRService().recognize(try XCTUnwrap(bitmap.cgImage)).text
     // A separate Update line verifies the button, not just the explanatory
     // caption. CI OCR can confuse the similar l/I glyphs in this brand name;
