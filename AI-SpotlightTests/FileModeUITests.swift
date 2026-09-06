@@ -146,8 +146,8 @@ final class FileModeUITests: XCTestCase {
         Spacer()
         Text("Local")
       }
-      FileModeAttachmentView(files: files, access: .readOnly, isBusy: false, useCodex: {})
-      FileModeAttachmentView(files: files, access: .readWrite, isBusy: false, useCodex: {})
+      FileModeAttachmentView(files: files, access: .readOnly, isCloud: false, isBusy: false, useCodex: {})
+      FileModeAttachmentView(files: files, access: .readWrite, isCloud: true, isBusy: false, useCodex: {})
       FileChangeSummaryView(files: files, isBusy: false)
     }.padding(24).frame(width: 660).background(Color(nsColor: .windowBackgroundColor))
     let view = NSHostingView(rootView: preview.environment(\.colorScheme, .dark))

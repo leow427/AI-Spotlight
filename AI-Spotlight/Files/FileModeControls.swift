@@ -22,6 +22,7 @@ struct FileModeToolButton: View {
 struct FileModeAttachmentView: View {
   @ObservedObject var files: FileModeCoordinator
   let access: FileAccessLevel
+  let isCloud: Bool
   let isBusy: Bool
   let useCodex: () -> Void
 
@@ -40,12 +41,14 @@ struct FileModeAttachmentView: View {
         }
         if access == .readOnly {
           HStack(spacing: 6) {
-            Text("Local can analyze files and suggest edits.").font(.caption2).foregroundStyle(.secondary)
+            Text(isCloud ? "Choose Codex to work with these files." : "Local can analyze files and suggest edits.")
+              .font(.caption2).foregroundStyle(.secondary)
             Button("Use Codex", action: useCodex).font(.caption2).buttonStyle(.plain)
               .disabled(isBusy || files.isWorking)
           }
         } else {
-          Text("Relevant file contents may be sent to Codex when you send a request.")
+          Text(isCloud ? "Relevant file contents may be sent to Codex when you send a request."
+               : "This trusted local model can edit the attached files on this Mac.")
             .font(.caption2).foregroundStyle(.secondary)
         }
       }

@@ -181,7 +181,7 @@ struct AppShellView: View {
                   .fixedSize(horizontal: false, vertical: true)
               }
               if files.selection != nil || files.error != nil {
-                FileModeAttachmentView(files: files, access: fileAccess, isBusy: localChat.isBusy,
+                FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
                   useCodex: { isFileCloudConsentPresented = true })
               }
               FileChangeSummaryView(files: files, isBusy: localChat.isBusy)
