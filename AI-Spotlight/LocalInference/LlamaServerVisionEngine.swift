@@ -40,7 +40,7 @@ enum LocalVisionModelValidation {
 
 /// One resident main model serves text, images, planning and answers. The child
 /// owns no conversation state: every call supplies the complete prepared messages.
-actor LlamaServerVisionEngine: LocalVisionServing {
+actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
   private var runtime: LocalModelRuntimeSession?
   private var activeID: UUID?
   private var idleTask: Task<Void, Never>?
@@ -73,6 +73,7 @@ actor LlamaServerVisionEngine: LocalVisionServing {
   }
 
   static func arguments(model: LocalModel, port: UInt16, key: String, alias: String) throws -> [String] {
+    if !model.supportsVision { return try LocalFileRuntime.textArguments(model: model, port: port, key: key, alias: alias) }
     try LocalVisionModelValidation.validate(model)
     let config = model.visionConfiguration!
     return ["-m", model.fileURL.path, "--mmproj", config.projectorURL.path,
@@ -198,6 +199,65 @@ actor LlamaServerVisionEngine: LocalVisionServing {
     } onCancel: { Task { await self.cancel(id: id) } }
   }
 
+  /// llama.cpp's native function calling endpoint performs template rendering and structured parsing.
+  /// The controller owns the tool loop; this method only performs one inference step.
+  func completeTools(messages: [AgentInferenceMessage], tools: [AgentToolDefinition],
+                     model: LocalModel) async throws -> AgentInferenceMessage {
+    let id = UUID()
+    if activeID != nil { await unload() }
+    idleTask?.cancel()
+    idleID = nil
+    activeID = id
+    return try await withTaskCancellationHandler {
+      do {
+        try Task.checkCancellation()
+        let session = try await load(model, requestID: id)
+        let payload = try LocalFileRuntime.payload(messages: messages, tools: tools, alias: session.alias)
+        // Render and tokenize the exact tool-aware template before inference. This avoids silently
+        // truncating a tool result or dropping the user's request when the agent reaches its budget.
+        let template = try await toolJSON(path: "apply-template", payload: payload, session: session)
+        guard let prompt = template["prompt"].string else {
+          throw FileModeError.operation("The local runtime did not return a rendered tool template.")
+        }
+        let tokens = try await toolJSON(path: "tokenize", payload: .object([
+          "content": .string(prompt), "add_special": .bool(true)]), session: session)
+        guard let count = tokens["tokens"].array?.count else {
+          throw FileModeError.operation("The local runtime did not return a token count for this file task.")
+        }
+        guard count + 1_088 < LocalFileRuntime.contextWindow(for: model) else {
+          throw FileModeError.operation("This file task filled the local model’s context. Start a new chat with a smaller selection or ask about a shorter section. Review keeps any completed edits.")
+        }
+        try Task.checkCancellation()
+        guard activeID == id else { throw CancellationError() }
+        let response = try await toolJSON(path: "v1/chat/completions", payload: payload, session: session)
+        let message = try LocalFileRuntime.response(JSONEncoder().encode(response))
+        try Task.checkCancellation()
+        guard activeID == id else { throw CancellationError() }
+        activeID = nil
+        scheduleIdleUnload(id: id)
+        return message
+      } catch {
+        await cancel(id: id)
+        throw error
+      }
+    } onCancel: { Task { await self.cancel(id: id) } }
+  }
+
+  private func toolJSON(path: String, payload: CodexValue, session: LocalModelRuntimeSession) async throws -> CodexValue {
+    var request = URLRequest(url: session.base.appendingPathComponent(path), timeoutInterval: 180)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(session.key)", forHTTPHeaderField: "Authorization")
+    request.httpBody = try JSONEncoder().encode(payload)
+    guard request.httpBody!.count <= 2 * 1_024 * 1_024 else { throw FileModeError.tooLarge }
+    let result = try await URLSessionCloudTransport(session: session.network).data(for: request)
+    guard result.statusCode == 200 else {
+      throw FileModeError.operation("This llama-server runtime could not complete structured file tools. Update its runtime or choose a recommended local model. File Mode never runs commands found in ordinary model text.")
+    }
+    guard result.data.count <= 4 * 1_024 * 1_024 else { throw FileModeError.tooLarge }
+    return try JSONDecoder().decode(CodexValue.self, from: result.data)
+  }
+
   private func scheduleIdleUnload(id: UUID) {
     idleID = id
     idleTask = Task { [weak self, idleDelay] in
@@ -220,7 +280,7 @@ actor LlamaServerVisionEngine: LocalVisionServing {
     }
     let port = try Self.availablePort()
     let session = LocalModelRuntimeSession(model: model, port: port)
-    session.process.executableURL = model.visionConfiguration?.serverExecutableURL
+    session.process.executableURL = LocalFileRuntime.executable(for: model)
     session.process.arguments = try Self.arguments(model: model, port: port, key: session.key, alias: session.alias)
     session.process.environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "en_US.UTF-8"]
     session.process.standardOutput = FileHandle.nullDevice

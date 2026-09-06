@@ -163,6 +163,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
   private func perform(_ shortcut: PanelShortcut) {
     switch shortcut {
+    case .fileMode:
+      NotificationCenter.default.post(name: .fileModeRequested, object: nil)
     case .newChat:
       NotificationCenter.default.post(name: .newChatRequested, object: nil)
     case .modePalette:
@@ -200,7 +202,8 @@ private final class SpotlightPanel: NSPanel {
       return true
     }
     if let shortcut = PanelShortcut.resolve(
-      characters: event.charactersIgnoringModifiers,
+      characters: event.keyCode == 3 && event.modifierFlags.intersection([.shift, .option, .command, .control]) == [.shift, .option]
+        ? "f" : event.charactersIgnoringModifiers,
       modifiers: event.modifierFlags
     ) {
       onShortcut?(shortcut)

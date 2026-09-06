@@ -7,6 +7,18 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		41785BB5B087C2B0E954509E /* FileModeRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */; };
+		7558BA92C2D5C3CE65628DD2 /* LocalFileRuntimeSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52189CDD3B416D1EA547D5A /* LocalFileRuntimeSetup.swift */; };
+		32FDB12D7B19D9FC87A3B01D /* FileModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358F0E6213F24E6E5A6BF331 /* FileModeUITests.swift */; };
+		CA0F234239D0AE49BA5AB66D /* FileAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6737F803E809057721E621C7 /* FileAgentTests.swift */; };
+		A8D1A4BB12B6A723B10D5435 /* FileModeControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65367875DCBEC279D08F684E /* FileModeControls.swift */; };
+		AD9DCA3F261F97353BA3A2F6 /* FileModeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F854E7BC1B8BD8048823C508 /* FileModeCoordinator.swift */; };
+		692FE1D5B808E9F46279D3EB /* CodexFileMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FD7EC4D72EA2C56D79D6BAF /* CodexFileMode.swift */; };
+		FF70383D00EFDC94759EC47F /* LocalFileInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0134D277D0D4590D1E9D4D24 /* LocalFileInference.swift */; };
+		CB0228C45D6046A5112037B1 /* AgentFileTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1C6689B264C3ACCED690935 /* AgentFileTools.swift */; };
+		1D8E6439046419E40B3F2C9E /* WorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA71017E0A573695B2D29C84 /* WorkspaceTests.swift */; };
+		C461A3249BD254564E9FA9E6 /* WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB984D58DB712EC44001FDD /* WorkspaceService.swift */; };
+		573FCAC21400EDC7D918408C /* WorkspaceAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CED3473E2C0640A46466B8F /* WorkspaceAccess.swift */; };
 		C50000000000000000000004 /* CloudModelCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000003 /* CloudModelCapabilities.swift */; };
 		C50000000000000000000002 /* CloudModelSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000001 /* CloudModelSelectionTests.swift */; };
 		C30000000000000000000002 /* LocalModelInstallationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */; };
@@ -99,6 +111,18 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileModeRuntimeTests.swift"; sourceTree = SOURCE_ROOT; };
+		D52189CDD3B416D1EA547D5A /* LocalFileRuntimeSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/LocalFileRuntimeSetup.swift"; sourceTree = SOURCE_ROOT; };
+		358F0E6213F24E6E5A6BF331 /* FileModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileModeUITests.swift"; sourceTree = SOURCE_ROOT; };
+		6737F803E809057721E621C7 /* FileAgentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileAgentTests.swift"; sourceTree = SOURCE_ROOT; };
+		65367875DCBEC279D08F684E /* FileModeControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/FileModeControls.swift"; sourceTree = SOURCE_ROOT; };
+		F854E7BC1B8BD8048823C508 /* FileModeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/FileModeCoordinator.swift"; sourceTree = SOURCE_ROOT; };
+		7FD7EC4D72EA2C56D79D6BAF /* CodexFileMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/CodexFileMode.swift"; sourceTree = SOURCE_ROOT; };
+		0134D277D0D4590D1E9D4D24 /* LocalFileInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/LocalFileInference.swift"; sourceTree = SOURCE_ROOT; };
+		F1C6689B264C3ACCED690935 /* AgentFileTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/AgentFileTools.swift"; sourceTree = SOURCE_ROOT; };
+		DA71017E0A573695B2D29C84 /* WorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceTests.swift"; sourceTree = SOURCE_ROOT; };
+		9DB984D58DB712EC44001FDD /* WorkspaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceService.swift"; sourceTree = SOURCE_ROOT; };
+		7CED3473E2C0640A46466B8F /* WorkspaceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceAccess.swift"; sourceTree = SOURCE_ROOT; };
 		C50000000000000000000003 /* CloudModelCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelCapabilities.swift; sourceTree = "<group>"; };
 		C50000000000000000000001 /* CloudModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelSelectionTests.swift; sourceTree = "<group>"; };
 		C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelInstallationStoreTests.swift; sourceTree = "<group>"; };
@@ -204,6 +228,18 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */,
+				D52189CDD3B416D1EA547D5A /* LocalFileRuntimeSetup.swift */,
+				358F0E6213F24E6E5A6BF331 /* FileModeUITests.swift */,
+				6737F803E809057721E621C7 /* FileAgentTests.swift */,
+				65367875DCBEC279D08F684E /* FileModeControls.swift */,
+				F854E7BC1B8BD8048823C508 /* FileModeCoordinator.swift */,
+				7FD7EC4D72EA2C56D79D6BAF /* CodexFileMode.swift */,
+				0134D277D0D4590D1E9D4D24 /* LocalFileInference.swift */,
+				F1C6689B264C3ACCED690935 /* AgentFileTools.swift */,
+				DA71017E0A573695B2D29C84 /* WorkspaceTests.swift */,
+				9DB984D58DB712EC44001FDD /* WorkspaceService.swift */,
+				7CED3473E2C0640A46466B8F /* WorkspaceAccess.swift */,
 				8423E65D659544F0E0BC57F6 /* AppBundleTests.swift */,
 				41B9B38819695DE62E80CBE1 /* ScreenNativeSmokeTests.swift */,
 				AF75EE2F32B58204588607B5 /* ScreenViewTests.swift */,
@@ -458,6 +494,14 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				7558BA92C2D5C3CE65628DD2 /* LocalFileRuntimeSetup.swift in Sources */,
+				A8D1A4BB12B6A723B10D5435 /* FileModeControls.swift in Sources */,
+				AD9DCA3F261F97353BA3A2F6 /* FileModeCoordinator.swift in Sources */,
+				692FE1D5B808E9F46279D3EB /* CodexFileMode.swift in Sources */,
+				FF70383D00EFDC94759EC47F /* LocalFileInference.swift in Sources */,
+				CB0228C45D6046A5112037B1 /* AgentFileTools.swift in Sources */,
+				C461A3249BD254564E9FA9E6 /* WorkspaceService.swift in Sources */,
+				573FCAC21400EDC7D918408C /* WorkspaceAccess.swift in Sources */,
 				B5173475932912D82BC87FC7 /* ScreenConnectivity.swift in Sources */,
 				905F6E0F59B1620D167CED63 /* ScreenPromptContext.swift in Sources */,
 				32E976745B12847D6DFF8EE0 /* LlamaServerVisionEngine.swift in Sources */,
@@ -518,6 +562,10 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				41785BB5B087C2B0E954509E /* FileModeRuntimeTests.swift in Sources */,
+				32FDB12D7B19D9FC87A3B01D /* FileModeUITests.swift in Sources */,
+				CA0F234239D0AE49BA5AB66D /* FileAgentTests.swift in Sources */,
+				1D8E6439046419E40B3F2C9E /* WorkspaceTests.swift in Sources */,
 				0C22F41F6C6A79FFFDD2AB4C /* AppBundleTests.swift in Sources */,
 				749A74810619BC2371A900AB /* ScreenNativeSmokeTests.swift in Sources */,
 				52FB913A027D7DEBFD96E69D /* ScreenViewTests.swift in Sources */,

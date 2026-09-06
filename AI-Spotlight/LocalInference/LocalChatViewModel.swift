@@ -53,13 +53,16 @@ final class LocalChatViewModel: ObservableObject {
 
   var isBusy: Bool {
     // A persistence error must not make a live request accept another submission.
-    if activeRequest != nil || generationTask != nil || installationTask != nil { return true }
+    if activeRequest != nil || generationTask != nil || installationTask != nil || files.isWorking || files.isPicking { return true }
     switch state {
     case .installing, .downloading, .benchmarking, .preparing, .refiningSearch, .searching, .streaming: return true
     case .idle, .failed: return false
     }
   }
 
+  let files: FileModeCoordinator
+  private let fileInference: any LocalToolInference
+  private let fileCodex: CodexSubscriptionClient
   private let engine: any LocalModelEngine
   private let visionEngine: any LocalVisionServing
   private let webSearch: any WebSearchProvider
@@ -73,6 +76,9 @@ final class LocalChatViewModel: ObservableObject {
 
   init(
     engine: any LocalModelEngine,
+    files: FileModeCoordinator? = nil,
+    fileInference: (any LocalToolInference)? = nil,
+    fileCodex: CodexSubscriptionClient = .live,
     visionEngine: any LocalVisionServing = LlamaServerVisionEngine(),
     modelAdvisor: LocalModelAdvisor? = nil,
     cloudProviders: CloudProviderRegistry = .live,
@@ -82,6 +88,9 @@ final class LocalChatViewModel: ObservableObject {
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
   ) {
     self.engine = engine
+    self.files = files ?? FileModeCoordinator()
+    self.fileInference = fileInference ?? (visionEngine as? any LocalToolInference) ?? LlamaServerVisionEngine()
+    self.fileCodex = fileCodex
     self.visionEngine = visionEngine
     self.modelAdvisor = modelAdvisor
     self.webSearch = webSearch
@@ -91,6 +100,16 @@ final class LocalChatViewModel: ObservableObject {
     self.sleep = sleep
     sessions = sessionStore.load()
     selectedSessionID = sessions.first?.id
+    self.files.restoreSelection(selectedSession?.workspace)
+    self.files.conversationID = selectedSessionID
+    self.files.onSelectionChange = { [weak self] selection in
+      guard let self else { return }
+      let sessionID = self.ensureSelectedSession()
+      self.files.conversationID = sessionID
+      guard let index = self.sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+      self.sessions[index].workspace = selection
+      self.persistSessions()
+    }
   }
 
   func refreshInstalledModel() async {
@@ -214,6 +233,76 @@ final class LocalChatViewModel: ObservableObject {
         self?.state = .failed(error.localizedDescription)
       }
     }
+  }
+
+  /// File Mode has its own explicit route. Auto stays local; a write request never causes upload.
+  func submitFiles(_ prompt: String, mode: ChatMode, cloudProvider: CloudProviderID,
+                   cloudModelID: String, onAccepted: @escaping @MainActor () -> Void = {}) {
+    guard !isBusy, !files.isWorking, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          files.selection != nil else { return }
+    let local = mode != .cloud
+    if local && installedModel == nil {
+      files.error = "Choose a local model, or choose Use Codex to work with these files in the cloud. Auto keeps File Mode on this Mac."
+      return
+    }
+    if !local && cloudProvider != .chatGPT {
+      files.error = "Cloud File Mode uses Codex. Choose Use Codex to continue; relevant file contents may be sent to the cloud."
+      return
+    }
+    let model = installedModel
+    let level = local ? model.map { LocalFileCapabilities.production.access(for: $0) } ?? .readOnly : .readWrite
+    let fileTools: AgentFileTools
+    do { fileTools = try files.begin(access: level) }
+    catch { files.error = error.localizedDescription; return }
+    let route = Route(mode: local ? .local : .cloud,
+      providerID: local ? "llama.cpp" : CloudProviderID.chatGPT.rawValue,
+      modelID: local ? model!.id : cloudModelID, usesNetwork: !local)
+    let history = messages + [ChatMessage(role: .user, content: prompt)]
+    let active = beginGeneration(route: route, modelDisplayName: local ? model!.displayName : cloudModelID)
+    let sessionID = ensureSelectedSession()
+    let responseID = UUID()
+    state = .preparing
+    contextNotice = nil
+    autoRouteDecision = nil
+    screenRouteDecision = nil
+    append(history.last!, to: sessionID)
+    append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
+    generationTask = Task { [weak self, fileInference, fileCodex, engine, files] in
+      var failure: Error?
+      do {
+        try Task.checkCancellation()
+        if local, let model {
+          // The inference-only bridge releases its model before the tool-capable runtime loads it.
+          await engine.unload()
+          let owner = self
+          try await LocalFileAgent(inference: fileInference).run(messages: history, model: model, tools: fileTools) { text in
+            await owner?.appendFileText(text, messageID: responseID, sessionID: sessionID, requestID: active.id)
+          }
+        } else {
+          let request = ChatRequest(sessionID: sessionID, messages: history, route: route)
+          for try await event in fileCodex.stream(request, fileTools: fileTools) {
+            try Task.checkCancellation()
+            if case .token(let text) = event {
+              self?.appendFileText(text, messageID: responseID, sessionID: sessionID, requestID: active.id)
+            }
+          }
+        }
+        try Task.checkCancellation()
+      } catch is CancellationError { }
+      catch { failure = error }
+      // Finish closes the authority before enabling the composer, including Stop and late events.
+      if local { await fileInference.unload() }
+      await files.finish(workspace: fileTools.workspace)
+      if let failure, self?.activeRequest?.id == active.id { files.error = failure.localizedDescription }
+      self?.finishGeneration(id: active.id, error: failure)
+    }
+    onAccepted()
+  }
+
+  private func appendFileText(_ text: String, messageID: UUID, sessionID: UUID, requestID: UUID) {
+    guard activeRequest?.id == requestID else { return }
+    state = .streaming
+    append(text, to: messageID, in: sessionID)
   }
 
   func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
@@ -659,6 +748,7 @@ final class LocalChatViewModel: ObservableObject {
   @discardableResult
   func stopStreaming() -> Task<Void, Never>? {
     guard let task = generationTask else { return nil }
+    files.revoke()
     // Revoke ownership before cancellation can release any queued events or cleanup.
     activeRequest = nil
     generationTask = nil
@@ -669,12 +759,14 @@ final class LocalChatViewModel: ObservableObject {
 
   func newChat() {
     stopStreaming()
+    files.restoreSelection(nil)
     contextNotice = nil
     autoRouteDecision = nil
     screenRouteDecision = nil
     let session = ChatSession()
     sessions.append(session)
     selectedSessionID = session.id
+    files.conversationID = session.id
     sortAndPersistSessions()
     if case .failed = state { state = .idle }
   }
@@ -682,6 +774,8 @@ final class LocalChatViewModel: ObservableObject {
   func selectSession(id: UUID) {
     guard sessions.contains(where: { $0.id == id }), !isBusy else { return }
     selectedSessionID = id
+    files.restoreSelection(selectedSession?.workspace)
+    files.conversationID = selectedSessionID
     contextNotice = nil
   }
 
@@ -690,6 +784,8 @@ final class LocalChatViewModel: ObservableObject {
     contextNotice = nil
     let selectedIndex = selectedSessionID.flatMap { id in sessions.firstIndex(where: { $0.id == id }) }
     selectedSessionID = sessions[selectedIndex.map { ($0 + 1) % sessions.count } ?? 0].id
+    files.restoreSelection(selectedSession?.workspace)
+    files.conversationID = selectedSessionID
   }
 
   func applicationBecameActive() {

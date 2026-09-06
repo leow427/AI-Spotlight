@@ -67,6 +67,7 @@ struct ChatSession: Codable, Sendable, Equatable, Identifiable {
   var messages: [ChatMessage]
   let createdAt: Date
   var lastActivityAt: Date
+  var workspace: WorkspaceSelection? = nil
 
   init(
     id: UUID = UUID(),

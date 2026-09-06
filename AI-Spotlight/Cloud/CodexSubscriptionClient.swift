@@ -90,6 +90,10 @@ struct CodexSubscriptionClient: ChatProvider {
   }
 
   func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
+    stream(request, fileTools: nil)
+  }
+
+  func stream(_ request: ChatRequest, fileTools: AgentFileTools?) -> AsyncThrowingStream<ChatEvent, Error> {
     AsyncThrowingStream { continuation in
       let task = Task {
         var threadID: String?
@@ -102,19 +106,31 @@ struct CodexSubscriptionClient: ChatProvider {
           guard try await account() != nil else { throw CodexError.notSignedIn }
           let notifications = try await transport.notifications()
           defer { Task { await notifications.cancel() } }
+          if fileTools != nil { try await transport.prepareFileMode() }
+          let parameters: CodexValue
+          if let fileTools {
+            parameters = CodexFileMode.threadParameters(model: request.route.modelID, selection: fileTools.workspace.selection)
+          } else { parameters = Self.threadParameters(model: request.route.modelID) }
           let started = try await Task {
-            try await transport.request("thread/start", params: Self.threadParameters(model: request.route.modelID))
+            try await transport.request("thread/start", params: parameters)
           }.value
           guard let id = started["thread"]["id"].string else { throw CodexError.invalidResponse }
           threadID = id
+          if let fileTools {
+            try await transport.setFileHandler(threadID: id) { method, params in
+              await CodexFileMode.handle(method: method, params: params, tools: fileTools)
+            }
+          }
           try Task.checkCancellation()
+          let selection = fileTools?.workspace.selection
           let turn = try await Task {
             try await transport.request(
               "turn/start",
               params: Self.turnParameters(
                 threadID: id,
                 request: boundedRequest,
-                thinkingCapacity: thinkingCapacity()
+                thinkingCapacity: thinkingCapacity(),
+                workspace: selection
               )
             )
           }.value
@@ -146,9 +162,11 @@ struct CodexSubscriptionClient: ChatProvider {
           }
           try Task.checkCancellation()
           guard completed else { throw CodexError.disconnected }
+          if let fileTools { await fileTools.workspace.revoke() }
           continuation.yield(.completed)
           continuation.finish()
         } catch {
+          if let fileTools { await fileTools.workspace.revoke() }
           continuation.finish(throwing: error)
         }
         // Cleanup runs outside the cancelled task so Stop also interrupts server-side generation.
@@ -156,6 +174,7 @@ struct CodexSubscriptionClient: ChatProvider {
           let transport = transport
           let interruptedTurnID = completed ? nil : turnID
           Task {
+            try? await transport.setFileHandler(threadID: threadID, handler: nil)
             if let interruptedTurnID {
               _ = try? await transport.request("turn/interrupt", params: .object([
                 "threadId": .string(threadID), "turnId": .string(interruptedTurnID),
@@ -183,13 +202,19 @@ struct CodexSubscriptionClient: ChatProvider {
   static func turnParameters(
     threadID: String,
     request: ChatRequest,
-    thinkingCapacity: CodexThinkingCapacity = defaultThinkingCapacity
+    thinkingCapacity: CodexThinkingCapacity = defaultThinkingCapacity,
+    workspace: WorkspaceSelection? = nil
   ) throws -> CodexValue {
     var params: [String: CodexValue] = [
       "threadId": .string(threadID),
       "input": .array([.object(["type": .string("text"), "text": .string(try prompt(for: request))])]),
     ]
     params["effort"] = .string(thinkingCapacity.rawValue)
+    if let workspace {
+      params["cwd"] = .string(workspace.cwd.path)
+      params["environments"] = .array([])
+      params["sandboxPolicy"] = CodexFileMode.sandboxPolicy(selection: workspace)
+    }
     return .object(params)
   }
 

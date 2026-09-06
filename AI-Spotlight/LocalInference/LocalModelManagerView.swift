@@ -211,6 +211,8 @@ struct LocalModelManagerSection: View {
             .disabled(chat.isBusy || chat.installedModel?.id == model.id)
         }
       }
+      LocalFileToolsSetupView(model: chat.installedModel)
+      FileRecoveryMenu(files: chat.files)
       Button("Advanced: Import Text GGUF…") { isImporterPresented = true }.disabled(chat.isBusy)
       Text("Approved model catalog · Version \(advisor.manifest.version)")
         .font(.caption).foregroundStyle(.secondary)
