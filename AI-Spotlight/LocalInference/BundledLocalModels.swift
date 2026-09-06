@@ -1,6 +1,6 @@
 import Foundation
 
-// Official Qwen GGUF/LFS metadata and llama.cpp b10797 reviewed 2026-09-06.
+// Official publisher GGUF/LFS metadata and llama.cpp b10797 reviewed 2026-09-06.
 // See docs/Local-Model-Selection.md for evidence, memory policy and limitations.
 enum BundledLocalModels {
   static let models: [LocalModelDescriptor] = [
@@ -15,7 +15,7 @@ enum BundledLocalModels {
       qualityScore: 76, performanceClass: "General text and visual reasoning", parameterBillions: 4,
       minimumMemory: 12 * LocalHardwareProfile.gib, recommendedMemory: 16 * LocalHardwareProfile.gib,
       projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/1cd86afb9a95c410a6038ab3b40d8b578c892266/mmproj-Qwen3VL-4B-Instruct-F16.gguf")!,
-        expectedByteCount: 836180256, checksumSHA256: "256f3a43bd4205ffef48d6b92715e1e70b5b0e9aef06522584967513a9985331"), runtimeBuild: 10797),
+        expectedByteCount: 836180256, checksumSHA256: "256f3a43bd4205ffef48d6b92715e1e70b5b0e9aef06522584967513a9985331"), runtimeBuild: 10797, publisher: "Alibaba / Qwen", modelSummary: "An efficient Alibaba model for everyday chat, reading screenshots and visual questions."),
     LocalModelDescriptor(
       id: "qwen3-vl-8b-instruct-q4-k-m", displayName: "Qwen3-VL 8B Instruct",
       downloadURL: URL(string: "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/Qwen3VL-8B-Instruct-Q4_K_M.gguf")!,
@@ -27,7 +27,7 @@ enum BundledLocalModels {
       qualityScore: 84, performanceClass: "General text and visual reasoning", parameterBillions: 8,
       minimumMemory: 24 * LocalHardwareProfile.gib, recommendedMemory: 32 * LocalHardwareProfile.gib,
       projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/resolve/f982a07559d4a2f6c8744d840bf6fccab30eea96/mmproj-Qwen3VL-8B-Instruct-F16.gguf")!,
-        expectedByteCount: 1159029824, checksumSHA256: "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"), runtimeBuild: 10797),
+        expectedByteCount: 1159029824, checksumSHA256: "ca524100ebf825c9a870db1c580d03879e0da0ab2541697e2458e64891cf9d38"), runtimeBuild: 10797, publisher: "Alibaba / Qwen", modelSummary: "A balanced Alibaba model for detailed screenshot understanding and general reasoning."),
     LocalModelDescriptor(
       id: "qwen3-vl-32b-instruct-q4-k-m", displayName: "Qwen3-VL 32B Instruct",
       downloadURL: URL(string: "https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct-GGUF/resolve/e3e1fe0c76de7ee58ea65db420c643adfe2e457c/Qwen3VL-32B-Instruct-Q4_K_M.gguf")!,
@@ -39,6 +39,76 @@ enum BundledLocalModels {
       qualityScore: 90, performanceClass: "General text and visual reasoning", parameterBillions: 32,
       minimumMemory: 64 * LocalHardwareProfile.gib, recommendedMemory: 64 * LocalHardwareProfile.gib,
       projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct-GGUF/resolve/e3e1fe0c76de7ee58ea65db420c643adfe2e457c/mmproj-Qwen3VL-32B-Instruct-F16.gguf")!,
-        expectedByteCount: 1196795040, checksumSHA256: "8617824839df91f84b4840ad5084dcf50a1403a435a1f4cfc4d8c84ce6cac2fc"), runtimeBuild: 10797),
+        expectedByteCount: 1196795040, checksumSHA256: "8617824839df91f84b4840ad5084dcf50a1403a435a1f4cfc4d8c84ce6cac2fc"), runtimeBuild: 10797, publisher: "Alibaba / Qwen", modelSummary: "A larger Alibaba model for demanding visual questions and text reasoning on high-memory Macs."),
+
+    package(id: "gemma-4-e2b-it-qat-q4_0-gguf", name: "Google Gemma 4 E2B", publisher: "Google",
+      summary: "A compact Google model for multilingual chat and image questions, with more weight memory than its E2B name suggests.", profile: .gemma4E2B, quality: 77, minimumGiB: 16, recommendedGiB: 24,
+      revision: "675cff42a74c774d6cb76f76d8eacb49b48c9b93", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B_q4_0-it.gguf")!,
+        expectedByteCount: 3349516256, checksumSHA256: "fa401b55b07ee70a54c6dae3903c783a6e65064312529ea57175cb5f8dec6634"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/resolve/675cff42a74c774d6cb76f76d8eacb49b48c9b93/gemma-4-E2B-it-mmproj.gguf")!,
+        expectedByteCount: 986833664, checksumSHA256: "021059cce659fe7f9170d5599761d7bbaf644b798dab9503aca30dc43e6beb14")),
+    package(id: "gemma-4-e4b-it-qat-q4_0-gguf", name: "Google Gemma 4 E4B", publisher: "Google",
+      summary: "A versatile Google model for reasoning, everyday writing and screenshot understanding.", profile: .gemma4E4B, quality: 86, minimumGiB: 24, recommendedGiB: 32,
+      revision: "4b4a2c1d584be7264f87aac328a1bc739ce81b6c", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/4b4a2c1d584be7264f87aac328a1bc739ce81b6c/gemma-4-E4B_q4_0-it.gguf")!,
+        expectedByteCount: 5154941280, checksumSHA256: "676c35070db6dbe52f93e9c864ee0fba4eddea94b9c875d9cb10daff453fbaee"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/resolve/4b4a2c1d584be7264f87aac328a1bc739ce81b6c/gemma-4-E4B-it-mmproj.gguf")!,
+        expectedByteCount: 991552256, checksumSHA256: "7498a37cb619e55f2fcf87eb931f56e99389ed6d432e4c5c66110694c0d65578")),
+    package(id: "gemma-4-26b-a4b-it-qat-q4_0-gguf", name: "Google Gemma 4 26B A4B", publisher: "Google",
+      summary: "A Google mixture-of-experts model for complex text and visual questions that still loads all 26 billion parameters.", profile: .gemma4A4B, quality: 91, minimumGiB: 48, recommendedGiB: 64,
+      revision: "d1c082be9cf3c8a514acf63b8761f4b41935842e", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/resolve/d1c082be9cf3c8a514acf63b8761f4b41935842e/gemma-4-26B_q4_0-it.gguf")!,
+        expectedByteCount: 14439363584, checksumSHA256: "3eca3b8f6d7baf218a7dd6bba5fb59a56ee25fe2d567b6f5f589b4f697eca51d"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/resolve/d1c082be9cf3c8a514acf63b8761f4b41935842e/gemma-4-26B-it-mmproj.gguf")!,
+        expectedByteCount: 1194828160, checksumSHA256: "a359953a076b877db30c31dbbb4c6d93b4a6e017ee5db5784247e4d4c0dd4f3b")),
+    package(id: "gemma-4-31b-it-qat-q4_0-gguf", name: "Google Gemma 4 31B", publisher: "Google",
+      summary: "A large Google model for demanding reasoning and image interpretation when ample memory is available.", profile: .gemma4_31B, quality: 93, minimumGiB: 64, recommendedGiB: 96,
+      revision: "59dde24573e7e61570dba08b18a2e1fe246955ed", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-31B-it-qat-q4_0-gguf/resolve/59dde24573e7e61570dba08b18a2e1fe246955ed/gemma-4-31B_q4_0-it.gguf")!,
+        expectedByteCount: 17651001568, checksumSHA256: "179cfb99212709597eae5929112cfca677e1bbf566178b479ae1da0c4772874b"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-31B-it-qat-q4_0-gguf/resolve/59dde24573e7e61570dba08b18a2e1fe246955ed/gemma-4-31B-it-mmproj.gguf")!,
+        expectedByteCount: 1200726368, checksumSHA256: "6bd60bdb958548b4093196d38744b0f2290c12503a3fddd7486bffa9c5eb07a4")),
+    package(id: "ministral-3-3b-instruct-2512-gguf", name: "Mistral Ministral 3 3B", publisher: "Mistral AI",
+      summary: "A lightweight Mistral model for quick everyday answers and visual questions, with less room for intricate reasoning.", profile: .ministral3B, quality: 70, minimumGiB: 12, recommendedGiB: 16,
+      revision: "eb599d408350ea2bb60452cb86be7c7b2fc28227", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/eb599d408350ea2bb60452cb86be7c7b2fc28227/Ministral-3-3B-Instruct-2512-Q4_K_M.gguf")!,
+        expectedByteCount: 2147023008, checksumSHA256: "9ed150d4367e68df0ac8e1540f6ddc65b42d0ee26378329d1ecbca60f93fc5f8"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/resolve/eb599d408350ea2bb60452cb86be7c7b2fc28227/Ministral-3-3B-Instruct-2512-BF16-mmproj.gguf")!,
+        expectedByteCount: 841501856, checksumSHA256: "70ca26e41ecea9da997e2887462ad68b848fbf64da011ff4107bbe7353519ee0")),
+    package(id: "ministral-3-8b-instruct-2512-gguf", name: "Mistral Ministral 3 8B", publisher: "Mistral AI",
+      summary: "A balanced Mistral model for multilingual conversation, instruction following and screenshot questions.", profile: .ministral8B, quality: 81, minimumGiB: 24, recommendedGiB: 32,
+      revision: "0102285ad796bd99af90f58de616092e5630e970", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF/resolve/0102285ad796bd99af90f58de616092e5630e970/Ministral-3-8B-Instruct-2512-Q4_K_M.gguf")!,
+        expectedByteCount: 5198911904, checksumSHA256: "33e7a72cf5e6e2cfc2f2847075acc013d68bba023e35310cef86b5cf8fdca761"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF/resolve/0102285ad796bd99af90f58de616092e5630e970/Ministral-3-8B-Instruct-2512-BF16-mmproj.gguf")!,
+        expectedByteCount: 858283168, checksumSHA256: "e799380f596d152ff4026a72d409ecc89c96cd437676804bc3f2ab3bd6b486ec")),
+    package(id: "ministral-3-14b-instruct-2512-gguf", name: "Mistral Ministral 3 14B", publisher: "Mistral AI",
+      summary: "A larger Mistral model for richer explanations and visual reasoning, with longer waits than its smaller siblings.", profile: .ministral14B, quality: 85, minimumGiB: 32, recommendedGiB: 48,
+      revision: "74fac473c43357d7fb2671713608183cc72496d0", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/mistralai/Ministral-3-14B-Instruct-2512-GGUF/resolve/74fac473c43357d7fb2671713608183cc72496d0/Ministral-3-14B-Instruct-2512-Q4_K_M.gguf")!,
+        expectedByteCount: 8239593024, checksumSHA256: "824e0f3373e69b84f2cae46fdcb9bd1ebc6ab3bfc7acc125d818b7b8178cc613"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/mistralai/Ministral-3-14B-Instruct-2512-GGUF/resolve/74fac473c43357d7fb2671713608183cc72496d0/Ministral-3-14B-Instruct-2512-BF16-mmproj.gguf")!,
+        expectedByteCount: 879258784, checksumSHA256: "ab7616148b7081030fd38e410c9213ce8346a8b0588291c8ca279058e78cfae7")),
+    package(id: "minicpm-v-4-gguf", name: "OpenBMB MiniCPM-V 4", publisher: "OpenBMB",
+      summary: "A compact OpenBMB model for image and document questions plus everyday chat.", profile: .miniCPMV4, quality: 68, minimumGiB: 12, recommendedGiB: 16,
+      revision: "c548a86e76648fe1cef8250ba60d7f2d9ba0996e", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/openbmb/MiniCPM-V-4-gguf/resolve/c548a86e76648fe1cef8250ba60d7f2d9ba0996e/ggml-model-Q4_K_M.gguf")!,
+        expectedByteCount: 2189861216, checksumSHA256: "b0ff610e9c92b30389ff1e0dd40fffed3c1f02a9d34a735fd5fba6a5ad25672b"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/openbmb/MiniCPM-V-4-gguf/resolve/c548a86e76648fe1cef8250ba60d7f2d9ba0996e/mmproj-model-f16.gguf")!,
+        expectedByteCount: 958777792, checksumSHA256: "f0faa9ae63532300999c86a196f140c716cd0fbb08bbbd81850f1f9a631f7761")),
+    package(id: "minicpm-v-4_5-gguf", name: "OpenBMB MiniCPM-V 4.5", publisher: "OpenBMB",
+      summary: "An OpenBMB vision model built on Qwen3 for detailed document, screenshot and general text questions.", profile: .miniCPMV45, quality: 83, minimumGiB: 24, recommendedGiB: 32,
+      revision: "8bfaecb5b1a65f068b86c32b997a3d5d8902eb36", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/openbmb/MiniCPM-V-4_5-gguf/resolve/8bfaecb5b1a65f068b86c32b997a3d5d8902eb36/MiniCPM-V-4_5-Q4_K_M.gguf")!,
+        expectedByteCount: 5026714304, checksumSHA256: "c1c3c33100b15b4caf7319acce4e23c0eb0ce1cbd12f70e8d24f05aa67b7512f"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/openbmb/MiniCPM-V-4_5-gguf/resolve/8bfaecb5b1a65f068b86c32b997a3d5d8902eb36/mmproj-model-f16.gguf")!,
+        expectedByteCount: 1095113184, checksumSHA256: "7a7225a32e8d453aaa3d22d8c579b5bf833c253f784cdb05c99c9a76fd616df8")),
   ]
+
+  private static func package(id: String, name: String, publisher: String, summary: String,
+    profile: LocalMultimodalProfile, quality: Double, minimumGiB: Int64, recommendedGiB: Int64,
+    revision: String, model: VerifiedModelArtifact, projector: VerifiedModelArtifact) -> LocalModelDescriptor {
+    LocalModelDescriptor(id: id, displayName: name, downloadURL: model.url,
+      expectedByteCount: model.expectedByteCount, license: "Apache-2.0", checksumSHA256: model.checksumSHA256,
+      revision: revision, quantization: profile.quantizations[0], architecture: profile.architecture,
+      chatTemplate: profile.chatTemplate, minimumLlamaBuild: LocalVisionRuntime.build,
+      estimatedRuntimeMemory: profile.memory(weights: model.expectedByteCount, projector: projector.expectedByteCount, context: 8192),
+      largestTensorBytes: (profile.architecture == "gemma4" ? 3 : 1) * LocalHardwareProfile.gib,
+      recommendedContextSize: 8192, qualityScore: quality, performanceClass: "General text and visual reasoning",
+      parameterBillions: profile.parameters, minimumMemory: minimumGiB * LocalHardwareProfile.gib,
+      recommendedMemory: recommendedGiB * LocalHardwareProfile.gib, projector: projector,
+      runtimeBuild: LocalVisionRuntime.build, publisher: publisher, modelSummary: summary, inferenceProfile: profile)
+  }
 }

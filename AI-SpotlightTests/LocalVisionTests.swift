@@ -78,7 +78,7 @@ final class LocalVisionTests: XCTestCase {
   }
 
   func testBundledVisionPackagesPinMatchingPairsAndOfficialRuntime() throws {
-    XCTAssertEqual(LocalVisionModelDescriptor.bundled.count, 3)
+    XCTAssertEqual(LocalVisionModelDescriptor.bundled.count, 12)
     for model in LocalVisionModelDescriptor.bundled {
       try model.validate()
       XCTAssertEqual(model.model.url.deletingLastPathComponent(), model.projector.url.deletingLastPathComponent())
@@ -435,7 +435,14 @@ final class LocalVisionTests: XCTestCase {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let chat = LocalChatViewModel(engine: LlamaCPPModelEngine(installationStore: LocalModelInstallationStore(modelsDirectory: directory)))
-    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, trust: nil)
+    // The ranked list excludes unsuitable models; use the same Mac profile
+    // on CI and locally so these assertions verify layout, not host resources.
+    let profile = LocalHardwareProfile(physicalMemory: 24 * LocalHardwareProfile.gib,
+      isAppleSilicon: true, hasMetal: true, hasUnifiedMemory: true,
+      chip: "Apple Silicon (24 GB fixture)", device: "Fixture Mac", cpuCount: 12, performanceCPUCount: 6,
+      availableDiskBytes: 200 * LocalHardwareProfile.gib, metalRecommendedWorkingSet: nil,
+      metalMaximumBufferLength: 8 * LocalHardwareProfile.gib, lowPowerMode: false)
+    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, trust: nil, detect: { _ in profile })
     await advisor.detectHardware()
     let view = NSHostingView(rootView: Form { LocalModelManagerSection(advisor: advisor, chat: chat) }.formStyle(.grouped))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 950), styleMask: [.borderless], backing: .buffered, defer: false)
@@ -455,6 +462,11 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertTrue(text.contains("Local Models"), text)
     XCTAssertFalse(text.contains("Image understanding"), text)
     XCTAssertTrue(text.contains("Qwen3"), text)
+    XCTAssertTrue(text.contains("Google Gemma 4 E4B"), text)
+    XCTAssertTrue(text.contains("OpenBMB"), text)
+    XCTAssertTrue(text.contains("Mistral"), text)
+    XCTAssertTrue(text.contains("everyday writing and screenshot understanding"), text)
+    XCTAssertTrue(text.contains("Best choices for this Mac"), text)
     XCTAssertFalse(text.contains("SmolVLM"), text)
     XCTAssertTrue(text.contains("Install"), text)
     XCTAssertFalse(text.contains("Choose a file"), text)
@@ -472,7 +484,14 @@ final class LocalVisionTests: XCTestCase {
     let chat = LocalChatViewModel(engine: LlamaCPPModelEngine(installationStore: store),
       sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
     await chat.refreshInstalledModel()
-    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, trust: nil)
+    // The ranked list excludes unsuitable models; use the same Mac profile
+    // on CI and locally so these assertions verify layout, not host resources.
+    let profile = LocalHardwareProfile(physicalMemory: 24 * LocalHardwareProfile.gib,
+      isAppleSilicon: true, hasMetal: true, hasUnifiedMemory: true,
+      chip: "Apple Silicon (24 GB fixture)", device: "Fixture Mac", cpuCount: 12, performanceCPUCount: 6,
+      availableDiskBytes: 200 * LocalHardwareProfile.gib, metalRecommendedWorkingSet: nil,
+      metalMaximumBufferLength: 8 * LocalHardwareProfile.gib, lowPowerMode: false)
+    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, trust: nil, detect: { _ in profile })
     await advisor.detectHardware()
     let view = NSHostingView(rootView: Form { LocalModelManagerSection(advisor: advisor, chat: chat) }.formStyle(.grouped))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 680, height: 1200),

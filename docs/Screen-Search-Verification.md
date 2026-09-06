@@ -6,9 +6,41 @@ handoff with one normally selected multimodal model. The existing branch is
 The starting head was `5a3ef9c`, whose GitHub CI passed. Its historical two-model
 results remain available in Git history; they are not current setup instructions.
 
-## Required local checks
+## Catalog expansion checks
 
-On the final implementation, Xcode 26.6, macOS, Apple M5 Pro, 24 GiB memory:
+Catalog version 3 expands the choices to twelve packages across Alibaba/Qwen,
+Google, Mistral AI and OpenBMB. Setup and settings show up to ten compatible choices
+in descending hardware-aware order, each with one sentence of description. See
+[the catalog and source review](Local-Model-Selection.md) for exact pinned packages,
+licenses, memory estimates and the editorial ranking policy.
+
+On the catalog implementation:
+
+- Required shared-scheme build and static analyzer passed.
+- Full automated suite: **273 discovered, 271 passed, two opt-in real-model tests
+  skipped, zero failures**. All 12 native panel regressions passed.
+- Focused catalog/runtime suite: 46 tests passed. After fixing the rendering tests
+  to use a deterministic 24 GiB Mac profile, all 22 local-vision tests passed again.
+- New regressions cover twelve complete packages/four makers, descriptions,
+  deterministic top-ten ordering, resource gates, fewer-than-ten behavior,
+  architecture-specific memory floors, measured demotion across families and
+  legacy descriptor decoding without changing package identity.
+- Native settings/onboarding renders were inspected. No interactive region
+  selection was performed and no app formatter was introduced.
+
+The owner requested to perform new-family response testing separately. Temporary
+candidate downloads were stopped and their partial files removed; no candidate
+was installed in the owner's library. New-family text/image output quality and
+real resource use have not been measured here. The pre-existing two optional
+native tests remain intact. The prior Qwen 4B results below describe the earlier
+unified runtime verification, not a new benchmark of this expanded catalog.
+
+The exact committed revision and GitHub CI outcome are recorded on
+[draft PR #3](https://github.com/leow427/AI-Spotlight/pull/3).
+
+## Prior unified-runtime local checks (`577fad3`)
+
+On the preceding unified-runtime implementation, Xcode 26.6, macOS, Apple M5 Pro, 24 GiB memory:
 
 - `scripts/verify-xcode.sh build`: passed.
 - `scripts/verify-xcode.sh test`: **270 tests, zero failures, zero skips**, including

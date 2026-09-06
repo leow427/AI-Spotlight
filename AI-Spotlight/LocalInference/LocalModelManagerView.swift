@@ -16,6 +16,7 @@ struct LocalModelChoiceCard: View {
         VStack(alignment: .leading, spacing: 5) {
           Text(role).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
           Text(assessment.model.displayName).font(.headline)
+          Text(assessment.model.summary).font(.subheadline).foregroundStyle(.secondary)
           Text("\(assessment.model.downloadByteCount, format: .byteCount(style: .file)) download · \(assessment.fit.rawValue)")
             .font(.subheadline)
           Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
@@ -57,25 +58,18 @@ struct LocalModelOnboardingView: View {
             .font(.caption).foregroundStyle(.secondary)
         }
       }
+      Text("Up to 10 choices, best suited to this Mac first; fewer appear when resources are limited.")
+        .font(.caption).foregroundStyle(.secondary)
       ScrollView {
         VStack(spacing: 10) {
-          if let recommended = recommendations.recommended {
-            LocalModelChoiceCard(assessment: recommended, role: "Recommended", isSelected: selected?.id == recommended.id) {
-              selectedID = recommended.id
-            }
-            if let faster = recommendations.faster {
-              LocalModelChoiceCard(assessment: faster, role: "Faster", isSelected: selected?.id == faster.id) {
-                selectedID = faster.id
-              }
-            }
-            if let smarter = recommendations.smarter {
-              LocalModelChoiceCard(assessment: smarter, role: "Smarter · Higher latency", isSelected: selected?.id == smarter.id) {
-                selectedID = smarter.id
-              }
-            }
-          } else {
-            ContentUnavailableView("No responsive model found", systemImage: "memorychip",
-              description: Text("No supported text-and-image model comfortably fits this Mac’s memory, speed or disk budget. Review Local Models for the specific limits. Cloud is also available."))
+          ForEach(Array(recommendations.rankedChoices.enumerated()), id: \.element.id) { index, assessment in
+            LocalModelChoiceCard(assessment: assessment,
+              role: "\(index + 1). \(assessment.id == recommendations.recommended?.id ? "Recommended" : "Alternative")",
+              isSelected: selected?.id == assessment.id) { selectedID = assessment.id }
+          }
+          if recommendations.rankedChoices.isEmpty {
+            ContentUnavailableView("No suitable model found", systemImage: "memorychip",
+              description: Text("No supported text-and-image model fits this Mac’s memory or disk budget. Review Local Models for the specific limits. Cloud is also available."))
           }
         }
         .padding(1)
@@ -187,44 +181,23 @@ struct LocalModelManagerSection: View {
           .disabled(chat.installedModel == nil)
       }
       .disabled(chat.isBusy || advisor.isDetecting)
-      ForEach(recommendations.assessments.sorted { lhs, rhs in
-        if lhs.id == rhs.id { return false }
-        if lhs.id == recommendations.recommended?.id { return true }
-        if rhs.id == recommendations.recommended?.id { return false }
-        if lhs.fit.canRun != rhs.fit.canRun { return lhs.fit.canRun }
-        if lhs.isResponsive != rhs.isResponsive { return lhs.isResponsive }
-        return LocalModelSelector.qualityOrder(lhs, rhs)
-      }) { assessment in
-        VStack(alignment: .leading, spacing: 6) {
-          HStack(alignment: .top) {
-            Text(assessment.model.displayName).font(.subheadline.weight(.medium))
-            Spacer(minLength: 8)
-            if let installed = chat.installedModels.first(where: { $0.id == assessment.id }),
-               !assessment.model.requiresUpdate(installed) {
-              Button(chat.installedModel?.id == assessment.id ? "Selected" : "Use") {
-                chat.selectModel(id: assessment.id)
-              }
-              .disabled(chat.isBusy || !assessment.fit.canRun || chat.installedModel?.id == assessment.id)
-            } else {
-              Button(chat.installedModels.contains { $0.id == assessment.id } ? "Update" : "Install") { chat.downloadModel(assessment.model) }
-                .disabled(chat.isBusy || !assessment.fit.canRun)
-            }
+      Text("Best choices for this Mac")
+        .font(.headline)
+      Text("Up to 10 compatible models, ranked by responsiveness and reviewed text/image capability. Check Performance can refine the order for your Mac.")
+        .font(.caption).foregroundStyle(.secondary)
+      if recommendations.rankedChoices.count < 10 {
+        Text("\(recommendations.rankedChoices.count) compatible choices are available on this Mac; up to 10 are shown.")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      ForEach(Array(recommendations.rankedChoices.enumerated()), id: \.element.id) { index, assessment in
+        modelRow(assessment, rank: index + 1, isRecommended: assessment.id == recommendations.recommended?.id)
+      }
+      if !recommendations.otherAssessments.isEmpty {
+        DisclosureGroup("Other models and hardware limits") {
+          ForEach(recommendations.otherAssessments) { assessment in
+            modelRow(assessment)
           }
-          Text(assessment.id == recommendations.recommended?.id ? "Recommended · \(assessment.fit.rawValue)" : assessment.fit.rawValue)
-            .font(.caption.weight(.medium))
-            .foregroundStyle(assessment.fit.canRun ? Color.secondary : .orange)
-          Text("\(assessment.model.downloadByteCount, format: .byteCount(style: .file)) · \(assessment.model.license)")
-            .font(.caption).foregroundStyle(.secondary)
-          Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
-          DisclosureGroup("Model details") {
-            Text("\(assessment.model.quantization) · \(assessment.model.recommendedContextSize) token context · \(assessment.model.performanceClass)")
-            Text("Estimated memory \(assessment.model.estimatedRuntimeMemory, format: .byteCount(style: .memory)) · Minimum Mac memory \(assessment.model.minimumMemory, format: .byteCount(style: .memory))")
-            Link("Model card and license", destination: assessment.model.downloadURL
-              .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent())
-          }
-          .font(.caption)
         }
-        .padding(.vertical, 5)
       }
       let imported = chat.installedModels.filter { model in !advisor.manifest.models.contains { $0.id == model.id } }
       ForEach(imported) { model in
@@ -250,5 +223,39 @@ struct LocalModelManagerSection: View {
       allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data], allowsMultipleSelection: false) { result in
       if case .success(let urls) = result, let url = urls.first { chat.installModel(from: url) }
     }
+  }
+
+  private func modelRow(_ assessment: LocalModelAssessment, rank: Int? = nil, isRecommended: Bool = false) -> some View {
+    VStack(alignment: .leading, spacing: 6) {
+      HStack(alignment: .top) {
+        Text(rank.map { "\($0). \(assessment.model.displayName)" } ?? assessment.model.displayName).font(.subheadline.weight(.medium))
+        Spacer(minLength: 8)
+        if let installed = chat.installedModels.first(where: { $0.id == assessment.id }),
+           !assessment.model.requiresUpdate(installed) {
+          Button(chat.installedModel?.id == assessment.id ? "Selected" : "Use") {
+            chat.selectModel(id: assessment.id)
+          }
+          .disabled(chat.isBusy || !assessment.fit.canRun || chat.installedModel?.id == assessment.id)
+        } else {
+          Button(chat.installedModels.contains { $0.id == assessment.id } ? "Update" : "Install") { chat.downloadModel(assessment.model) }
+            .disabled(chat.isBusy || !assessment.fit.canRun)
+        }
+      }
+      Text(assessment.model.summary).font(.subheadline).foregroundStyle(.secondary)
+      Text(isRecommended ? "Recommended · \(assessment.fit.rawValue)" : assessment.fit.rawValue)
+        .font(.caption.weight(.medium))
+        .foregroundStyle(assessment.fit.canRun ? Color.secondary : .orange)
+      Text("\(assessment.model.maker) · \(assessment.model.downloadByteCount, format: .byteCount(style: .file)) · \(assessment.model.license)")
+        .font(.caption).foregroundStyle(.secondary)
+      Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
+      DisclosureGroup("Model details") {
+        Text("\(assessment.model.quantization) · \(assessment.model.recommendedContextSize) token context · \(assessment.model.performanceClass)")
+        Text("Estimated memory \(assessment.model.estimatedRuntimeMemory, format: .byteCount(style: .memory)) · Minimum Mac memory \(assessment.model.minimumMemory, format: .byteCount(style: .memory))")
+        Link("Model card and license", destination: assessment.model.downloadURL
+          .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent())
+      }
+      .font(.caption)
+    }
+    .padding(.vertical, 5)
   }
 }

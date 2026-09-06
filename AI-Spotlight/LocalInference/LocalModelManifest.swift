@@ -24,6 +24,18 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
   // Optional for decoding existing text-only installations and old signed catalogs.
   var projector: VerifiedModelArtifact? = nil
   var runtimeBuild: Int? = nil
+  var publisher: String? = nil
+  var modelSummary: String? = nil
+  var inferenceProfile: LocalMultimodalProfile? = nil
+
+  var summary: String {
+    modelSummary ?? (supportsVision ? "A local model for general text answers and screenshot understanding."
+      : "A legacy text-only model for chat and OCR text; direct image input is unsupported.")
+  }
+  var maker: String { publisher ?? (architecture == "qwen3vl" ? "Alibaba / Qwen" : "Imported model") }
+  var resolvedProfile: LocalMultimodalProfile? {
+    inferenceProfile ?? LocalMultimodalProfile.legacyQwen(parameters: parameterBillions)
+  }
 
   var downloadByteCount: Int64 {
     expectedByteCount + (projector?.expectedByteCount ?? 0)
@@ -46,7 +58,7 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
   var visionDescriptor: LocalVisionModelDescriptor? {
     guard let projector else { return nil }
     return LocalVisionModelDescriptor(id: id, displayName: displayName,
-      summary: "Text, images and visual reasoning in one model.",
+      summary: summary,
       model: VerifiedModelArtifact(url: downloadURL, expectedByteCount: expectedByteCount, checksumSHA256: checksumSHA256),
       projector: projector, estimatedRuntimeMemory: estimatedRuntimeMemory)
   }
@@ -68,14 +80,17 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
           (256...131_072).contains(recommendedContextSize),
           qualityScore.isFinite, (0...100).contains(qualityScore),
           !performanceClass.isEmpty, parameterBillions.isFinite, parameterBillions > 0,
+          publisher.map({ !$0.isEmpty && $0.count <= 100 }) ?? true,
+          modelSummary.map({ !$0.isEmpty && $0.count <= 300 && !$0.contains("\n") }) ?? true,
           minimumMemory >= estimatedRuntimeMemory, recommendedMemory >= minimumMemory else {
       throw LocalModelCatalogError.invalidManifest(id)
     }
     if let projector {
       try visionDescriptor!.validate()
       guard runtimeBuild == LocalVisionRuntime.build,
-            estimatedRuntimeMemory >= Self.multimodalMemory(weights: expectedByteCount,
-              projector: projector.expectedByteCount, parameters: parameterBillions, context: recommendedContextSize) else {
+            let profile = resolvedProfile,
+            estimatedRuntimeMemory >= profile.memory(weights: expectedByteCount,
+              projector: projector.expectedByteCount, context: recommendedContextSize) else {
         throw LocalModelCatalogError.invalidManifest(id)
       }
     } else if runtimeBuild != nil { throw LocalModelCatalogError.invalidManifest(id) }
@@ -86,6 +101,75 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
     let layers: Int64 = parameters > 8 ? 64 : 36
     let kv = layers * 8 * 128 * 4 * Int64(context)
     return Int64(Double(weights + projector) * 1.2) + kv + 2 * LocalHardwareProfile.gib
+  }
+}
+
+/// Reviewed against publisher configs and the pinned runtime; full-context F16
+/// cache is reserved even for sliding/shared KV layers, avoiding optimistic fits.
+enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
+  case qwen3VL4B, qwen3VL8B, qwen3VL32B
+  case gemma4E2B, gemma4E4B, gemma4A4B, gemma4_31B
+  case ministral3B, ministral8B, ministral14B
+  case miniCPMV4, miniCPMV45
+
+  static func legacyQwen(parameters: Double) -> Self? {
+    switch parameters { case 4: .qwen3VL4B; case 8: .qwen3VL8B; case 32: .qwen3VL32B; default: nil }
+  }
+
+  var architecture: String {
+    switch self {
+    case .qwen3VL4B, .qwen3VL8B, .qwen3VL32B: "qwen3vl"
+    case .gemma4E2B, .gemma4E4B, .gemma4A4B, .gemma4_31B: "gemma4"
+    case .ministral3B, .ministral8B, .ministral14B: "mistral3"
+    case .miniCPMV4: "llama"
+    case .miniCPMV45: "qwen3"
+    }
+  }
+
+  var chatTemplate: String {
+    switch self {
+    case .qwen3VL4B, .qwen3VL8B, .qwen3VL32B: "qwen3-vl-instruct"
+    case .gemma4E2B, .gemma4E4B, .gemma4A4B, .gemma4_31B: "gemma4-instruct"
+    case .ministral3B, .ministral8B, .ministral14B: "ministral3-instruct"
+    case .miniCPMV4: "minicpm-v4"
+    case .miniCPMV45: "minicpm-v4.5"
+    }
+  }
+
+  var parameters: Double {
+    switch self {
+    case .qwen3VL4B: 4; case .qwen3VL8B: 8; case .qwen3VL32B: 32
+    case .gemma4E2B: 4.6; case .gemma4E4B: 7.5; case .gemma4A4B: 26; case .gemma4_31B: 31
+    case .ministral3B: 3.4; case .ministral8B: 8.5; case .ministral14B: 13.5
+    case .miniCPMV4: 3.6; case .miniCPMV45: 8.2
+    }
+  }
+
+  var quantizations: [String] {
+    architecture == "gemma4" ? ["Q4_0"] : ["Q4_K_M", "Q8_0"]
+  }
+
+  var cacheBytesPerToken: Int64 {
+    // K and V are both F16 (4 bytes together); Gemma global and sliding
+    // layers use different head dimensions/head counts. PLE/MoE weights
+    // are already included in the actual artifact bytes, never active params.
+    switch self {
+    case .qwen3VL4B, .qwen3VL8B, .miniCPMV45: 36 * 8 * 128 * 4
+    case .qwen3VL32B: 64 * 8 * 128 * 4
+    case .gemma4E2B: (28 * 1 * 256 + 7 * 1 * 512) * 4
+    case .gemma4E4B: (35 * 2 * 256 + 7 * 2 * 512) * 4
+    case .gemma4A4B: (25 * 8 * 256 + 5 * 2 * 512) * 4
+    case .gemma4_31B: (50 * 16 * 256 + 10 * 4 * 512) * 4
+    case .ministral3B: 26 * 8 * 128 * 4
+    case .ministral8B: 34 * 8 * 128 * 4
+    case .ministral14B: 40 * 8 * 128 * 4
+    case .miniCPMV4: 32 * 2 * 128 * 4
+    }
+  }
+
+  func memory(weights: Int64, projector: Int64, context: Int) -> Int64 {
+    Int64(Double(weights + projector) * 1.2) + cacheBytesPerToken * Int64(context)
+      + 2 * LocalHardwareProfile.gib
   }
 }
 
@@ -102,7 +186,7 @@ struct LocalModelManifest: Codable, Sendable, Equatable {
     try models.forEach { try $0.validate() }
   }
 
-  static let bundled = LocalModelManifest(version: 2, models: BundledLocalModels.models)
+  static let bundled = LocalModelManifest(version: 3, models: BundledLocalModels.models)
 }
 
 struct ModelDownloadProgress: Sendable, Equatable {
@@ -394,7 +478,7 @@ struct LocalVisionModelDescriptor: Sendable, Equatable, Identifiable {
     for artifact in [model, projector] {
       try artifact.validate()
       let path = artifact.url.pathComponents
-      guard artifact.url.host == "huggingface.co", path.count == 6, ["ggml-org", "Qwen"].contains(path[1]),
+      guard artifact.url.host == "huggingface.co", path.count == 6, ["ggml-org", "Qwen", "google", "mistralai", "openbmb"].contains(path[1]),
             path[3] == "resolve", path[4].range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil,
             artifact.url.pathExtension == "gguf",
             artifact.url.deletingLastPathComponent() == model.url.deletingLastPathComponent() else {

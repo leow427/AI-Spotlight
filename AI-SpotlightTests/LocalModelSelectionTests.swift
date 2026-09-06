@@ -11,11 +11,16 @@ final class LocalModelSelectionTests: XCTestCase {
 
   func testCatalogPinsEveryQuantizationAndMatchesEmbeddedBuild() throws {
     try catalog.validate()
-    XCTAssertEqual(catalog.models.count, 3)
-    XCTAssertEqual(Set(catalog.models.map(\.quantization)), ["Q4_K_M"])
+    XCTAssertEqual(catalog.models.count, 12)
+    XCTAssertEqual(Set(catalog.models.map(\.quantization)), ["Q4_K_M", "Q4_0"])
+    XCTAssertEqual(Set(catalog.models.map(\.maker)), ["Alibaba / Qwen", "Google", "Mistral AI", "OpenBMB"])
+    XCTAssertEqual(Set(catalog.models.compactMap(\.resolvedProfile)), Set(LocalMultimodalProfile.allCases))
     for model in catalog.models {
       XCTAssertTrue(LocalModelCompatibility.supports(model))
       XCTAssertTrue(model.supportsVision)
+      XCTAssertNotNil(model.modelSummary)
+      XCTAssertLessThanOrEqual(model.summary.count, 300)
+      XCTAssertTrue(model.summary.hasSuffix("."))
       XCTAssertNotNil(model.projector)
       XCTAssertEqual(model.runtimeBuild, LocalVisionRuntime.build)
       XCTAssertGreaterThanOrEqual(model.recommendedContextSize, 4_096)
@@ -24,6 +29,68 @@ final class LocalModelSelectionTests: XCTestCase {
     let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .appending(path: "Packages/LlamaBridge/Package.swift")
     XCTAssertTrue(try String(contentsOf: source, encoding: .utf8).contains("releases/download/b\(LocalModelCompatibility.llamaBuild)/"))
+  }
+
+  func testTopTenAreDeterministicHardwareRankedAndNeverPaddedWithUnsafeModels() throws {
+    var mac = hardware(memory: 128)
+    mac.performanceCPUCount = 16
+    let choices = LocalModelSelector.select(manifest: catalog, hardware: mac)
+    XCTAssertEqual(choices.rankedChoices.count, 10)
+    XCTAssertEqual(choices.rankedChoices.first?.id, choices.recommended?.id)
+    XCTAssertEqual(Set(choices.rankedChoices.map(\.id)).count, 10)
+    XCTAssertTrue(choices.rankedChoices.allSatisfy { $0.fit.canRun })
+    XCTAssertGreaterThanOrEqual(Set(choices.rankedChoices.map(\.model.maker)).count, 3)
+    let reversed = LocalModelSelector.select(manifest: LocalModelManifest(version: catalog.version,
+      models: catalog.models.reversed()), hardware: mac)
+    XCTAssertEqual(choices.rankedChoices.map(\.id), reversed.rankedChoices.map(\.id))
+    XCTAssertEqual(Set(choices.rankedChoices.map(\.id)).union(choices.otherAssessments.map(\.id)), Set(catalog.models.map(\.id)))
+    for (higher, lower) in zip(choices.rankedChoices, choices.rankedChoices.dropFirst()) {
+      XCTAssertTrue(LocalModelSelector.hardwareOrder(higher, lower))
+    }
+    let small = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 8))
+    XCTAssertTrue(small.rankedChoices.isEmpty)
+    XCTAssertNil(small.recommended)
+    XCTAssertEqual(small.otherAssessments.count, catalog.models.count)
+    let ordinary = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 24))
+    XCTAssertLessThan(ordinary.rankedChoices.count, 10)
+    XCTAssertGreaterThanOrEqual(Set(ordinary.rankedChoices.map(\.model.maker)).count, 4)
+    XCTAssertTrue(ordinary.rankedChoices.allSatisfy { $0.model.minimumMemory <= 24 * gib })
+    mac.availableDiskBytes = 0
+    XCTAssertTrue(LocalModelSelector.select(manifest: catalog, hardware: mac).rankedChoices.isEmpty)
+  }
+
+  func testEveryFamilyHasAReviewedMemoryFloorAndRejectsMismatchedProfiles() throws {
+    for model in catalog.models {
+      let profile = try XCTUnwrap(model.resolvedProfile)
+      let projector = try XCTUnwrap(model.projector)
+      let required = profile.memory(weights: model.expectedByteCount, projector: projector.expectedByteCount, context: 8192)
+      XCTAssertGreaterThanOrEqual(model.estimatedRuntimeMemory, required)
+      XCTAssertThrowsError(try modifying(model, ["estimatedRuntimeMemory": required - 1]).validate())
+      let incorrect = try modifying(model, ["chatTemplate": "another-family"])
+      XCTAssertEqual(LocalModelSelector.assess(incorrect, hardware: hardware(memory: 128)).fit, .unsupported)
+      let record = benchmark(model: model, hardware: hardware(memory: 128), speed: 2)
+      XCTAssertTrue(record.isApplicable(to: hardware(memory: 128)))
+      let measured = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 128), measurements: [record])
+      XCTAssertTrue(try XCTUnwrap(measured.assessments.first { $0.id == model.id }).isMeasured)
+      XCTAssertNotEqual(measured.recommended?.id, model.id)
+    }
+    XCTAssertEqual(LocalMultimodalProfile.ministral14B.cacheBytesPerToken, 163_840)
+    XCTAssertEqual(LocalMultimodalProfile.gemma4E4B.cacheBytesPerToken, 100_352)
+    let moe = try XCTUnwrap(catalog.models.first { $0.inferenceProfile == .gemma4A4B })
+    XCTAssertGreaterThan(moe.expectedByteCount, 14_000_000_000)
+    XCTAssertGreaterThan(moe.estimatedRuntimeMemory, 20 * gib)
+  }
+
+  func testOldInstalledDescriptorDecodesWithoutDescriptionsOrProfilesAndKeepsPackageIdentity() throws {
+    let model = catalog.models[0]
+    var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(model)) as? [String: Any])
+    for key in ["publisher", "modelSummary", "inferenceProfile"] { json.removeValue(forKey: key) }
+    let restored = try JSONDecoder().decode(LocalModelDescriptor.self, from: JSONSerialization.data(withJSONObject: json))
+    try restored.validate()
+    XCTAssertEqual(restored.packageRevision, model.packageRevision)
+    XCTAssertTrue(LocalModelCompatibility.supports(restored))
+    XCTAssertFalse(restored.summary.isEmpty)
+    XCTAssertEqual(restored.maker, "Alibaba / Qwen")
   }
 
   func testBudgetReservesOSMemoryAndHonorsMetalWorkingSet() {
@@ -174,10 +241,10 @@ final class LocalModelSelectionTests: XCTestCase {
   func testSignedCatalogAcceptsTrustedUpdateAndRejectsTamperingWrongKeyAndRollback() throws {
     let key = Curve25519.Signing.PrivateKey()
     let trust = LocalCatalogTrust(url: URL(string: "https://example.com/catalog.json")!, publicKey: key.publicKey.rawRepresentation)
-    let updated = LocalModelManifest(version: 2, models: catalog.models)
+    let updated = LocalModelManifest(version: catalog.version + 1, models: catalog.models)
     let signed = try signedData(updated, key: key)
     XCTAssertEqual(try trust.verify(signed, minimumVersion: 1), updated)
-    XCTAssertThrowsError(try trust.verify(signed, minimumVersion: 3))
+    XCTAssertThrowsError(try trust.verify(signed, minimumVersion: updated.version + 1))
     XCTAssertThrowsError(try trust.verify(signedData(updated, key: .init()), minimumVersion: 1))
     let envelope = try JSONDecoder().decode(SignedLocalModelCatalog.self, from: signed)
     let tampered = SignedLocalModelCatalog(payload: Data("tampered".utf8), signature: envelope.signature)
@@ -192,7 +259,7 @@ final class LocalModelSelectionTests: XCTestCase {
     let root = try temporaryDirectory()
     let key = Curve25519.Signing.PrivateKey()
     let trust = LocalCatalogTrust(url: URL(string: "https://example.invalid/catalog.json")!, publicKey: key.publicKey.rawRepresentation)
-    let updated = LocalModelManifest(version: 2, models: catalog.models)
+    let updated = LocalModelManifest(version: catalog.version + 1, models: catalog.models)
     let now = Date()
     try signedData(updated, key: key).write(to: root.appending(path: "signed-model-catalog.json"))
     try JSONEncoder().encode(now).write(to: root.appending(path: "catalog-last-check.json"))

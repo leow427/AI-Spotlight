@@ -8,10 +8,11 @@ enum LocalModelCompatibility {
 
   static func supports(_ model: LocalModelDescriptor) -> Bool {
     if model.supportsVision {
+      guard let profile = model.resolvedProfile else { return false }
       return model.runtimeBuild == LocalVisionRuntime.build && model.minimumLlamaBuild <= LocalVisionRuntime.build
-        && model.architecture == "qwen3vl" && model.chatTemplate == "qwen3-vl-instruct"
-        && [4.0, 8.0, 32.0].contains(model.parameterBillions)
-        && ["Q4_K_M", "Q8_0"].contains(model.quantization) && model.recommendedContextSize == 8192
+        && model.architecture == profile.architecture && model.chatTemplate == profile.chatTemplate
+        && model.parameterBillions == profile.parameters
+        && profile.quantizations.contains(model.quantization) && model.recommendedContextSize == 8192
     }
     return model.minimumLlamaBuild <= llamaBuild && model.architecture == "qwen2"
       && model.chatTemplate == "chatml"
@@ -55,6 +56,16 @@ struct LocalModelRecommendations: Sendable {
   let faster: LocalModelAssessment?
   let smarter: LocalModelAssessment?
 
+  /// Best suitable choices only; unavailable entries never fill the top ten.
+  var rankedChoices: [LocalModelAssessment] {
+    Array(assessments.filter(\.fit.canRun).sorted(by: LocalModelSelector.hardwareOrder).prefix(10))
+  }
+
+  var otherAssessments: [LocalModelAssessment] {
+    let visible = Set(rankedChoices.map(\.id))
+    return assessments.filter { !visible.contains($0.id) }.sorted(by: LocalModelSelector.hardwareOrder)
+  }
+
   func fasterAlternative(to modelID: String) -> LocalModelAssessment? {
     guard let current = assessments.first(where: { $0.id == modelID }) else { return nil }
     return assessments.filter {
@@ -90,6 +101,12 @@ enum LocalModelSelector {
     }
     return LocalModelRecommendations(assessments: assessments, recommended: recommended,
                                      faster: faster, smarter: smarter)
+  }
+
+  static func hardwareOrder(_ lhs: LocalModelAssessment, _ rhs: LocalModelAssessment) -> Bool {
+    if lhs.fit.canRun != rhs.fit.canRun { return lhs.fit.canRun }
+    if lhs.isResponsive != rhs.isResponsive { return lhs.isResponsive }
+    return qualityOrder(lhs, rhs)
   }
 
   static func qualityOrder(_ lhs: LocalModelAssessment, _ rhs: LocalModelAssessment) -> Bool {

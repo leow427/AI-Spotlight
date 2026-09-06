@@ -38,3 +38,15 @@ License: Apache License 2.0. Model weights are downloaded separately, not bundle
 https://huggingface.co/Qwen
 https://github.com/QwenLM/Qwen3-VL/blob/main/LICENSE
 The optional llama.cpp b10797 runtime is MIT licensed as above.
+
+Additional multimodal model packages (optional downloads)
+========================================================
+Google Gemma 4 E2B, E4B, 26B A4B and 31B official QAT Q4_0 GGUFs and projectors.
+Mistral AI Ministral 3 3B, 8B and 14B Instruct official GGUFs and projectors.
+OpenBMB MiniCPM-V 4 and 4.5 official GGUFs and projectors.
+License: Apache License 2.0, as identified by the publishers' model cards.
+https://huggingface.co/google
+https://huggingface.co/mistralai
+https://github.com/OpenBMB/MiniCPM-V/blob/main/LICENSE
+Exact pinned repositories and model-card links: docs/Local-Model-Selection.md.
+These weights are downloaded separately and are not included in the app binary.
