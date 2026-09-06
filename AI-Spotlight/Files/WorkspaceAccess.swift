@@ -3,17 +3,19 @@ import Foundation
 
 enum FileModeError: LocalizedError, Equatable {
   case outsideWorkspace, unsafeFile, readOnly, invalidArguments, tooLarge, conflict, inactive
+  case protectedWriteRequiresCloud
   case operation(String)
 
   var errorDescription: String? {
     switch self {
     case .outsideWorkspace: "That location is not attached. Choose it with + → Files first."
     case .unsafeFile: "File Mode cannot access links, special files, or protected project settings."
-    case .readOnly: "This local model has Read Only access. It can suggest edits. Choose Use Codex to allow cloud editing."
+    case .readOnly: "This workspace has Read Only access. File changes are not allowed by its current permission grant."
     case .invalidArguments: "The file operation was incomplete or ambiguous. No change was made."
     case .tooLarge: "This file or request exceeds File Mode’s size limit. Choose a smaller file or a more specific folder."
     case .conflict: "A file changed outside this task. Your newer work was kept. Review the files before trying again."
     case .inactive: "File access has ended. Attach the location again to continue."
+    case .protectedWriteRequiresCloud: "This protected edit requires the user's Codex cloud permission. No protected file was changed."
     case .operation(let message): message
     }
   }
@@ -103,16 +105,12 @@ struct WorkspaceSelection: Codable, Equatable, Sendable {
 
 enum FileAccessLevel: String, Sendable { case readOnly = "Read Only", readWrite = "Read & Edit" }
 
-/// Trust is a release-controlled allowlist of tested model artifacts, never a parameter-count heuristic
-/// or an editable catalog field. An empty production allowlist intentionally disables local writes.
+/// Explicit File Mode grants local models the same scoped editing access as Codex. The grant
+/// is independent of model size or catalog metadata; filesystem validation still applies to every tool.
 struct LocalFileCapabilities: Sendable {
-  static let production = LocalFileCapabilities(trustedArtifactHashes: [])
-  let trustedArtifactHashes: Set<String>
-  func access(for model: LocalModel) -> FileAccessLevel {
-    guard let hash = model.catalogDescriptor?.checksumSHA256,
-          trustedArtifactHashes.contains(hash.lowercased()) else { return .readOnly }
-    return .readWrite
-  }
+  static let production = LocalFileCapabilities(accessLevel: .readWrite)
+  let accessLevel: FileAccessLevel
+  func access(for _: LocalModel) -> FileAccessLevel { accessLevel }
 }
 
 /// Scoped descriptors are retained for a task. Every descendant is opened relative to a verified
@@ -211,6 +209,12 @@ final class WorkspaceAccess: @unchecked Sendable {
       throw FileModeError.unsafeFile
     }
     return Location(mount: index, components: parts)
+  }
+
+  func absolutePath(_ location: Location) -> String {
+    let attachment = mounts[location.mount].attachment
+    let root = attachment.isDirectory ? attachment.url : attachment.url.deletingLastPathComponent()
+    return location.components.reduce(root) { $0.appendingPathComponent($1) }.path
   }
 
   func withParent<T>(_ location: Location, _ body: (Int32, String) throws -> T) throws -> T {

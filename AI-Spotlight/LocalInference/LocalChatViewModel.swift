@@ -63,6 +63,7 @@ final class LocalChatViewModel: ObservableObject {
   let files: FileModeCoordinator
   private let fileInference: any LocalToolInference
   private let fileCodex: CodexSubscriptionClient
+  private let fileCloudAvailability: WorkspaceWritePolicy.CloudCheck
   private let engine: any LocalModelEngine
   private let visionEngine: any LocalVisionServing
   private let webSearch: any WebSearchProvider
@@ -79,6 +80,7 @@ final class LocalChatViewModel: ObservableObject {
     files: FileModeCoordinator? = nil,
     fileInference: (any LocalToolInference)? = nil,
     fileCodex: CodexSubscriptionClient = .live,
+    fileCloudAvailability: WorkspaceWritePolicy.CloudCheck? = nil,
     visionEngine: any LocalVisionServing = LlamaServerVisionEngine(),
     modelAdvisor: LocalModelAdvisor? = nil,
     cloudProviders: CloudProviderRegistry = .live,
@@ -91,6 +93,11 @@ final class LocalChatViewModel: ObservableObject {
     self.files = files ?? FileModeCoordinator()
     self.fileInference = fileInference ?? (visionEngine as? any LocalToolInference) ?? LlamaServerVisionEngine()
     self.fileCodex = fileCodex
+    self.fileCloudAvailability = fileCloudAvailability ?? {
+      if await ScreenConnectivity.shared.isOffline { return .unavailable(reason: "This Mac is offline.") }
+      guard CodexRuntimeConfiguration.executableURL() != nil else { return .unavailable(reason: "Codex is not installed.") }
+      return await fileCodex.fileEditingAvailability(preferredModelID: CloudPreferencesStore().preferredModel(for: .chatGPT))
+    }
     self.visionEngine = visionEngine
     self.modelAdvisor = modelAdvisor
     self.webSearch = webSearch
@@ -252,7 +259,7 @@ final class LocalChatViewModel: ObservableObject {
     let model = installedModel
     let level = local ? model.map { LocalFileCapabilities.production.access(for: $0) } ?? .readOnly : .readWrite
     let fileTools: AgentFileTools
-    do { fileTools = try files.begin(access: level) }
+    do { fileTools = try files.begin(access: level, isLocal: local, prompt: prompt, cloudAvailability: fileCloudAvailability) }
     catch { files.error = error.localizedDescription; return }
     let route = Route(mode: local ? .local : .cloud,
       providerID: local ? "llama.cpp" : CloudProviderID.chatGPT.rawValue,

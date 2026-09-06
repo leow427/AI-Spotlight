@@ -22,6 +22,7 @@ struct AgentToolDefinition: Sendable {
 struct AgentToolResult: Sendable, Equatable {
   let text: String
   let success: Bool
+  var requiresCloudConsent = false
   var codex: CodexValue {
     .object(["success": .bool(success), "contentItems": .array([
       .object(["type": .string("inputText"), "text": .string(text)])])])
@@ -47,7 +48,9 @@ struct AgentFileTools: Sendable {
   Do not request shell commands, execute project code, read unrelated locations, or upload an entire project.
   Use apply_patch with a unique old_text match for targeted edits. Parent directories must already exist.
   Delete only when the user's task explicitly requires it; deletion also needs the user's confirmation.
-  Explain what changed in plain language. If a tool reports Read Only, propose the edit and explain the Use Codex option.
+  Explain what changed in plain language. If a tool reports Read Only, explain that the current workspace grant does not allow changes and propose the edit.
+  Local safe-write files can be edited directly. The host classifies protected edits and requests Codex permission when available;
+  otherwise it explicitly reports a local fallback. Never rename files or create intermediates to evade that policy.
   Never claim a file was edited unless a file tool succeeded. Never change provider yourself.
   """
 
@@ -126,17 +129,15 @@ struct AgentFileTools: Sendable {
         try await workspace.apply([.move(from: arguments["from"].string!, to: arguments["to"].string!)])
         output = .string("File moved. Undo is available.")
       case "delete_file":
-        _ = try await workspace.metadata(path)
-        guard await confirmDeletion(path) else { throw FileModeError.operation("The user did not approve deleting this file. Keep it.") }
-        try Task.checkCancellation()
-        try await workspace.apply([.delete(path: path)])
+        try await workspace.apply([.delete(path: path)], confirmDeletion: confirmDeletion)
         output = .string("File deleted. Undo is available.")
       default: throw FileModeError.invalidArguments
       }
       let data = try JSONEncoder().encode(output)
       return AgentToolResult(text: String(decoding: data, as: UTF8.self), success: true)
     } catch {
-      return AgentToolResult(text: error.localizedDescription, success: false)
+      return AgentToolResult(text: error.localizedDescription, success: false,
+        requiresCloudConsent: error as? FileModeError == .protectedWriteRequiresCloud)
     }
   }
 }
@@ -209,6 +210,10 @@ struct LocalFileAgent: Sendable {
           result = AgentToolResult(text: "Invalid structured tool arguments. Try again using the tool schema.", success: false)
         }
         history.append(AgentInferenceMessage(role: "tool", content: result.text, toolCallID: call.id))
+        if result.requiresCloudConsent {
+          await onText("\n\nThis protected edit is waiting for Codex permission. Choose Use Codex, review the cloud disclosure, then send the prepared request. The protected file has not been changed.")
+          return
+        }
       }
     }
     throw FileModeError.operation("File Mode reached its step limit. Review any changes, then ask a more specific follow-up.")

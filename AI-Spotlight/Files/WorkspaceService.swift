@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 import PDFKit
 
 struct WorkspaceFileState: Codable, Equatable, Sendable {
@@ -6,6 +7,7 @@ struct WorkspaceFileState: Codable, Equatable, Sendable {
   let mode: UInt16
   var attributes: [String: Data] = [:]
   var permissions: WorkspaceFilePermissions? = nil
+  var createdBySpotlight: Bool? = nil
 }
 
 struct WorkspaceChange: Codable, Equatable, Sendable, Identifiable {
@@ -13,6 +15,7 @@ struct WorkspaceChange: Codable, Equatable, Sendable, Identifiable {
   let path: String
   let before: WorkspaceFileState
   var after: WorkspaceFileState
+  var absolutePath: String? = nil
   var kind: String { before.data == nil ? "Created" : after.data == nil ? "Deleted" : "Edited" }
 }
 
@@ -43,11 +46,15 @@ actor WorkspaceService {
   private let journalDirectory: URL
   private var journal: WorkspaceChangeSet
   private var active = true
+  private var mutationInProgress = false
+  private let writePolicy: WorkspaceWritePolicy
+  private let knownOrigins: [String: Set<Data>]
   private let failureAfterWrite: (@Sendable (Int) throws -> Void)?
 
   init(selection: WorkspaceSelection, accessLevel: FileAccessLevel,
        journalDirectory: URL = WorkspaceService.defaultJournalDirectory,
        conversationID: UUID? = nil,
+       writePolicy: WorkspaceWritePolicy = .cloud,
        failureAfterWrite: (@Sendable (Int) throws -> Void)? = nil) throws {
     self.selection = selection
     self.accessLevel = accessLevel
@@ -55,6 +62,17 @@ actor WorkspaceService {
     self.journalDirectory = journalDirectory
     journal = WorkspaceChangeSet(id: UUID(), selection: selection, changes: [], conversationID: conversationID)
     self.failureAfterWrite = failureAfterWrite
+    self.writePolicy = writePolicy
+    var origins: [String: Set<Data>] = [:]
+    // Read only app-owned provenance; never resolve or reopen historical attachment bookmarks.
+    for record in Self.savedChanges(in: journalDirectory) {
+      for change in record.changes where change.after.createdBySpotlight == true {
+        if let path = change.absolutePath, let data = change.after.data {
+          origins[path, default: []].insert(Data(SHA256.hash(data: data)))
+        }
+      }
+    }
+    knownOrigins = origins
   }
 
   static var defaultJournalDirectory: URL {
@@ -158,8 +176,12 @@ actor WorkspaceService {
     return matches
   }
 
-  func apply(_ mutations: [WorkspaceMutation]) throws {
+  func apply(_ mutations: [WorkspaceMutation],
+             confirmDeletion: (@Sendable (String) async -> Bool)? = nil) async throws {
     try checkActive()
+    guard !mutationInProgress else { throw FileModeError.conflict }
+    mutationInProgress = true
+    defer { mutationInProgress = false }
     guard accessLevel == .readWrite else { throw FileModeError.readOnly }
     guard !mutations.isEmpty, mutations.count <= 100 else { throw FileModeError.invalidArguments }
     var before: [String: WorkspaceFileState] = [:]
@@ -179,18 +201,18 @@ actor WorkspaceService {
       case .create(let path, let content):
         let value = try current(path)
         guard value.data == nil else { throw FileModeError.conflict }
-        after[path] = WorkspaceFileState(data: Data(content.utf8), mode: 0o600, permissions: .newFile)
+        after[path] = WorkspaceFileState(data: Data(content.utf8), mode: 0o600, permissions: .newFile, createdBySpotlight: true)
       case .write(let path, let content):
         let value = try current(path)
         guard let existing = value.data, !existing.contains(0), String(data: existing, encoding: .utf8) != nil else {
           throw FileModeError.operation("Only UTF-8 text files can be replaced. Export this document as text to edit it safely.")
         }
-        after[path] = WorkspaceFileState(data: Data(content.utf8), mode: value.mode, attributes: value.attributes, permissions: value.permissions)
+        after[path] = WorkspaceFileState(data: Data(content.utf8), mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
       case .patch(let path, let old, let new):
         let value = try current(path)
-        guard !old.isEmpty, let data = value.data, let text = String(data: data, encoding: .utf8),
+        guard !old.isEmpty, let data = value.data, !data.contains(0), let text = String(data: data, encoding: .utf8),
               text.components(separatedBy: old).count == 2 else { throw FileModeError.invalidArguments }
-        after[path] = WorkspaceFileState(data: Data(text.replacingOccurrences(of: old, with: new).utf8), mode: value.mode, attributes: value.attributes, permissions: value.permissions)
+        after[path] = WorkspaceFileState(data: Data(text.replacingOccurrences(of: old, with: new).utf8), mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
       case .move(let from, let to):
         guard from != to else { throw FileModeError.invalidArguments }
         let source = try current(from)
@@ -206,12 +228,33 @@ actor WorkspaceService {
     guard after.values.allSatisfy({ ($0.data?.count ?? 0) <= WorkspaceAccess.fileLimit }) else {
       throw FileModeError.tooLarge
     }
+    let protectedPaths = try after.keys.sorted().filter { path in
+      let classificationPath = access.absolutePath(try access.location(path, writing: true))
+      let original = before[path]!
+      let proposed = after[path]!
+      // Classify both versions. A note cannot be rewritten as structured data, or moved into
+      // a source/config path, to bypass a protected-write decision. New files have no provenance yet.
+      let versions = [original.data, proposed.data].compactMap { $0 }
+      return versions.contains { WorkspaceWriteClassifier.classify(path: classificationPath, data: $0,
+        createdBySpotlight: original.createdBySpotlight == true) == .protectedWrite }
+    }
+    try await writePolicy.authorize(protectedPaths: protectedPaths)
+    try checkActive()
+    if let confirmDeletion {
+      for case .delete(let path) in mutations {
+        guard await confirmDeletion(path) else {
+          throw FileModeError.operation("The user did not approve deleting this file. Keep it.")
+        }
+        try checkActive()
+      }
+    }
     let oldJournal = journal
     for path in after.keys.sorted() {
       if let index = journal.changes.firstIndex(where: { $0.path == path }) {
         journal.changes[index].after = after[path]!
       } else {
-        journal.changes.append(WorkspaceChange(path: path, before: before[path]!, after: after[path]!))
+        journal.changes.append(WorkspaceChange(path: path, before: before[path]!, after: after[path]!,
+          absolutePath: access.absolutePath(try access.location(path, writing: true))))
       }
     }
     guard journal.changes.reduce(0, { $0 + ($1.before.data?.count ?? 0) + ($1.after.data?.count ?? 0)
@@ -249,6 +292,7 @@ actor WorkspaceService {
   /// Undo uses the same authority and atomic replacement primitives, including after restart.
   /// Files already at their before-image are accepted after an interrupted operation.
   func undo(_ saved: WorkspaceChangeSet) throws -> WorkspaceChangeSet {
+    guard !mutationInProgress else { throw FileModeError.conflict }
     guard saved.selection == selection, !saved.isUndone else { throw FileModeError.invalidArguments }
     var current: [String: WorkspaceFileState] = [:]
     for change in saved.changes {
@@ -285,8 +329,14 @@ actor WorkspaceService {
   private func state(_ path: String) throws -> WorkspaceFileState {
     let location = try access.location(path, writing: true)
     guard let info = try access.info(location) else { return WorkspaceFileState(data: nil, mode: 0o600) }
-    return WorkspaceFileState(data: try access.read(location), mode: UInt16(info.st_mode & 0o777),
-      attributes: try access.attributes(location), permissions: try access.permissions(location))
+    let data = try access.read(location)
+    let known = knownOrigins[access.absolutePath(location)]?.contains(Data(SHA256.hash(data: data))) == true
+      || journal.changes.contains { change in
+        change.path == path && [change.before, change.after].contains { $0.createdBySpotlight == true && $0.data == data }
+      }
+    return WorkspaceFileState(data: data, mode: UInt16(info.st_mode & 0o777),
+      attributes: try access.attributes(location), permissions: try access.permissions(location),
+      createdBySpotlight: known ? true : nil)
   }
 
   private func restore(_ value: WorkspaceFileState, at path: String) throws {

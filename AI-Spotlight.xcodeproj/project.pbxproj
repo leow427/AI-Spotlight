@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0009134391031E5AE19F8236 /* WorkspaceWritePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCD3B0B99B28590527862FF /* WorkspaceWritePolicyTests.swift */; };
+		119F917FD36890D94019A810 /* WorkspaceWritePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139FA002CA94953FE2BB73CF /* WorkspaceWritePolicy.swift */; };
 		41785BB5B087C2B0E954509E /* FileModeRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */; };
 		7558BA92C2D5C3CE65628DD2 /* LocalFileRuntimeSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52189CDD3B416D1EA547D5A /* LocalFileRuntimeSetup.swift */; };
 		32FDB12D7B19D9FC87A3B01D /* FileModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358F0E6213F24E6E5A6BF331 /* FileModeUITests.swift */; };
@@ -111,6 +113,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		0FCD3B0B99B28590527862FF /* WorkspaceWritePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceWritePolicyTests.swift"; sourceTree = SOURCE_ROOT; };
+		139FA002CA94953FE2BB73CF /* WorkspaceWritePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceWritePolicy.swift"; sourceTree = SOURCE_ROOT; };
 		E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileModeRuntimeTests.swift"; sourceTree = SOURCE_ROOT; };
 		D52189CDD3B416D1EA547D5A /* LocalFileRuntimeSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/LocalFileRuntimeSetup.swift"; sourceTree = SOURCE_ROOT; };
 		358F0E6213F24E6E5A6BF331 /* FileModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileModeUITests.swift"; sourceTree = SOURCE_ROOT; };
@@ -228,6 +232,8 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				0FCD3B0B99B28590527862FF /* WorkspaceWritePolicyTests.swift */,
+				139FA002CA94953FE2BB73CF /* WorkspaceWritePolicy.swift */,
 				E6FC52FEA0B2ED0E36AEE5AD /* FileModeRuntimeTests.swift */,
 				D52189CDD3B416D1EA547D5A /* LocalFileRuntimeSetup.swift */,
 				358F0E6213F24E6E5A6BF331 /* FileModeUITests.swift */,
@@ -494,6 +500,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				119F917FD36890D94019A810 /* WorkspaceWritePolicy.swift in Sources */,
 				7558BA92C2D5C3CE65628DD2 /* LocalFileRuntimeSetup.swift in Sources */,
 				A8D1A4BB12B6A723B10D5435 /* FileModeControls.swift in Sources */,
 				AD9DCA3F261F97353BA3A2F6 /* FileModeCoordinator.swift in Sources */,
@@ -562,6 +569,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				0009134391031E5AE19F8236 /* WorkspaceWritePolicyTests.swift in Sources */,
 				41785BB5B087C2B0E954509E /* FileModeRuntimeTests.swift in Sources */,
 				32FDB12D7B19D9FC87A3B01D /* FileModeUITests.swift in Sources */,
 				CA0F234239D0AE49BA5AB66D /* FileAgentTests.swift in Sources */,

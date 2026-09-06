@@ -89,6 +89,24 @@ struct CodexSubscriptionClient: ChatProvider {
     return models
   }
 
+  /// Metadata-only availability check. Never starts a model turn or supplies file contents.
+  func fileEditingAvailability(preferredModelID: String) async -> FileEditingCloudAvailability {
+    do {
+      guard try await account() != nil else { return .unavailable(reason: "Codex is not signed in.") }
+      try await transport.prepareFileMode()
+      let available = try await models().filter {
+        CloudModelCapabilities.compatibility(provider: .chatGPT, modelID: $0.id).allowsSending
+      }
+      guard let selected = available.first(where: { $0.id == preferredModelID })
+        ?? available.first(where: { $0.id == Self.defaultModelID }) ?? available.first else {
+        return .unavailable(reason: "No compatible Codex model is available.")
+      }
+      return .available(modelID: selected.id)
+    } catch {
+      return .unavailable(reason: "Codex could not be reached or does not support file editing.")
+    }
+  }
+
   func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
     stream(request, fileTools: nil)
   }

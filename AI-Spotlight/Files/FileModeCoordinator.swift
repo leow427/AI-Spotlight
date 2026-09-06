@@ -47,6 +47,9 @@ final class FileModeCoordinator: ObservableObject {
   @Published private(set) var deletionPath: String?
   @Published var review: WorkspaceChangeSet?
   @Published var conversationID: UUID?
+  @Published private(set) var protectedWrite: ProtectedWriteNotice?
+  private var protectedWritePrompt: String?
+  private var activeTaskID: UUID?
   var visibleChanges: [WorkspaceChangeSet] {
     changes.filter { change in
       if let conversationID { return change.conversationID == conversationID }
@@ -82,6 +85,8 @@ final class FileModeCoordinator: ObservableObject {
         if !attachments.contains(where: { $0.url == attachment.url }) { attachments.append(attachment) }
       }
       guard attachments.count <= 16 else { throw FileModeError.invalidArguments }
+      protectedWrite = nil
+      protectedWritePrompt = nil
       selection = WorkspaceSelection.normalized(attachments)
       selectionRevision = UUID()
       error = nil
@@ -92,6 +97,8 @@ final class FileModeCoordinator: ObservableObject {
   func remove(id: UUID) {
     guard !isWorking else { return }
     selectionRevision = UUID()
+    protectedWrite = nil
+    protectedWritePrompt = nil
     let attachments = selection?.attachments.filter { $0.id != id } ?? []
     selection = attachments.isEmpty ? nil : WorkspaceSelection(attachments: attachments)
     error = nil
@@ -102,15 +109,29 @@ final class FileModeCoordinator: ObservableObject {
     cancelPendingDeletion()
     selectionRevision = UUID()
     self.selection = selection
+    protectedWrite = nil
+    protectedWritePrompt = nil
     error = nil
     // Bookmark scopes open only when the user sends a File Mode request.
   }
 
-  func begin(access: FileAccessLevel) throws -> AgentFileTools {
+  func begin(access: FileAccessLevel, isLocal: Bool = false, prompt: String? = nil,
+             cloudAvailability: @escaping WorkspaceWritePolicy.CloudCheck = { .unavailable(reason: "Codex is not configured.") }) throws -> AgentFileTools {
     guard let selection, !isWorking, !isPicking else { throw FileModeError.inactive }
-    let workspace = try WorkspaceService(selection: selection, accessLevel: access, journalDirectory: journalDirectory, conversationID: conversationID)
+    let taskID = UUID()
+    let probe = FileEditingCloudProbe(check: cloudAvailability)
+    let revision = selectionRevision
+    let policy: WorkspaceWritePolicy = isLocal ? .local(cloudAvailability: { await probe.availability() },
+      notice: { [weak self] notice in
+        await self?.recordProtectedWrite(notice, prompt: prompt, taskID: taskID, revision: revision)
+      }) : .cloud
+    let workspace = try WorkspaceService(selection: selection, accessLevel: access, journalDirectory: journalDirectory,
+      conversationID: conversationID, writePolicy: policy)
     activeWorkspace = workspace
+    activeTaskID = taskID
     isWorking = true
+    protectedWrite = nil
+    protectedWritePrompt = nil
     error = nil
     return AgentFileTools(workspace: workspace, confirmDeletion: { [weak self] path in
       await self?.confirmDeletion(path) ?? false
@@ -125,12 +146,14 @@ final class FileModeCoordinator: ObservableObject {
     }
     if activeWorkspace === workspace {
       activeWorkspace = nil
+      activeTaskID = nil
       isWorking = false
       cancelPendingDeletion()
     }
   }
 
   func revoke() {
+    activeTaskID = nil
     cancelPendingDeletion()
     if let workspace = activeWorkspace { Task { await workspace.revoke() } }
   }
@@ -147,6 +170,21 @@ final class FileModeCoordinator: ObservableObject {
       review = nil
       error = nil
     } catch { self.error = error.localizedDescription }
+  }
+
+  private func recordProtectedWrite(_ notice: ProtectedWriteNotice, prompt: String?, taskID: UUID, revision: UUID) {
+    guard activeTaskID == taskID, selectionRevision == revision else { return }
+    protectedWrite = notice
+    protectedWritePrompt = prompt
+  }
+
+  /// Called only by the existing cloud consent action. Supplies a draft, never sends a request.
+  func prepareProtectedCloudDraft() -> (prompt: String, modelID: String)? {
+    guard !isWorking, case .cloudRequired(_, let modelID) = protectedWrite,
+          let prompt = protectedWritePrompt else { return nil }
+    protectedWrite = nil
+    protectedWritePrompt = nil
+    return (prompt, modelID)
   }
 
   private func confirmDeletion(_ path: String) async -> Bool {

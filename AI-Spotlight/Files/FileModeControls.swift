@@ -41,15 +41,22 @@ struct FileModeAttachmentView: View {
         }
         if access == .readOnly {
           HStack(spacing: 6) {
-            Text(isCloud ? "Choose Codex to work with these files." : "Local can analyze files and suggest edits.")
+            Text(isCloud ? "Choose Codex to work with these files." : "Choose a local model to work with these files.")
               .font(.caption2).foregroundStyle(.secondary)
             Button("Use Codex", action: useCodex).font(.caption2).buttonStyle(.plain)
               .disabled(isBusy || files.isWorking)
           }
         } else {
           Text(isCloud ? "Relevant file contents may be sent to Codex when you send a request."
-               : "This trusted local model can edit the attached files on this Mac.")
+               : "Notes and text files can be edited locally. Protected edits use Codex when available, with your permission.")
             .font(.caption2).foregroundStyle(.secondary)
+        }
+      }
+      if let notice = files.protectedWrite {
+        Text(notice.message).font(.caption).foregroundStyle(.orange).fixedSize(horizontal: false, vertical: true)
+        if case .cloudRequired = notice {
+          Button("Use Codex", action: useCodex).font(.caption).buttonStyle(.plain)
+            .disabled(isBusy || files.isWorking)
         }
       }
       if let error = files.error {
@@ -145,7 +152,7 @@ struct FileModeDialogs: ViewModifier {
       }
       .alert("Use Codex for these files?", isPresented: $isCloudConsentPresented) {
         Button("Use Codex", action: useCodex)
-        Button("Keep Local", role: .cancel) { }
+        Button("Cancel", role: .cancel) { }
       } message: {
         Text("Codex can edit the attached files. Relevant file contents may be sent to the cloud when you send your next request. Your current local task will not be sent automatically.")
       }

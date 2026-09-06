@@ -254,6 +254,10 @@ struct AppShellView: View {
       isBusy: localChat.isBusy, useCodex: {
         cloudSettings.preferredProvider = .chatGPT
         selectedMode = .cloud
+        if let handoff = files.prepareProtectedCloudDraft() {
+          cloudSettings.preferredModelID = handoff.modelID
+          if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { draft = handoff.prompt }
+        }
       }))
     .alert("Allow screenshot uploads?", isPresented: $isScreenPermissionPresented) {
       Button("Allow & Send") {
@@ -774,7 +778,7 @@ struct AppShellView: View {
   }
 
   private var fileAccess: FileAccessLevel {
-    if selectedMode == .cloud && cloudSettings.preferredProvider == .chatGPT { return .readWrite }
+    if selectedMode == .cloud { return cloudSettings.preferredProvider == .chatGPT ? .readWrite : .readOnly }
     return localChat.installedModel.map { LocalFileCapabilities.production.access(for: $0) } ?? .readOnly
   }
 

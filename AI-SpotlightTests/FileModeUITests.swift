@@ -101,6 +101,7 @@ final class FileModeUITests: XCTestCase {
     let inference = FileUITestInference()
     let engine = FileTestEngine()
     let chat = LocalChatViewModel(engine: engine, files: files, fileInference: inference,
+      fileCloudAvailability: { XCTFail("Safe writes must not check cloud availability"); return .available(modelID: "unused") },
       sessionStore: .init(applicationSupportDirectory: root))
     await chat.refreshInstalledModel()
     await files.activate(from: .menu)
@@ -111,7 +112,12 @@ final class FileModeUITests: XCTestCase {
     await fulfillment(of: [finished], timeout: 3)
     token.cancel()
     let calls = await inference.count
-    XCTAssertEqual(calls, 1)
+    XCTAssertEqual(calls, 2)
+    XCTAssertNil(files.error)
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("hello.txt"), encoding: .utf8), "Updated locally")
+    let changes = try XCTUnwrap(files.visibleChanges.first)
+    XCTAssertEqual(changes.count, 1)
+    await files.undo(changes)
     XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("hello.txt"), encoding: .utf8), "Hello")
     chat.newChat()
     let ordinary = expectation(description: "Ordinary chat completed")
@@ -120,9 +126,75 @@ final class FileModeUITests: XCTestCase {
     await fulfillment(of: [ordinary], timeout: 3)
     ordinaryToken.cancel()
     let after = await inference.count
-    XCTAssertEqual(after, 1)
+    XCTAssertEqual(after, 2)
     XCTAssertNil(files.selection)
     XCTAssertTrue(chat.messages.contains { $0.content == "Normal chat" })
+  }
+
+  func testLocalModeEditsThroughProductionGrantAndSupportsUndo() async throws {
+    let files = FileModeCoordinator(picker: FileTestPicker([project]), journalDirectory: root.appendingPathComponent("Recovery"))
+    let chat = LocalChatViewModel(engine: FileTestEngine(), files: files, fileInference: FileUITestInference(),
+      sessionStore: .init(applicationSupportDirectory: root))
+    await chat.refreshInstalledModel()
+    await files.activate(from: .menu)
+    let finished = expectation(description: "Local edit completed")
+    let token = chat.$state.dropFirst().filter { $0 == .idle }.prefix(1).sink { _ in finished.fulfill() }
+    chat.submitFiles("Update hello.txt", mode: .local, cloudProvider: .chatGPT, cloudModelID: "unused")
+    XCTAssertEqual(chat.activeRequest?.route.mode, .local)
+    XCTAssertEqual(chat.activeRequest?.route.usesNetwork, false)
+    await fulfillment(of: [finished], timeout: 3)
+    token.cancel()
+    XCTAssertNil(files.error)
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("hello.txt"), encoding: .utf8), "Updated locally")
+    await files.undo(try XCTUnwrap(files.visibleChanges.first))
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("hello.txt"), encoding: .utf8), "Hello")
+  }
+
+  func testProtectedEditOffersCloudDraftWithoutSendingOrChangingFiles() async throws {
+    try Data("source before".utf8).write(to: project.appendingPathComponent("code.swift"))
+    let files = FileModeCoordinator(picker: FileTestPicker([project]), journalDirectory: root.appendingPathComponent("Recovery"))
+    let inference = FileUITestInference(path: "code.swift")
+    let chat = LocalChatViewModel(engine: FileTestEngine(), files: files, fileInference: inference,
+      fileCloudAvailability: { .available(modelID: "configured-codex") }, sessionStore: .init(applicationSupportDirectory: root))
+    await chat.refreshInstalledModel()
+    await files.activate(from: .menu)
+    let finished = expectation(description: "Protected edit paused")
+    let token = chat.$state.dropFirst().filter { $0 == .idle }.prefix(1).sink { _ in finished.fulfill() }
+    chat.submitFiles("Update code.swift", mode: .local, cloudProvider: .chatGPT, cloudModelID: "unused")
+    await fulfillment(of: [finished], timeout: 3)
+    token.cancel()
+    XCTAssertEqual(files.protectedWrite, .cloudRequired(paths: ["code.swift"], modelID: "configured-codex"))
+    XCTAssertTrue(files.visibleChanges.isEmpty)
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("code.swift"), encoding: .utf8), "source before")
+    let calls = await inference.count
+    XCTAssertEqual(calls, 1, "Do not let the local agent retry or work around a protected edit")
+    // The consent action prepares the original request; only the user's subsequent Send submits it.
+    let handoff = try XCTUnwrap(files.prepareProtectedCloudDraft())
+    XCTAssertEqual(handoff.prompt, "Update code.swift")
+    XCTAssertEqual(handoff.modelID, "configured-codex")
+    XCTAssertNil(chat.activeRequest)
+    XCTAssertFalse(files.isWorking)
+    XCTAssertNil(files.protectedWrite)
+  }
+
+  func testProtectedLocalFallbackIsVisibleAndUndoableWhenCloudIsUnavailable() async throws {
+    try Data("source before".utf8).write(to: project.appendingPathComponent("code.swift"))
+    let files = FileModeCoordinator(picker: FileTestPicker([project]), journalDirectory: root.appendingPathComponent("Recovery"))
+    let chat = LocalChatViewModel(engine: FileTestEngine(), files: files, fileInference: FileUITestInference(path: "code.swift"),
+      fileCloudAvailability: { .unavailable(reason: "No compatible cloud model.") }, sessionStore: .init(applicationSupportDirectory: root))
+    await chat.refreshInstalledModel()
+    await files.activate(from: .menu)
+    let finished = expectation(description: "Fallback edit completed")
+    let token = chat.$state.dropFirst().filter { $0 == .idle }.prefix(1).sink { _ in finished.fulfill() }
+    chat.submitFiles("Update code.swift", mode: .auto, cloudProvider: .chatGPT, cloudModelID: "unused")
+    XCTAssertEqual(chat.activeRequest?.route.usesNetwork, false)
+    await fulfillment(of: [finished], timeout: 3)
+    token.cancel()
+    XCTAssertEqual(files.protectedWrite, .localFallback(paths: ["code.swift"], reason: "No compatible cloud model."))
+    XCTAssertNil(files.error)
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("code.swift"), encoding: .utf8), "Updated locally")
+    await files.undo(try XCTUnwrap(files.visibleChanges.first))
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("code.swift"), encoding: .utf8), "source before")
   }
 
   func testNativeFileIconAndAttachmentReviewStatesRender() async throws {
@@ -146,7 +218,7 @@ final class FileModeUITests: XCTestCase {
         Spacer()
         Text("Local")
       }
-      FileModeAttachmentView(files: files, access: .readOnly, isCloud: false, isBusy: false, useCodex: {})
+      FileModeAttachmentView(files: files, access: .readWrite, isCloud: false, isBusy: false, useCodex: {})
       FileModeAttachmentView(files: files, access: .readWrite, isCloud: true, isBusy: false, useCodex: {})
       FileChangeSummaryView(files: files, isBusy: false)
     }.padding(24).frame(width: 660).background(Color(nsColor: .windowBackgroundColor))
@@ -189,10 +261,18 @@ private final class FileTestPicker: WorkspacePicking {
 
 private actor FileUITestInference: LocalToolInference {
   private(set) var count = 0
+  let path: String
+  init(path: String = "hello.txt") { self.path = path }
   func completeTools(messages: [AgentInferenceMessage], tools: [AgentToolDefinition], model: LocalModel) async throws -> AgentInferenceMessage {
     count += 1
-    XCTAssertFalse(tools.contains { $0.name == "write_file" })
-    return AgentInferenceMessage(role: "assistant", content: "I can propose an edit. Choose Use Codex to allow cloud editing.")
+    XCTAssertTrue(tools.contains { $0.name == "write_file" })
+    if count == 1 {
+      return AgentInferenceMessage(role: "assistant", content: nil, toolCalls: [AgentToolCall(id: "edit",
+        function: .init(name: "write_file", arguments: String(decoding: try JSONEncoder().encode(
+          ["path": path, "content": "Updated locally"]), as: UTF8.self)))])
+    }
+    XCTAssertTrue(messages.contains { $0.role == "tool" && $0.content?.contains("File edited") == true })
+    return AgentInferenceMessage(role: "assistant", content: "Updated the file locally. Undo is available.")
   }
 }
 

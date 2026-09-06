@@ -33,7 +33,7 @@ struct LocalFileToolsSetupView: View {
     VStack(alignment: .leading, spacing: 6) {
       Text("Local File Tools").font(.subheadline.weight(.medium))
       if ready || model.map({ LocalFileRuntime.executable(for: $0) != nil }) == true {
-        Text("Ready · File contents stay on this Mac. Local editing is disabled unless the model is explicitly trusted.")
+        Text("Ready · Notes and text files can be edited locally. Protected edits offer Codex with your permission, or use a local fallback when Codex is unavailable. Review and Undo remain available.")
           .font(.caption).foregroundStyle(.secondary)
       } else {
         Text("Install the small file-tools runtime once to analyze files with imported local models. This download sends no attached files.")

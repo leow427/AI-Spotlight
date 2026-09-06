@@ -72,12 +72,12 @@ final class FileAgentTests: XCTestCase {
     XCTAssertEqual(text, "Before")
   }
 
-  func testUntrustedLocalModelCannotWriteEvenIfItCallsHiddenWriteTool() async throws {
+  func testExplicitReadOnlyGrantRejectsHiddenWriteTool() async throws {
     let readOnly = try WorkspaceService(selection: workspace.selection, accessLevel: .readOnly,
       journalDirectory: root.appendingPathComponent("ReadOnlyRecovery"))
     let inference = ScriptedFileInference([
       call("1", "write_file", #"{"path":"file.txt","content":"Malicious"}"#),
-      AgentInferenceMessage(role: "assistant", content: "I can suggest changes. Choose Use Codex for cloud editing.")])
+      AgentInferenceMessage(role: "assistant", content: "This workspace grant is read-only. I can suggest changes.")])
     try await LocalFileAgent(inference: inference).run(messages: [.init(role: .user, content: "Edit")],
       model: model, tools: AgentFileTools(workspace: readOnly)) { _ in }
     let histories = await inference.histories
@@ -86,7 +86,14 @@ final class FileAgentTests: XCTestCase {
     XCTAssertFalse(definitions.flatMap { $0 }.contains("write_file"))
     let text = try await workspace.readFile("file.txt")
     XCTAssertEqual(text, "Before")
-    XCTAssertEqual(LocalFileCapabilities.production.access(for: model), .readOnly)
+  }
+
+  func testProductionLocalAccessIncludesAllFileToolsForImportedModels() {
+    XCTAssertNil(model.catalogDescriptor)
+    let access = LocalFileCapabilities.production.access(for: model)
+    XCTAssertEqual(access, .readWrite)
+    XCTAssertEqual(Set(AgentFileTools.definitions(access: access).map(\.name)),
+      Set(["list_files", "read_file", "search_files", "get_file_metadata", "apply_patch", "write_file", "create_file", "move_file", "delete_file"]))
   }
 
   func testAssistantTextWithJSONNeverExecutesAFileOperation() async throws {
@@ -172,6 +179,25 @@ final class FileAgentTests: XCTestCase {
     XCTAssertEqual(parsed.toolCalls?.first?.function.name, "read_file")
   }
 
+  func testCloudEditingAvailabilityChecksMetadataWithoutStartingAModelTurn() async {
+    let transport = FileAvailabilityTransport(models: ["configured-codex"])
+    let availability = await CodexSubscriptionClient(transport: transport).fileEditingAvailability(preferredModelID: "configured-codex")
+    XCTAssertEqual(availability, .available(modelID: "configured-codex"))
+    let methods = await transport.methods
+    XCTAssertEqual(Set(methods), ["account/read", "model/list"])
+  }
+
+  func testMissingAccountUnsupportedRuntimeAndNoModelsAllowLocalFallback() async {
+    for transport in [FileAvailabilityTransport(hasAccount: false), FileAvailabilityTransport(supportsFiles: false),
+      FileAvailabilityTransport(models: [])] {
+      let availability = await CodexSubscriptionClient(transport: transport).fileEditingAvailability(preferredModelID: "configured-codex")
+      guard case .unavailable = availability else { XCTFail("Should allow local fallback"); continue }
+      let methods = await transport.methods
+      XCTAssertFalse(methods.contains("thread/start"))
+      XCTAssertFalse(methods.contains("turn/start"))
+    }
+  }
+
   func testToolSchemaRejectsUnknownToolsAndWrongArgumentTypes() async {
     let tools = AgentFileTools(workspace: workspace)
     for (name, args) in [("run_command", CodexValue.object([:])),
@@ -222,6 +248,26 @@ private actor FileCodexTransport: CodexRPCTransport {
         "threadId": .string("file-thread"), "turn": .object(["id": .string("turn"), "status": .string("completed")])])))
       return .object(["turn": .object(["id": .string("turn")])])
     default: return .object([:])
+    }
+  }
+}
+
+private actor FileAvailabilityTransport: CodexRPCTransport {
+  let hasAccount: Bool
+  let supportsFiles: Bool
+  let models: [String]
+  private(set) var methods: [String] = []
+  init(hasAccount: Bool = true, supportsFiles: Bool = true, models: [String] = ["configured-codex"]) {
+    self.hasAccount = hasAccount; self.supportsFiles = supportsFiles; self.models = models
+  }
+  func prepareFileMode() async throws { if !supportsFiles { throw FileModeError.inactive } }
+  func notifications() async throws -> CodexNotificationSubscription { throw FileModeError.inactive }
+  func request(_ method: String, params: CodexValue) async throws -> CodexValue {
+    methods.append(method)
+    switch method {
+    case "account/read": return .object(["account": hasAccount ? .object(["type": .string("chatgpt")]) : .null])
+    case "model/list": return .object(["data": .array(models.map { .object(["model": .string($0), "displayName": .string($0)]) })])
+    default: XCTFail("Availability must not start cloud inference"); throw FileModeError.inactive
     }
   }
 }

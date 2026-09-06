@@ -2,9 +2,9 @@
 
 File Mode starts only after **+ → Files** or **Shift + Option + F** opens the macOS file/folder picker. Both entry points call `FileModeCoordinator.activate`. Multiple files and folders can be attached; removing the last attachment returns to ordinary chat. A new chat starts without attachments. Existing conversations retain attachment metadata and bookmarks, but scopes open only when a File Mode request starts.
 
-The input displays a pink File Mode icon, each attachment and its access level. Local and Auto requests stay on the Mac with **Read Only** access. **Use Codex** displays a cloud-content disclosure and selects Codex; the user must still send the next request. There is no automatic provider fallback. Cloud File Mode currently supports the existing ChatGPT/Codex connection. Other cloud providers remain available for ordinary chat.
+The input displays a pink File Mode icon, each attachment and its access level. Local and Auto requests use **Read & Edit** access with a per-file safe/protected policy. Notes and simple text documents are edited locally. Protected edits offer Codex when a compatible cloud model is available; otherwise they use a clearly labeled local fallback. **Use Codex** displays a cloud-content disclosure and selects Codex; the user must still send the next request. There is no automatic provider fallback. Cloud File Mode currently supports the existing ChatGPT/Codex connection. Other cloud providers remain available for ordinary chat.
 
-![Native UI fixtures showing the two access states and change actions](images/file-mode.png)
+![Native UI fixtures showing local write policy, Codex disclosure and change actions](images/file-mode.png)
 
 ## Shared architecture
 
@@ -45,13 +45,29 @@ Some app-server versions do not implement the newer `readOnlyAccess` sandbox fie
 
 References: [Codex app-server](https://learn.chatgpt.com/docs/app-server). The executable's generated schema is the runtime authority; experimental fields may change.
 
-## Local inference and editing trust
+## Local inference and editing access
 
 `LocalFileAgent` owns the bounded inference/tool loop. `LlamaCPPModelEngine` remains unchanged and inference-only. `LlamaServerVisionEngine` implements `LocalToolInference` for both text GGUF and existing vision models, using llama-server's native OpenAI-compatible `tools` and `tool_calls` with `--jinja`. Assistant text is never parsed for embedded JSON commands.
 
 Each step counts the actual rendered prompt tokens, limits the completion and rejects incomplete responses. Tool outputs return as structured tool messages. IDs are normalized for history, including runtimes that reuse an ID in separate completions. The loop permits at most 16 steps and eight calls in one response. Inference and filesystem dispatch remain separate.
 
-`LocalFileCapabilities.production` has an intentionally empty, release-controlled artifact-hash allowlist. Model size, a model-generated claim or a catalog capability flag cannot enable writes. Adding a tested artifact to this allowlist is an explicit future release decision, not a user-facing trust toggle. The real-model write smoke test creates a test-only writable service and does not change production policy.
+`LocalFileCapabilities.production` exposes the full file-tool capability to selected local models, including imported models without catalog metadata. Model size and a trust allowlist do not determine editing permission. `WorkspaceWriteClassifier` and `WorkspaceWritePolicy` centrally decide each mutation inside `WorkspaceService.apply`, before snapshots or writes. Both providers use this service; no backend maintains its own file-type list.
+
+### Safe and protected writes
+
+| Classification | Examples | Local behavior |
+| --- | --- | --- |
+| Safe write | Plain `.md`, `.markdown`, `.txt`, `.text`; extensionless notes, plans, checklists, TODO and README; verified files created by AI Spotlight | Edit directly, with snapshots and Undo. No cloud availability check is made. |
+| Protected write | Source code, project/configuration files, structured data, unknown formats, hidden settings, instruction files and sensitive credential names | Offer Codex when available. Pause the protected operation until the user approves the cloud disclosure and sends the prepared draft. |
+| Protected write with unavailable cloud | Offline Mac, no installed/signed-in compatible Codex runtime, no compatible model, or failed availability check | Allow a local attempt with a visible “Local fallback” notice explaining lower reliability. The same transactional protections apply. |
+
+Configuration/credential names remain protected even with a document extension or app-created provenance. JSON/XML/shebang content cannot become a safe note just by using `.txt` or `.md`. Classification checks both the original and proposed contents, including rename destinations, and resolves the full authorized path so selecting a file inside a sensitive directory does not hide that context. Unknown binary formats remain subject to the existing text-editing limits.
+
+Creation provenance is recorded by the host in recovery journals, with the absolute authorized path and before/after states. Subsequent local tasks recognize an app-created file only when its current contents match recorded app-created contents at that path. Unrecognized external replacements lose this exception. A model cannot assert provenance in tool arguments; a newly proposed unknown-format file must first pass the protected policy before it gains provenance.
+
+Cloud availability is checked lazily, once per local task that requests a protected write. The check uses network status, installed runtime compatibility, account metadata and the native model list. It never starts a model turn or supplies file contents. The host picks an available configured/default Codex model; the cloud consent action shows the disclosure, selects that model and restores the original request to the composer. **The user must still press Send.** Canceling or removing the attachment does not upload anything. Local agents stop at a required cloud handoff rather than retrying or bypassing the protected edit. Protected deletions choose the backend before presenting deletion confirmation.
+
+The real-model smoke tests use these production capabilities and exercise both safe local edits and unavailable-cloud protected fallback. Explicit read-only grants remain supported and independently enforced by the shared service. Filesystem boundaries, snapshot/rollback, cancellation and deletion confirmation continue to apply in every mode.
 
 Settings → Local Models → **Install Local File Tools** installs the existing pinned, checksum-verified llama-server runtime (about 11 MB) when necessary. Already installed compatible model runtimes are reused. Setup downloads the runtime only; it does not transmit attachments. Model inference binds to loopback with an ephemeral API key, runs offline and is unloaded after the file task. Models still need a compatible chat template and reliable tool-calling behavior; unsupported or malformed output fails without executing text as a command.
 
@@ -71,7 +87,7 @@ After a task, **N files changed → Review / Undo** appears in its conversation.
 - `read_file` returns up to 32,000 characters per call with an offset for continuation. Search reads on demand, with a 4 MiB text budget, 2,000 entries, 500 entries per directory, depth 16 and 100 matches. Large results must be narrowed by path. Listings are capped at 500 entries.
 - Writes create/replace UTF-8 files; parent directories must already exist. Moves/deletes affect regular files, not entire directory trees. The journal is capped at 64 MiB of file data and attributes per task. A move counts both affected paths.
 - File Mode runs separately from Screen/Web Search for now. Enabling it clears those draft tools; combining them later is blocked with a clear message.
-- There is no shell, test runner, arbitrary network tool, automatic repository upload or autonomous local editing in production.
+- There is no shell, test runner, arbitrary network tool or automatic repository upload. Local safe writes, protected local fallback and Codex edits all stay within explicitly attached locations.
 
 ## Verification
 
@@ -83,7 +99,7 @@ scripts/verify-xcode.sh test
 scripts/verify-xcode.sh analyze
 ```
 
-`WorkspaceTests`, `FileAgentTests` and `FileModeUITests` cover picker flows, files/folders, the native panel shortcut including Option-F's `ƒ`, conversation persistence, local/cloud tool dispatch, ordinary chat, traversal/symlinks/hardlinks, read-only policy, preflight, rollback, snapshots, restart recovery, modified/deleted/new/moved files, metadata, conflicts and native UI rendering. The screenshot is rendered from native SwiftUI fixtures.
+`WorkspaceTests`, `WorkspaceWritePolicyTests`, `FileAgentTests` and `FileModeUITests` cover picker flows, files/folders, the native panel shortcut including Option-F's `ƒ`, conversation persistence, local/cloud tool dispatch, ordinary chat, Local/Auto editing with Undo, traversal/symlinks/hardlinks, explicit read-only grants, safe/protected classification, metadata-only availability, cloud consent handoff, local fallback, provenance, preflight, rollback, snapshots, restart recovery, modified/deleted/new/moved files, metadata, conflicts and native UI rendering. The screenshot is rendered from native SwiftUI fixtures.
 
 `scripts/verify-file-mode-codex.py` exercises a real installed app-server with an isolated configuration and a loopback fixture Responses provider. It verifies native dynamic-tool dispatch, returning tool results to the next model step, turn completion and the absence of direct filesystem/shell tools. It requires no cloud account or user file contents. Set `AI_SPOTLIGHT_CODEX_PATH` to select the executable.
 
@@ -94,4 +110,4 @@ TEST_RUNNER_AI_SPOTLIGHT_FILE_TEST_MODEL_PATH=/absolute/path/to/model.gguf \
   scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/FileModeRuntimeTests'
 ```
 
-The test reads a disposable fixture, writes a precisely specified edit through the shared tools and verifies Undo. Qwen 2.5 3B Q8 passed this test locally; an earlier ambiguous prompt produced the wrong edit. This is integration evidence, **not** an editing-trust qualification. Cloud integration tests use deterministic native transport fixtures and the real app-server probe, rather than paid/live cloud inference.
+The tests use production local access and per-file policies, read disposable fixtures, write precisely specified edits through the shared tools and verify Undo. They cover a safe text file with no cloud check, and a protected source-file fixture with an explicitly unavailable-cloud fallback. Qwen 2.5 3B Q8 is used for local integration verification. Model output quality still depends on tool-calling support and instructions; Review and Undo remain available for local edits. Cloud integration tests use deterministic native transport fixtures and the real app-server probe, rather than paid/live cloud inference.
