@@ -24,18 +24,27 @@ enum LocalFileRuntime {
     model.visionConfiguration?.contextWindow ?? max(4_096, min(16_384, model.catalogDescriptor?.recommendedContextSize ?? 8_192))
   }
 
-  static func payload(messages: [AgentInferenceMessage], tools: [AgentToolDefinition], alias: String) throws -> CodexValue {
+  static func validateBudget(promptTokens: Int, maximumTokens: Int, contextWindow: Int) throws {
+    guard promptTokens >= 0, (128...4_096).contains(maximumTokens), (4_096...32_768).contains(contextWindow) else {
+      throw FileModeError.invalidArguments
+    }
+    guard promptTokens < contextWindow - maximumTokens - 64 else { throw FileModeError.contextExhausted }
+  }
+
+  static func payload(messages: [AgentInferenceMessage], tools: [AgentToolDefinition], alias: String,
+                      maximumTokens: Int = 1_024) throws -> CodexValue {
     let encoded = try JSONEncoder().encode(messages)
     return .object(["model": .string(alias), "messages": try JSONDecoder().decode(CodexValue.self, from: encoded),
       "tools": .array(tools.map(\.llama)), "tool_choice": .string("auto"), "parallel_tool_calls": .bool(false),
-      "stream": .bool(false), "max_tokens": .number(1_024), "temperature": .number(0), "cache_prompt": .bool(false)])
+      "stream": .bool(false), "max_tokens": .number(Double(maximumTokens)), "temperature": .number(0), "cache_prompt": .bool(false)])
   }
 
   static func response(_ data: Data) throws -> AgentInferenceMessage {
     let value = try JSONDecoder().decode(CodexValue.self, from: data)
-    guard let choice = value["choices"].array?.first,
-          ["stop", "tool_calls"].contains(choice["finish_reason"].string ?? "") else {
-      throw FileModeError.operation("The local model’s file response was incomplete. Try a smaller request; any completed edits are available in Review.")
+    guard let choice = value["choices"].array?.first else { throw FileModeError.invalidArguments }
+    if choice["finish_reason"].string == "length" { throw FileModeError.incompleteResponse }
+    guard ["stop", "tool_calls"].contains(choice["finish_reason"].string ?? "") else {
+      throw FileModeError.operation("The local runtime stopped with an unsupported finish reason. No calls from that response were executed. Review keeps earlier edits.")
     }
     let message = try JSONDecoder().decode(AgentInferenceMessage.self, from: JSONEncoder().encode(choice["message"]))
     guard message.role == "assistant",

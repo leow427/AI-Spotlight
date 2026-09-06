@@ -84,6 +84,7 @@ final class WorkspaceTests: XCTestCase {
   func testLocalReadOnlyRejectsEveryMutation() async throws {
     let workspace = try service(level: .readOnly)
     let mutations: [WorkspaceMutation] = [.write(path: "notes.txt", content: "no"),
+      .append(path: "notes.txt", content: "no"),
       .patch(path: "notes.txt", old: "original", new: "no"), .create(path: "new.txt", content: "no"),
       .move(from: "notes.txt", to: "renamed.txt"), .delete(path: "notes.txt")]
     for mutation in mutations {
@@ -138,6 +139,30 @@ final class WorkspaceTests: XCTestCase {
     do { _ = try await workspace.undo(changes); XCTFail() }
     catch { XCTAssertEqual(error as? FileModeError, .conflict) }
     XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("notes.txt"), encoding: .utf8), "user changes")
+  }
+
+  func testFailedRollbackPreservesConcurrentEditAndDurableRecoveryCopies() async throws {
+    let file = project.appendingPathComponent("notes.txt")
+    let original = try Data(contentsOf: file)
+    let workspace = try service(failure: { count in
+      if count == 1 {
+        try Data("newer external edit".utf8).write(to: file)
+        throw FileModeError.operation("Injected failure after external edit")
+      }
+    })
+    do {
+      try await workspace.apply([.write(path: "notes.txt", content: "agent edit"),
+        .create(path: "z-new.txt", content: "not written")])
+      XCTFail("Unsafe rollback must stop and retain recovery")
+    } catch { XCTAssertTrue(error.localizedDescription.contains("could not be restored")) }
+    XCTAssertEqual(try Data(contentsOf: file), Data("newer external edit".utf8))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: project.appendingPathComponent("z-new.txt").path))
+    let snapshot = await workspace.snapshotURL
+    let saved = try JSONDecoder().decode(WorkspaceChangeSet.self, from: Data(contentsOf: snapshot))
+    XCTAssertEqual(saved.changes.first { $0.path == "notes.txt" }?.before.data, original)
+    do { _ = try await workspace.undo(saved); XCTFail("Undo must also preserve the external edit") }
+    catch { XCTAssertEqual(error as? FileModeError, .conflict) }
+    XCTAssertEqual(try Data(contentsOf: file), Data("newer external edit".utf8))
   }
 
   func testEditsAndUndoPreserveFinderMetadataAndFilePermissions() async throws {
@@ -216,5 +241,120 @@ final class WorkspaceTests: XCTestCase {
     catch { XCTAssertEqual(error as? FileModeError, .inactive) }
     do { try await workspace.apply([.write(path: "notes.txt", content: "late")]); XCTFail() }
     catch { XCTAssertEqual(error as? FileModeError, .inactive) }
+  }
+
+  func testQueryExcerptFindsLateTextWithBoundedUnicodeOffsets() async throws {
+    let content = String(repeating: "🌿 Keep this line.\n", count: 4_000) + "Target: before\n"
+    try Data(content.utf8).write(to: project.appendingPathComponent("notes.txt"))
+    let workspace = try service()
+    let excerpt = try await workspace.readExcerpt("notes.txt", query: "Target: before")
+    XCTAssertTrue(excerpt["text"].string!.contains("Target: before"))
+    XCTAssertLessThanOrEqual(excerpt["text"].string!.count, 2_000)
+    XCTAssertEqual(excerpt["total_characters"].integer, content.count)
+    XCTAssertEqual(excerpt["has_more"].bool, false)
+    let offset = try XCTUnwrap(excerpt["offset"].integer)
+    XCTAssertEqual(excerpt["text"].string, String(content.dropFirst(offset)))
+    try await workspace.apply([.patch(path: "notes.txt", old: "Target: before", new: "Target: after")])
+    try await workspace.verifyChanges()
+    _ = try await workspace.undo(workspace.changeSet())
+    XCTAssertEqual(try Data(contentsOf: project.appendingPathComponent("notes.txt")), Data(content.utf8))
+  }
+
+  func testFirstWriteRejectsConcurrentChangesSinceRead() async throws {
+    for mutation in [WorkspaceMutation.write(path: "notes.txt", content: "new"),
+      .patch(path: "notes.txt", old: "original", new: "new")] {
+      let workspace = try service()
+      try Data("original".utf8).write(to: project.appendingPathComponent("notes.txt"))
+      _ = try await workspace.readFile("notes.txt")
+      try Data("original plus user work".utf8).write(to: project.appendingPathComponent("notes.txt"))
+      do { try await workspace.apply([mutation]); XCTFail("Do not overwrite a newer file") }
+      catch { XCTAssertEqual(error as? FileModeError, .conflict) }
+      let changes = await workspace.changeSet()
+      XCTAssertEqual(changes.count, 0)
+      XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("notes.txt"), encoding: .utf8), "original plus user work")
+    }
+  }
+
+  func testReadAliasesCannotHideConcurrentChangesFromFirstWrite() async throws {
+    for alias in ["./notes.txt", "NOTES.TXT"] {
+      let workspace = try service()
+      try Data("original".utf8).write(to: project.appendingPathComponent("notes.txt"))
+      _ = try await workspace.readFile(alias)
+      try Data("original plus user work".utf8).write(to: project.appendingPathComponent("notes.txt"))
+      do { try await workspace.apply([.write(path: "notes.txt", content: "new")]); XCTFail() }
+      catch { XCTAssertEqual(error as? FileModeError, .conflict) }
+    }
+  }
+
+  func testVerificationDetectsExternalChangesWithoutRollingThemBack() async throws {
+    let workspace = try service()
+    try await workspace.apply([.write(path: "notes.txt", content: "agent edit")])
+    try Data("newer user text".utf8).write(to: project.appendingPathComponent("notes.txt"))
+    do { try await workspace.verifyChanges(); XCTFail("A journal alone cannot prove current contents") }
+    catch { XCTAssertEqual(error as? FileModeError, .conflict) }
+    let changes = await workspace.changeSet()
+    do { _ = try await workspace.undo(changes); XCTFail("Undo must preserve concurrent user text") }
+    catch { XCTAssertEqual(error as? FileModeError, .conflict) }
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("notes.txt"), encoding: .utf8), "newer user text")
+    XCTAssertEqual(changes.changes.first?.before.data, Data("original text\nneedle\n".utf8))
+  }
+
+  func testPatchErrorsDistinguishMissingAndAmbiguousMatches() async throws {
+    let workspace = try service()
+    for (old, expected) in [("missing", FileModeError.patchNotFound), ("e", .patchAmbiguous)] {
+      do { try await workspace.apply([.patch(path: "notes.txt", old: old, new: "x")]); XCTFail() }
+      catch { XCTAssertEqual(error as? FileModeError, expected) }
+    }
+    let changes = await workspace.changeSet()
+    XCTAssertEqual(changes.count, 0)
+  }
+
+  func testLocalPatchMustUseAnObservedExcerptInsteadOfGuessingUnseenText() async throws {
+    let initial = String(repeating: "Unchanged line\n", count: 1_000) + "Status: before.\n"
+    try Data(initial.utf8).write(to: project.appendingPathComponent("notes.txt"))
+    let workspace = try service()
+    _ = try await workspace.readExcerpt("notes.txt", limit: 500)
+    do {
+      try await workspace.apply([.patch(path: "notes.txt", old: "Status:", new: "Status: after.")], requireObservedPatch: true)
+      XCTFail("A guessed match outside the excerpt must not run")
+    } catch { XCTAssertEqual(error as? FileModeError, .patchUnobserved) }
+    XCTAssertEqual(try Data(contentsOf: project.appendingPathComponent("notes.txt")), Data(initial.utf8))
+    _ = try await workspace.readExcerpt("./notes.txt", query: "Status:")
+    try await workspace.apply([.patch(path: "notes.txt", old: "Status: before.", new: "Status: after.")], requireObservedPatch: true)
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("notes.txt"), encoding: .utf8),
+      initial.replacingOccurrences(of: "Status: before.", with: "Status: after."))
+  }
+
+  func testQuerySearchesTheWholeFileEvenAfterAnEarlierExcerptOffset() async throws {
+    let workspace = try service()
+    let excerpt = try await workspace.readExcerpt("notes.txt", offset: 20, query: "original")
+    XCTAssertEqual(excerpt["text"].string, "original text\nneedle\n")
+    let unfiltered = try await workspace.readExcerpt("notes.txt", query: "")
+    XCTAssertEqual(unfiltered["text"], excerpt["text"])
+    let missing = try await workspace.metadata("absent.txt")
+    XCTAssertEqual(missing["exists"].bool, false)
+  }
+
+  func testSearchResultsAreObservedTextForLocalPatches() async throws {
+    let workspace = try service()
+    _ = try await workspace.searchFiles("original")
+    try await workspace.apply([.patch(path: "notes.txt", old: "original text", new: "changed text")], requireObservedPatch: true)
+    let text = try await workspace.readFile("notes.txt")
+    XCTAssertEqual(text, "changed text\nneedle\n")
+  }
+
+  func testAppendKeepsProtectedWritePolicyAndFileSizeLimit() async throws {
+    let workspace = try WorkspaceService(selection: .init(attachments: [.select(project)]), accessLevel: .readWrite,
+      journalDirectory: journal, writePolicy: .local(cloudAvailability: { .available(modelID: "test") }, notice: { _ in }))
+    try Data("let value = 1\n".utf8).write(to: project.appendingPathComponent("source.swift"))
+    do { try await workspace.apply([.append(path: "source.swift", content: "let other = 2\n")]); XCTFail() }
+    catch { XCTAssertEqual(error as? FileModeError, .protectedWriteRequiresCloud) }
+    do {
+      try await workspace.apply([.append(path: "notes.txt", content: String(repeating: "a", count: WorkspaceAccess.fileLimit))])
+      XCTFail()
+    } catch { XCTAssertEqual(error as? FileModeError, .tooLarge) }
+    let changes = await workspace.changeSet()
+    XCTAssertEqual(changes.count, 0)
+    XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("source.swift"), encoding: .utf8), "let value = 1\n")
   }
 }

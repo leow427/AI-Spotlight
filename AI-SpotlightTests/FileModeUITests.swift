@@ -271,7 +271,13 @@ private actor FileUITestInference: LocalToolInference {
         function: .init(name: "write_file", arguments: String(decoding: try JSONEncoder().encode(
           ["path": path, "content": "Updated locally"]), as: UTF8.self)))])
     }
-    XCTAssertTrue(messages.contains { $0.role == "tool" && $0.content?.contains("File edited") == true })
+    let content = try XCTUnwrap(messages.last { $0.role == "tool" }?.content)
+    let receipt = try JSONDecoder().decode(CodexValue.self, from: Data(content.utf8))
+    XCTAssertEqual(receipt["success"].bool, true)
+    XCTAssertEqual(receipt["result"]["status"].string, "edited")
+    XCTAssertEqual(receipt["result"]["path"].string, path)
+    XCTAssertEqual(receipt["result"]["verified"].bool, true)
+    XCTAssertEqual(receipt["result"]["read_back"]["text"].string, "Updated locally")
     return AgentInferenceMessage(role: "assistant", content: "Updated the file locally. Undo is available.")
   }
 }

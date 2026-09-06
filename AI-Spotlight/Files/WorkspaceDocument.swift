@@ -23,7 +23,7 @@ enum WorkspaceDocument {
     return Data(content.utf8)
   }
 
-  static func edit(path: String, data: Data, oldText: String? = nil, content: String) throws -> Data {
+  static func edit(path: String, data: Data, oldText: String? = nil, content: String, strictPatch: Bool = false) throws -> Data {
     try validateContent(content)
     if isRTF(path: path, data: data) {
       let (document, attributes) = try richText(data, editing: true)
@@ -32,6 +32,7 @@ enum WorkspaceDocument {
       let replacement: String
       if let oldText {
         range = try uniqueRange(oldText, in: original)
+        if strictPatch { try validatePatchBoundary(oldText, replacement: content, range: range, in: original) }
         replacement = content
       } else {
         if original == content { return data }
@@ -52,6 +53,7 @@ enum WorkspaceDocument {
     let original = try text(path: path, data: data)
     if let oldText {
       let range = try uniqueRange(oldText, in: original)
+      if strictPatch { try validatePatchBoundary(oldText, replacement: content, range: range, in: original) }
       return Data((original as NSString).replacingCharacters(in: range, with: content).utf8)
     }
     return Data(content.utf8)
@@ -62,13 +64,35 @@ enum WorkspaceDocument {
     guard !content.utf8.contains(0) else { throw FileModeError.invalidArguments }
   }
 
+  /// Local inline edits cannot silently add line breaks or copy the next unchanged line. A
+  /// deliberate structural edit remains expressible by matching the full affected lines.
+  private static func validatePatchBoundary(_ old: String, replacement: String, range: NSRange, in text: String) throws {
+    guard old != replacement else { return }
+    let value = text as NSString
+    let end = NSMaxRange(range)
+    func newline(_ value: UInt16) -> Bool { value == 10 || value == 13 }
+    if old.utf16.filter(newline).count != replacement.utf16.filter(newline).count {
+      let startsLine = range.location == 0 || newline(value.character(at: range.location - 1))
+      let endsLine = end == value.length || newline(value.character(at: end - 1))
+      guard startsLine && endsLine else { throw FileModeError.patchBoundary }
+    }
+    if let last = old.utf16.last, newline(last), end < value.length {
+      let nextLine = String(value.substring(from: end).prefix { $0 != "\n" && $0 != "\r" })
+      if !nextLine.trimmingCharacters(in: .whitespaces).isEmpty,
+         [nextLine, nextLine + "\n", nextLine + "\r\n"].contains(where: replacement.hasSuffix) {
+        throw FileModeError.patchBoundary
+      }
+    }
+  }
+
   private static func uniqueRange(_ old: String, in text: String) throws -> NSRange {
     let value = text as NSString
     let first = value.range(of: old, options: .literal)
-    guard !old.isEmpty, first.location != NSNotFound else { throw FileModeError.invalidArguments }
+    guard !old.isEmpty else { throw FileModeError.invalidArguments }
+    guard first.location != NSNotFound else { throw FileModeError.patchNotFound }
     let rest = NSRange(location: first.location + 1, length: value.length - first.location - 1)
     guard value.range(of: old, options: .literal, range: rest).location == NSNotFound else {
-      throw FileModeError.invalidArguments
+      throw FileModeError.patchAmbiguous
     }
     return first
   }

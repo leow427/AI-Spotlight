@@ -31,6 +31,7 @@ struct WorkspaceChangeSet: Codable, Equatable, Sendable, Identifiable {
 enum WorkspaceMutation: Sendable {
   case create(path: String, content: String)
   case write(path: String, content: String)
+  case append(path: String, content: String)
   case patch(path: String, old: String, new: String)
   case move(from: String, to: String)
   case delete(path: String)
@@ -47,6 +48,9 @@ actor WorkspaceService {
   private var journal: WorkspaceChangeSet
   private var active = true
   private var mutationInProgress = false
+  private var observedHashes: [String: Data] = [:]
+  private var observedExcerpts: [String: [String]] = [:]
+  private var canonicalReadPaths: [String: String] = [:]
   private let writePolicy: WorkspaceWritePolicy
   private let knownOrigins: [String: Set<Data>]
   private let failureAfterWrite: (@Sendable (Int) throws -> Void)?
@@ -98,8 +102,44 @@ actor WorkspaceService {
     return String(try textFile(path).dropFirst(offset).prefix(limit))
   }
 
+  /// A bounded, query-centered excerpt keeps small-model histories independent of file size.
+  func readExcerpt(_ path: String, offset: Int = 0, limit: Int = 2_000, query: String? = nil, fromEnd: Bool = false) throws -> CodexValue {
+    try checkActive()
+    guard offset >= 0, offset <= WorkspaceAccess.fileLimit, (1...2_000).contains(limit) else {
+      throw FileModeError.invalidArguments
+    }
+    let text = try textFile(path)
+    var start = fromEnd ? max(0, text.count - limit) : min(offset, text.count)
+    if let query, !query.isEmpty {
+      guard query.count <= 512 else { throw FileModeError.invalidArguments }
+      // A query locates text anywhere in this file. Offset is for ordinary excerpt pagination;
+      // combining a previous next_offset with a query must not hide an earlier matching target.
+      guard let match = text.range(of: query, options: .literal) else {
+        throw FileModeError.patchNotFound
+      }
+      start = max(0, text.distance(from: text.startIndex, to: match.lowerBound) - min(200, limit / 4))
+    }
+    let excerpt = String(text.dropFirst(start).prefix(limit))
+    let key = canonicalReadPaths[path]!
+    observedExcerpts[key, default: []].append(excerpt)
+    observedExcerpts[key] = Array(observedExcerpts[key, default: []].suffix(8))
+    let end = start + excerpt.count
+    return .object(["path": .string(path), "text": .string(excerpt), "offset": .number(Double(start)),
+      "next_offset": .number(Double(end)), "total_characters": .number(Double(text.count)), "has_more": .bool(end < text.count)])
+  }
+
+  /// Check actual bytes and metadata through the same authorized descriptors before reporting success
+  /// or acknowledging an already completed operation. This does not certify the model's interpretation.
+  func verifyChanges() throws {
+    try checkActive()
+    for change in journal.changes {
+      guard try state(change.path) == change.after else { throw FileModeError.conflict }
+    }
+  }
+
   private func textFile(_ path: String) throws -> String {
-    let data = try access.read(access.location(path))
+    let observed = try access.readWithPath(access.location(path))
+    let data = observed.data
     let text: String
     if path.lowercased().hasSuffix(".pdf") {
       guard let document = PDFDocument(data: data), document.pageCount <= 200,
@@ -108,13 +148,19 @@ actor WorkspaceService {
     } else {
       text = try WorkspaceDocument.text(path: path, data: data)
     }
+    let hash = Data(SHA256.hash(data: data))
+    if let previous = observedHashes[observed.path], previous != hash { observedExcerpts[observed.path] = nil }
+    observedHashes[observed.path] = hash
+    canonicalReadPaths[path] = observed.path
     return text
   }
 
   func metadata(_ path: String) throws -> CodexValue {
     try checkActive()
-    guard let info = try access.info(access.location(path)) else { throw FileModeError.invalidArguments }
-    return .object(["path": .string(path), "directory": .bool(info.st_mode & 0o170000 == 0o040000),
+    guard let info = try access.info(access.location(path)) else {
+      return .object(["path": .string(path), "exists": .bool(false)])
+    }
+    return .object(["path": .string(path), "exists": .bool(true), "directory": .bool(info.st_mode & 0o170000 == 0o040000),
       "bytes": .number(Double(info.st_size)), "modifiedAt": .number(Double(info.st_mtimespec.tv_sec))])
   }
 
@@ -165,6 +211,10 @@ actor WorkspaceService {
           for (index, line) in bounded.components(separatedBy: "\n").enumerated()
             where line.localizedCaseInsensitiveContains(query) {
             matches.append("\(entry):\(index + 1): \(line.prefix(240))")
+            if let key = canonicalReadPaths[entry] {
+              observedExcerpts[key, default: []].append(String(line.prefix(240)))
+              observedExcerpts[key] = Array(observedExcerpts[key, default: []].suffix(8))
+            }
             if matches.count >= 100 { break }
           }
         }
@@ -174,6 +224,7 @@ actor WorkspaceService {
   }
 
   func apply(_ mutations: [WorkspaceMutation],
+             requireObservedPatch: Bool = false,
              confirmDeletion: (@Sendable (String) async -> Bool)? = nil) async throws {
     try checkActive()
     guard !mutationInProgress else { throw FileModeError.conflict }
@@ -187,6 +238,10 @@ actor WorkspaceService {
       _ = try access.location(path, writing: true)
       if let value = after[path] { return value }
       let value = try state(path)
+      let absolutePath = access.absolutePath(try access.location(path, writing: true))
+      if let observed = observedHashes[absolutePath], value.data.map({ Data(SHA256.hash(data: $0)) }) != observed {
+        throw FileModeError.conflict
+      }
       if let previous = journal.changes.first(where: { $0.path == path }), value != previous.after {
         throw FileModeError.conflict
       }
@@ -197,22 +252,36 @@ actor WorkspaceService {
       switch mutation {
       case .create(let path, let content):
         let value = try current(path)
-        guard value.data == nil else { throw FileModeError.conflict }
+        guard value.data == nil else { throw FileModeError.alreadyExists }
         after[path] = WorkspaceFileState(data: try WorkspaceDocument.create(path: path, content: content), mode: 0o600, permissions: .newFile, createdBySpotlight: true)
       case .write(let path, let content):
         let value = try current(path)
         guard let existing = value.data else { throw FileModeError.invalidArguments }
         after[path] = WorkspaceFileState(data: try WorkspaceDocument.edit(path: path, data: existing, content: content),
           mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
+      case .append(let path, let content):
+        let value = try current(path)
+        guard let existing = value.data else { throw FileModeError.invalidArguments }
+        let original = try WorkspaceDocument.text(path: path, data: existing)
+        after[path] = WorkspaceFileState(data: try WorkspaceDocument.edit(path: path, data: existing, content: original + content),
+          mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
       case .patch(let path, let old, let new):
+        guard !old.isEmpty else { throw FileModeError.invalidArguments }
         let value = try current(path)
         guard let data = value.data else { throw FileModeError.invalidArguments }
-        after[path] = WorkspaceFileState(data: try WorkspaceDocument.edit(path: path, data: data, oldText: old, content: new),
+        if requireObservedPatch {
+          let key = access.absolutePath(try access.location(path, writing: true))
+          guard observedExcerpts[key, default: []].contains(where: { $0.range(of: old, options: .literal) != nil }) else {
+            throw FileModeError.patchUnobserved
+          }
+        }
+        after[path] = WorkspaceFileState(data: try WorkspaceDocument.edit(path: path, data: data, oldText: old, content: new, strictPatch: requireObservedPatch),
           mode: value.mode, attributes: value.attributes, permissions: value.permissions, createdBySpotlight: value.createdBySpotlight)
       case .move(let from, let to):
         guard from != to else { throw FileModeError.invalidArguments }
         let source = try current(from)
-        guard source.data != nil, try current(to).data == nil else { throw FileModeError.conflict }
+        guard source.data != nil else { throw FileModeError.invalidArguments }
+        guard try current(to).data == nil else { throw FileModeError.alreadyExists }
         after[to] = source
         after[from] = WorkspaceFileState(data: nil, mode: 0o600)
       case .delete(let path):
@@ -282,6 +351,9 @@ actor WorkspaceService {
         throw FileModeError.operation("Some files could not be restored. Their recovery copies were kept. Use Review and Undo before continuing.")
       }
       throw error
+    }
+    for (path, value) in after {
+      observedHashes[access.absolutePath(try access.location(path))] = value.data.map { Data(SHA256.hash(data: $0)) }
     }
   }
 

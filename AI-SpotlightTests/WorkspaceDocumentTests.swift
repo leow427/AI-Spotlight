@@ -25,6 +25,31 @@ final class WorkspaceDocumentTests: XCTestCase {
     XCTAssertEqual(matches, ["note.rtf:2: before and coloured text."])
   }
 
+  func testRTFAppendPreservesExistingCharacterFormattingAndExactUndo() async throws {
+    let (root, workspace) = try fixture()
+    defer { try? FileManager.default.removeItem(at: root) }
+    var beforeAttributes: NSDictionary?
+    let before = try XCTUnwrap(NSAttributedString(rtf: original, documentAttributes: &beforeAttributes))
+    // AppKit materializes implicit RTF paragraph defaults on export. Compare those with an
+    // unchanged export, while keeping direct equality for every explicitly supplied attribute.
+    let canonicalData = try XCTUnwrap(before.rtf(from: NSRange(location: 0, length: before.length),
+      documentAttributes: beforeAttributes as? [NSAttributedString.DocumentAttributeKey: Any] ?? [:]))
+    let canonical = try XCTUnwrap(NSAttributedString(rtf: canonicalData, documentAttributes: nil))
+    let result = await AgentFileTools(workspace: workspace).execute(name: "append_file",
+      arguments: .object(["path": .string("note.rtf"), "content": .string("\nAdded 🌿")]))
+    XCTAssertTrue(result.success, result.text)
+    let data = try Data(contentsOf: root.appendingPathComponent("Project/note.rtf"))
+    let after = try XCTUnwrap(NSAttributedString(rtf: data, documentAttributes: nil))
+    XCTAssertEqual(after.string, before.string + "\nAdded 🌿")
+    for index in 0..<before.length {
+      var expected = before.attributes(at: index, effectiveRange: nil)
+      if expected[.paragraphStyle] == nil { expected[.paragraphStyle] = canonical.attribute(.paragraphStyle, at: index, effectiveRange: nil) }
+      XCTAssertTrue(NSDictionary(dictionary: expected).isEqual(to: after.attributes(at: index, effectiveRange: nil)), "Character \(index)")
+    }
+    _ = try await workspace.undo(workspace.changeSet())
+    XCTAssertEqual(try Data(contentsOf: root.appendingPathComponent("Project/note.rtf")), original)
+  }
+
   func testRTFPatchPreservesFormattingAndUndoRestoresExactBytesAfterRestart() async throws {
     let (root, workspace) = try fixture()
     defer { try? FileManager.default.removeItem(at: root) }
@@ -100,6 +125,32 @@ final class WorkspaceDocumentTests: XCTestCase {
       let data = try WorkspaceDocument.create(path: "note.rtf", content: before)
       let edited = try WorkspaceDocument.edit(path: "note.rtf", data: data, content: after)
       XCTAssertEqual(try WorkspaceDocument.text(path: "note.rtf", data: edited), after)
+    }
+  }
+
+  func testLocalPatchRequiresWholeLinesForStructuralChanges() throws {
+    for path in ["note.txt", "note.rtf"] {
+      for (text, old, replacement) in [
+        ("let message = \"before\"\n", "before", "after\n"),
+        ("Status: before.\n", "Status: before.", "Status: after.\n"),
+        ("Size: small\nKeep: yes\n", "Size: small\n", "Size: large\nKeep: yes\n")
+      ] {
+        let data = try WorkspaceDocument.create(path: path, content: text)
+        XCTAssertThrowsError(try WorkspaceDocument.edit(path: path, data: data, oldText: old,
+          content: replacement, strictPatch: true)) { XCTAssertEqual($0 as? FileModeError, .patchBoundary) }
+        XCTAssertEqual(try WorkspaceDocument.text(path: path, data: data), text)
+      }
+      for (text, old, replacement, expected) in [
+        ("Status: before.\n", "Status: before.\n", "Status:\nafter.\n", "Status:\nafter.\n"),
+        ("Size: small\nKeep: yes\n", "Size: small\nKeep: yes\n", "Size: large\nKeep: yes\nKeep: yes\n", "Size: large\nKeep: yes\nKeep: yes\n"),
+        ("Same\nSame\n", "Same\nSame\n", "Same\nSame\n", "Same\nSame\n"),
+        ("Before", "Before", "Before\nAdded", "Before\nAdded")
+      ] {
+        let data = try WorkspaceDocument.create(path: path, content: text)
+        let edited = try WorkspaceDocument.edit(path: path, data: data, oldText: old,
+          content: replacement, strictPatch: true)
+        XCTAssertEqual(try WorkspaceDocument.text(path: path, data: edited), expected)
+      }
     }
   }
 
