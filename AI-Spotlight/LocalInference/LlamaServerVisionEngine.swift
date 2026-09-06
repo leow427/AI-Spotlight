@@ -40,13 +40,22 @@ enum LocalVisionModelValidation {
 
 /// One resident main model serves text, images, planning and answers. The child
 /// owns no conversation state: every call supplies the complete prepared messages.
-actor LlamaServerVisionEngine: LocalVisionServing {
+actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
   private var runtime: LocalModelRuntimeSession?
   private var activeID: UUID?
   private var idleTask: Task<Void, Never>?
   private var idleID: UUID?
   private let idleDelay: Duration
-  init(idleDelay: Duration = .seconds(300)) { self.idleDelay = idleDelay }
+  private let fileMaximumTokens: Int
+  private let fileContextOverride: Int?
+  private let fileDiagnostics: (@Sendable (CodexValue) async -> Void)?
+  init(idleDelay: Duration = .seconds(300), fileMaximumTokens: Int = 1_024,
+       fileContextOverride: Int? = nil, fileDiagnostics: (@Sendable (CodexValue) async -> Void)? = nil) {
+    self.idleDelay = idleDelay
+    self.fileMaximumTokens = fileMaximumTokens
+    self.fileContextOverride = fileContextOverride
+    self.fileDiagnostics = fileDiagnostics
+  }
 
   func runtimeProcessIdentifier() -> Int32? {
     guard let runtime, runtime.process.isRunning else { return nil }
@@ -73,6 +82,7 @@ actor LlamaServerVisionEngine: LocalVisionServing {
   }
 
   static func arguments(model: LocalModel, port: UInt16, key: String, alias: String) throws -> [String] {
+    if !model.supportsVision { return try LocalFileRuntime.textArguments(model: model, port: port, key: key, alias: alias) }
     try LocalVisionModelValidation.validate(model)
     let config = model.visionConfiguration!
     return ["-m", model.fileURL.path, "--mmproj", config.projectorURL.path,
@@ -198,6 +208,92 @@ actor LlamaServerVisionEngine: LocalVisionServing {
     } onCancel: { Task { await self.cancel(id: id) } }
   }
 
+  /// llama.cpp's native function calling endpoint performs template rendering and structured parsing.
+  /// The controller owns the tool loop; this method only performs one inference step.
+  func completeTools(messages: [AgentInferenceMessage], tools: [AgentToolDefinition],
+                     model: LocalModel) async throws -> AgentInferenceMessage {
+    let id = UUID()
+    let started = ProcessInfo.processInfo.systemUptime
+    var diagnostic: [String: CodexValue] = ["limit": .number(Double(fileMaximumTokens)),
+      "context": .number(Double(fileContextOverride ?? LocalFileRuntime.contextWindow(for: model)))]
+    if activeID != nil { await unload() }
+    idleTask?.cancel()
+    idleID = nil
+    activeID = id
+    return try await withTaskCancellationHandler {
+      do {
+        try Task.checkCancellation()
+        guard (128...4_096).contains(fileMaximumTokens),
+              fileContextOverride == nil || (4_096...32_768).contains(fileContextOverride!) else {
+          throw FileModeError.invalidArguments
+        }
+        let session = try await load(model, requestID: id)
+        if fileDiagnostics != nil,
+           let properties = try? await toolJSON(path: "props", payload: .object([:]), session: session, method: "GET") {
+          diagnostic["runtime_settings"] = properties["default_generation_settings"]
+        }
+        let payload = try LocalFileRuntime.payload(messages: messages, tools: tools, alias: session.alias,
+          maximumTokens: fileMaximumTokens)
+        // Render and tokenize the exact tool-aware template before inference. This avoids silently
+        // truncating a tool result or dropping the user's request when the agent reaches its budget.
+        let template = try await toolJSON(path: "apply-template", payload: payload, session: session)
+        guard let prompt = template["prompt"].string else {
+          throw FileModeError.operation("The local runtime did not return a rendered tool template.")
+        }
+        let tokens = try await toolJSON(path: "tokenize", payload: .object([
+          "content": .string(prompt), "add_special": .bool(true)]), session: session)
+        guard let count = tokens["tokens"].array?.count else {
+          throw FileModeError.operation("The local runtime did not return a token count for this file task.")
+        }
+        diagnostic["rendered_prompt_tokens"] = .number(Double(count))
+        try LocalFileRuntime.validateBudget(promptTokens: count, maximumTokens: fileMaximumTokens,
+          contextWindow: fileContextOverride ?? LocalFileRuntime.contextWindow(for: model))
+        try Task.checkCancellation()
+        guard activeID == id else { throw CancellationError() }
+        let response = try await toolJSON(path: "v1/chat/completions", payload: payload, session: session)
+        diagnostic["usage"] = response["usage"]
+        diagnostic["timings"] = response["timings"]
+        diagnostic["finish_reason"] = response["choices"].array?.first?["finish_reason"] ?? .null
+        // Opt-in synthetic evaluations only. No production logger receives file text or arguments.
+        if fileDiagnostics != nil {
+          diagnostic["response_preview"] = .string(String(String(decoding: try JSONEncoder().encode(response), as: UTF8.self).prefix(8_000)))
+        }
+        let message = try LocalFileRuntime.response(JSONEncoder().encode(response))
+        try Task.checkCancellation()
+        guard activeID == id else { throw CancellationError() }
+        activeID = nil
+        scheduleIdleUnload(id: id)
+        diagnostic["seconds"] = .number(ProcessInfo.processInfo.systemUptime - started)
+        await fileDiagnostics?(.object(diagnostic))
+        return message
+      } catch {
+        diagnostic["error"] = .string(error.localizedDescription)
+        diagnostic["seconds"] = .number(ProcessInfo.processInfo.systemUptime - started)
+        await fileDiagnostics?(.object(diagnostic))
+        await cancel(id: id)
+        throw error
+      }
+    } onCancel: { Task { await self.cancel(id: id) } }
+  }
+
+  private func toolJSON(path: String, payload: CodexValue, session: LocalModelRuntimeSession, method: String = "POST") async throws -> CodexValue {
+    var request = URLRequest(url: session.base.appendingPathComponent(path), timeoutInterval: 180)
+    request.httpMethod = method
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.setValue("Bearer \(session.key)", forHTTPHeaderField: "Authorization")
+    // Stable schema/property order keeps native chat templates consistent across launches.
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = .sortedKeys
+    if method == "POST" { request.httpBody = try encoder.encode(payload) }
+    guard (request.httpBody?.count ?? 0) <= 2 * 1_024 * 1_024 else { throw FileModeError.tooLarge }
+    let result = try await URLSessionCloudTransport(session: session.network).data(for: request)
+    guard result.statusCode == 200 else {
+      throw FileModeError.operation("The local runtime returned HTTP \(result.statusCode) for \(path). It could not complete this file inference. Review keeps any earlier edits; ordinary model text is never executed.")
+    }
+    guard result.data.count <= 4 * 1_024 * 1_024 else { throw FileModeError.tooLarge }
+    return try JSONDecoder().decode(CodexValue.self, from: result.data)
+  }
+
   private func scheduleIdleUnload(id: UUID) {
     idleID = id
     idleTask = Task { [weak self, idleDelay] in
@@ -220,8 +316,11 @@ actor LlamaServerVisionEngine: LocalVisionServing {
     }
     let port = try Self.availablePort()
     let session = LocalModelRuntimeSession(model: model, port: port)
-    session.process.executableURL = model.visionConfiguration?.serverExecutableURL
+    session.process.executableURL = LocalFileRuntime.executable(for: model)
     session.process.arguments = try Self.arguments(model: model, port: port, key: session.key, alias: session.alias)
+    if let fileContextOverride, let index = session.process.arguments?.firstIndex(of: "--ctx-size") {
+      session.process.arguments?[index + 1] = String(fileContextOverride)
+    }
     session.process.environment = ["PATH": "/usr/bin:/bin", "LC_ALL": "en_US.UTF-8"]
     session.process.standardOutput = FileHandle.nullDevice
     session.process.standardError = FileHandle.nullDevice

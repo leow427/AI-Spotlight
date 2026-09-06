@@ -7,6 +7,7 @@ enum PanelShortcut: Equatable {
   case cycleRecentChat
   case settings
   case hideInactiveTools
+  case fileMode
 
   static func resolve(
     characters: String?,
@@ -14,6 +15,7 @@ enum PanelShortcut: Equatable {
   ) -> PanelShortcut? {
     let shortcutModifiers: NSEvent.ModifierFlags = [.command, .option, .control, .shift]
     let relevantModifiers = modifiers.intersection(shortcutModifiers)
+    if relevantModifiers == [.shift, .option], characters?.lowercased() == "f" { return .fileMode }
     if relevantModifiers == .control, characters == "\t" {
       return .cycleRecentChat
     }

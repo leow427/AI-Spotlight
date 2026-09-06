@@ -6,11 +6,16 @@ struct WebSearchControls: View {
   var isBusy: Bool
   var openSettings: () -> Void
   var captureScreen: (() -> Void)? = nil
+  var attachFiles: (() -> Void)? = nil
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
   var body: some View {
     HStack(spacing: 0) {
       Menu {
+        if let attachFiles {
+          Button(action: attachFiles) { ToolMenuLabel(title: "Files", imageName: "FileMode") }
+            .disabled(isBusy)
+        }
         if let captureScreen {
           Button(action: captureScreen) { ToolMenuLabel(title: "Screen", imageName: "ScreenCapture") }
             .disabled(isBusy)
@@ -37,7 +42,7 @@ struct WebSearchControls: View {
       .menuIndicator(.hidden)
       .fixedSize()
       .accessibilityLabel("Add tools")
-      .help("Add tools, including Screen and Web Search")
+      .help("Add tools, including Files, Screen and Web Search")
 
       ZStack(alignment: .leading) {
         if isPresented {

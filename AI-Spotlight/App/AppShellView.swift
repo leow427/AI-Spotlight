@@ -47,6 +47,8 @@ struct AppShellView: View {
   @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
   @ObservedObject private var modelAdvisor: LocalModelAdvisor
+  @ObservedObject private var files: FileModeCoordinator
+  @State private var isFileCloudConsentPresented = false
   @StateObject private var screen: ScreenComposerCoordinator
   @ObservedObject private var screenSettings = ScreenSettings.shared
   @ObservedObject private var connectivity = ScreenConnectivity.shared
@@ -80,12 +82,12 @@ struct AppShellView: View {
     self.modelAdvisor = modelAdvisor
     self.searchSettings = searchSettings
     _screen = StateObject(wrappedValue: screen)
-    _localChat = StateObject(
-      wrappedValue: localChat ?? localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
-    )
+    let chat = localChat ?? localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
+    _localChat = StateObject(wrappedValue: chat)
+    self.files = chat.files
   }
 
-  var body: some View {
+  private var shellLayout: some View {
     ZStack {
       welcomeBackground
         .ignoresSafeArea()
@@ -178,6 +180,11 @@ struct AppShellView: View {
                 Text(error).font(.caption).foregroundStyle(.orange)
                   .fixedSize(horizontal: false, vertical: true)
               }
+              if files.selection != nil || files.error != nil {
+                FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
+                  useCodex: { isFileCloudConsentPresented = true })
+              }
+              FileChangeSummaryView(files: files, isBusy: localChat.isBusy)
               composer
             }
             .padding(20)
@@ -194,6 +201,13 @@ struct AppShellView: View {
     .overlay {
       RoundedRectangle(cornerRadius: 24, style: .continuous)
         .stroke(.white.opacity(0.14), lineWidth: 0.5)
+    }
+  }
+
+  private var observedShell: some View {
+    shellLayout
+    .onReceive(NotificationCenter.default.publisher(for: .fileModeRequested)) { _ in
+      activateFileMode(from: .keyboard)
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       screen.clearDraft()
@@ -229,9 +243,22 @@ struct AppShellView: View {
     .onReceive(NotificationCenter.default.publisher(for: .recentChatCycleRequested)) { _ in
       localChat.cycleRecentChat()
     }
+  }
+
+  var body: some View {
+    observedShell
     .sheet(isPresented: $modelAdvisor.isOnboardingPresented, onDismiss: { modelAdvisor.dismissOnboarding() }) {
       LocalModelOnboardingView(advisor: modelAdvisor, chat: localChat)
     }
+    .modifier(FileModeDialogs(files: files, isCloudConsentPresented: $isFileCloudConsentPresented,
+      isBusy: localChat.isBusy, useCodex: {
+        cloudSettings.preferredProvider = .chatGPT
+        selectedMode = .cloud
+        if let handoff = files.prepareProtectedCloudDraft() {
+          cloudSettings.preferredModelID = handoff.modelID
+          if draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { draft = handoff.prompt }
+        }
+      }))
     .alert("Allow screenshot uploads?", isPresented: $isScreenPermissionPresented) {
       Button("Allow & Send") {
         screenSettings.answerCloudPermission(allow: true)
@@ -313,16 +340,19 @@ struct AppShellView: View {
       HStack(spacing: 0) {
         WebSearchControls(
           isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
-          isBusy: localChat.isBusy || screen.isBusy, openSettings: openSettings, captureScreen: captureScreen
+          isBusy: localChat.isBusy || screen.isBusy || files.isPicking || files.isWorking,
+          openSettings: openSettings, captureScreen: captureScreen,
+          attachFiles: { activateFileMode(from: .menu) }
         )
         ScreenToolButton(coordinator: screen, isBusy: localChat.isBusy, capture: captureScreen)
+        FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
       }
 
       TextField("Ask anything", text: $screen.draft, axis: .vertical)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($isComposerFocused)
-        .disabled(localChat.isBusy || screen.isBusy)
+        .disabled(localChat.isBusy || screen.isBusy || files.isWorking || files.isPicking)
         .onSubmit(submitDraft)
 
       Menu {
@@ -747,6 +777,23 @@ struct AppShellView: View {
     .disabled(localChat.isBusy)
   }
 
+  private var fileAccess: FileAccessLevel {
+    if selectedMode == .cloud { return cloudSettings.preferredProvider == .chatGPT ? .readWrite : .readOnly }
+    return localChat.installedModel.map { LocalFileCapabilities.production.access(for: $0) } ?? .readOnly
+  }
+
+  private func activateFileMode(from source: FileModeCoordinator.Activation) {
+    guard !localChat.isBusy, !screen.isBusy else { return }
+    Task {
+      await files.activate(from: source)
+      if files.selection != nil {
+        screen.removeAttachment()
+        isSearchEnabled = false
+      }
+      isComposerFocused = true
+    }
+  }
+
   private func captureScreen() {
     guard !localChat.isBusy else { return }
     Task {
@@ -756,7 +803,17 @@ struct AppShellView: View {
   }
 
   private func submitDraft() {
-    guard !localChat.isBusy, !screen.isBusy else { return }
+    guard !localChat.isBusy, !screen.isBusy, !files.isWorking, !files.isPicking else { return }
+    if files.selection != nil {
+      if screen.isEnabled || isSearchEnabled {
+        files.error = "Turn off Screen and Web Search to work with your attached files."
+        return
+      }
+      let prompt = draft
+      localChat.submitFiles(prompt, mode: selectedMode, cloudProvider: cloudSettings.preferredProvider,
+        cloudModelID: cloudSettings.preferredModelID) { if draft == prompt { draft = "" } }
+      return
+    }
     // Capture can finish and submit again before SwiftUI delivers onChange.
     // Resolve all requested tools now; no view-update timing controls routing.
     let commands = ComposerCommands(draft)
@@ -963,6 +1020,7 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Hide inactive tools", keys: "⇧ ⌘ H")
           shortcut("Enable Web Search", keys: "/search")
           shortcut("Capture a screen region", keys: "/screen")
+          shortcut("Attach files or a folder", keys: "⇧ ⌥ F")
           Text("/screen with a question captures and sends. /screen alone attaches a screenshot and waits for a question.")
             .font(.caption).foregroundStyle(.secondary)
 
