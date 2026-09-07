@@ -551,7 +551,7 @@ struct AppShellView: View {
           .overlay { Circle().stroke(NatureGlass.edge, lineWidth: 0.75) }
           .padding(.bottom, 4)
         Text("How can I help?")
-          .font(.custom("AvenirNext-Medium", size: 22))
+          .font(.system(size: 22, weight: .medium))
         Text(welcomeSubtitle)
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -1081,8 +1081,8 @@ struct AppShellView: View {
 }
 
 enum ChatTypography {
-  static let body = Font.custom("AvenirNext-Regular", size: 15, relativeTo: .body)
-  static let label = Font.custom("AvenirNext-DemiBold", size: 11, relativeTo: .caption)
+  static let body = Font.system(size: 15)
+  static let label = Font.system(size: 11, weight: .semibold)
 }
 
 struct LocalMessageView: View {

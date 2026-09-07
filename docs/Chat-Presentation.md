@@ -1,7 +1,7 @@
 # Chat presentation and attachment lifecycle
 
-User messages appear immediately as sage bubbles aligned to the right. Avenir
-Next is used for conversation text and the composer. Assistant messages use the
+User messages appear immediately as sage bubbles aligned to the right. The macOS system sans-serif
+font is used for conversation text and the composer. Assistant messages use the
 available chat width, with paragraph spacing preserved. File and folder names
 appear above the corresponding user bubble; screenshot previews use the same
 placement.
@@ -33,7 +33,7 @@ file edits and undo, native bubble rendering, and scrolling through the leaf's
 layout transition. The previous pink-icon rendering assertion now checks green
 because the requested color changed.
 
-The image is a native rendering with synthetic messages. The signed app's privacy
+The image is a native rendering with synthetic messages from before the system-font update. The signed app's privacy
 setting excludes the panel from computer screenshots; live behavior is checked
 through its accessibility hierarchy.
 

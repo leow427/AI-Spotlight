@@ -9,7 +9,6 @@ import XCTest
 @MainActor
 final class ScreenViewTests: XCTestCase {
   func testConversationBubblesAndSentAttachmentRender() throws {
-    XCTAssertNotNil(NSFont(name: "AvenirNext-Regular", size: 15))
     var outgoing = ChatMessage(role: .user, content: "Could you review the notes I attached and suggest a clearer introduction?")
     outgoing.attachments = [MessageAttachment(name: "Project notes.txt", isDirectory: false)]
     let encoded = try JSONEncoder().encode(outgoing)
