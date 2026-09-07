@@ -11,7 +11,7 @@ final class LocalModelSelectionTests: XCTestCase {
 
   func testCatalogPinsEveryQuantizationAndMatchesEmbeddedBuild() throws {
     try catalog.validate()
-    XCTAssertEqual(catalog.models.count, 12)
+    XCTAssertEqual(catalog.models.count, 13)
     XCTAssertEqual(Set(catalog.models.map(\.quantization)), ["Q4_K_M", "Q4_0"])
     XCTAssertEqual(Set(catalog.models.map(\.maker)), ["Alibaba / Qwen", "Google", "Mistral AI", "OpenBMB"])
     XCTAssertEqual(Set(catalog.models.compactMap(\.resolvedProfile)), Set(LocalMultimodalProfile.allCases))
@@ -29,6 +29,33 @@ final class LocalModelSelectionTests: XCTestCase {
     let source = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
       .appending(path: "Packages/LlamaBridge/Package.swift")
     XCTAssertTrue(try String(contentsOf: source, encoding: .utf8).contains("releases/download/b\(LocalModelCompatibility.llamaBuild)/"))
+  }
+
+  func testGemmaTwelveBUsesPinnedOfficialQuantizedPackage() throws {
+    let model = try XCTUnwrap(catalog.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
+    XCTAssertEqual(model.displayName, "Google Gemma 4 12B")
+    XCTAssertEqual(model.revision, "29d097773436b69ff9feafd636ab4cf873786537")
+    XCTAssertEqual(model.expectedByteCount, 6_975_879_296)
+    XCTAssertEqual(model.checksumSHA256, "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b")
+    XCTAssertEqual(model.projector?.expectedByteCount, 175_115_616)
+    XCTAssertEqual(model.projector?.checksumSHA256, "cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7")
+    XCTAssertEqual(model.inferenceProfile, .gemma4_12B)
+    XCTAssertEqual(model.quantization, "Q4_0")
+    XCTAssertTrue(LocalModelCompatibility.supports(model))
+  }
+
+  func testGemmaTwelveBCanBeInstalledAndLoadedWithAnExplicitMemoryOverride() throws {
+    let gemma = try XCTUnwrap(catalog.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
+    let insufficientMemory = LocalModelSelector.assess(gemma, hardware: hardware(memory: 24))
+    XCTAssertEqual(insufficientMemory.fit, .memory)
+    XCTAssertTrue(insufficientMemory.permitsMemoryOverride)
+    XCTAssertTrue(insufficientMemory.canInstall)
+
+    let other = try XCTUnwrap(catalog.models.first { $0.id != gemma.id })
+    let blocked = LocalModelSelector.assess(other, hardware: hardware(memory: 4))
+    XCTAssertEqual(blocked.fit, .memory)
+    XCTAssertFalse(blocked.permitsMemoryOverride)
+    XCTAssertFalse(blocked.canInstall)
   }
 
   func testTopTenAreDeterministicHardwareRankedAndNeverPaddedWithUnsafeModels() throws {
@@ -408,6 +435,18 @@ final class LocalModelSelectionTests: XCTestCase {
     } catch {
       XCTAssertTrue(error.localizedDescription.contains("resources"))
     }
+  }
+
+  @MainActor
+  func testGemmaTwelveBDownloadConfirmationAllowsTheMemoryOverride() async throws {
+    let root = try temporaryDirectory()
+    let profile = hardware(memory: 24)
+    let advisor = LocalModelAdvisor(directory: root, modelsDirectory: root, trust: nil, detect: { _ in profile })
+    let gemma = try XCTUnwrap(catalog.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
+
+    let assessment = try await advisor.confirmDownload(gemma, installedModels: [])
+    XCTAssertEqual(assessment.fit, .memory)
+    XCTAssertTrue(assessment.canInstall)
   }
 
   @MainActor

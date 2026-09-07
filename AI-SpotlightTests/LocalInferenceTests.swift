@@ -104,6 +104,21 @@ final class LocalInferenceTests: XCTestCase {
   }
 
   @MainActor
+  func testViewModelDeletesInstalledModelAfterUnloadingIt() async {
+    let installed = fixtureModel()
+    let engine = MockLocalModelEngine(installedModel: installed)
+    let viewModel = LocalChatViewModel(engine: engine, sessionStore: makeSessionStore())
+    await viewModel.refreshInstalledModel()
+
+    viewModel.deleteModel(id: installed.id)
+    await waitUntil { viewModel.state == .idle && viewModel.installedModels.isEmpty }
+
+    XCTAssertNil(viewModel.installedModel)
+    XCTAssertEqual(engine.deletedIDs, [installed.id])
+    XCTAssertEqual(engine.unloadCount, 1)
+  }
+
+  @MainActor
   func testViewModelPreservesPartialOutputWhenStreamFails() async {
     let engine = MockLocalModelEngine(
       installedModel: fixtureModel(),
@@ -307,6 +322,7 @@ private final class MockLocalModelEngine: LocalModelEngine, @unchecked Sendable 
   private var storedModel: LocalModel?
   private var storedRequests: [LocalModelRequest] = []
   private var storedUnloadCount = 0
+  private var storedDeletedIDs: [String] = []
 
   init(
     installedModel: LocalModel? = nil,
@@ -326,6 +342,10 @@ private final class MockLocalModelEngine: LocalModelEngine, @unchecked Sendable 
     access { storedUnloadCount }
   }
 
+  var deletedIDs: [String] {
+    access { storedDeletedIDs }
+  }
+
   func install(_ model: LocalModel) async throws {
     access { storedModel = model }
   }
@@ -341,6 +361,16 @@ private final class MockLocalModelEngine: LocalModelEngine, @unchecked Sendable 
   func selectModel(id: String) async throws {
     guard access({ storedModel?.id == id }) else {
       throw LocalInferenceError.unknownInstalledModel
+    }
+  }
+
+  func deleteModel(id: String) async throws {
+    guard access({ storedModel?.id == id }) else {
+      throw LocalInferenceError.unknownInstalledModel
+    }
+    access {
+      storedModel = nil
+      storedDeletedIDs.append(id)
     }
   }
 

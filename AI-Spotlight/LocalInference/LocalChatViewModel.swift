@@ -9,6 +9,7 @@ final class LocalChatViewModel: ObservableObject {
   enum State: Equatable {
     case idle
     case installing
+    case deleting
     case benchmarking
     case downloading(ModelDownloadProgress)
     case preparing
@@ -55,7 +56,7 @@ final class LocalChatViewModel: ObservableObject {
     // A persistence error must not make a live request accept another submission.
     if activeRequest != nil || generationTask != nil || installationTask != nil || files.isWorking || files.isPicking { return true }
     switch state {
-    case .installing, .downloading, .benchmarking, .preparing, .refiningSearch, .searching, .streaming: return true
+    case .installing, .deleting, .downloading, .benchmarking, .preparing, .refiningSearch, .searching, .streaming: return true
     case .idle, .failed: return false
     }
   }
@@ -238,6 +239,26 @@ final class LocalChatViewModel: ObservableObject {
         self.state = .idle
       } catch {
         self?.state = .failed(error.localizedDescription)
+      }
+    }
+  }
+
+  func deleteModel(id: String) {
+    guard !isBusy, installedModels.contains(where: { $0.id == id }) else { return }
+    stopStreaming()
+    idleUnloadTask?.cancel()
+    benchmarkNotice = nil
+    state = .deleting
+    installationTask = Task { [weak self, engine] in
+      do {
+        await self?.visionEngine.unload()
+        await engine.unload()
+        try await engine.deleteModel(id: id)
+        guard let self else { return }
+        await self.refreshInstalledModel()
+        self.finishInstallation()
+      } catch {
+        self?.failInstallation(error)
       }
     }
   }

@@ -75,7 +75,7 @@ final class LocalModelAdvisor: ObservableObject {
   func confirmDownload(_ model: LocalModelDescriptor, installedModels: [LocalModel]) async throws -> LocalModelAssessment {
     await detectHardware()
     guard let assessment = recommendations(installedModels: installedModels).assessments.first(where: { $0.model == model }),
-          assessment.fit.canRun else {
+          assessment.canInstall else {
       throw LocalInferenceError.bridgeFailure("This model no longer fits the available resources. Refresh the model choices.")
     }
     return assessment

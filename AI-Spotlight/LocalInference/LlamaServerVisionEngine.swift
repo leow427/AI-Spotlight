@@ -312,7 +312,7 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
     if let descriptor = model.catalogDescriptor, descriptor.supportsVision {
       let hardware = LocalHardwareProfile.detect(modelsDirectory: model.fileURL.deletingLastPathComponent())
       let assessment = LocalModelSelector.assess(descriptor, hardware: hardware, installed: true)
-      guard assessment.fit.canRun else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
+      guard assessment.canInstall else { throw LocalInferenceError.bridgeFailure(assessment.reason) }
     }
     let port = try Self.availablePort()
     let session = LocalModelRuntimeSession(model: model, port: port)

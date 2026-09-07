@@ -218,6 +218,73 @@ final class LocalModelInstallationStoreTests: XCTestCase {
     XCTAssertEqual(fixture.store.installedModel(), selected)
   }
 
+  func testDeletingSelectedModelRemovesItsBytesAndSelectsTheRemainingModel() throws {
+    let fixture = try makeFixture()
+    let remaining = try fixture.store.install(fixture.input(id: "remaining", bytes: "remaining"))
+    let deleted = try fixture.store.install(fixture.input(id: "deleted", bytes: "deleted"))
+
+    try fixture.store.deleteModel(id: deleted.id)
+
+    XCTAssertFalse(FileManager.default.fileExists(atPath: deleted.fileURL.path))
+    XCTAssertEqual(fixture.store.installedModels(), [remaining])
+    XCTAssertEqual(fixture.store.installedModel(), remaining)
+  }
+
+  func testDeletingUnselectedModelPreservesSelectionAndUntrackedFiles() throws {
+    let fixture = try makeFixture()
+    let selected = try fixture.store.install(fixture.input(id: "selected", bytes: "selected"))
+    let deleted = try fixture.store.install(fixture.input(id: "deleted", bytes: "deleted"))
+    try fixture.store.selectModel(id: selected.id)
+    let untracked = fixture.modelsURL.appending(path: "keep-me.gguf")
+    try Data("untracked".utf8).write(to: untracked)
+
+    try fixture.store.deleteModel(id: deleted.id)
+
+    XCTAssertEqual(fixture.store.installedModels(), [selected])
+    XCTAssertEqual(fixture.store.installedModel(), selected)
+    XCTAssertEqual(try Data(contentsOf: untracked), Data("untracked".utf8))
+  }
+
+  func testDeletionFailuresRestoreTheCompleteLibrary() throws {
+    for failure in [InstallationFailure.move, .metadata] {
+      let fixture = try makeFixture()
+      let selected = try fixture.store.install(fixture.input(id: "selected", bytes: "selected"))
+      let before = try fixture.snapshot()
+
+      XCTAssertThrowsError(try fixture.store(using: failure.operations).deleteModel(id: selected.id))
+
+      XCTAssertEqual(try fixture.snapshot(), before)
+      XCTAssertEqual(fixture.store.installedModel(), selected)
+      XCTAssertEqual(fixture.store.installedModels(), [selected])
+    }
+  }
+
+  func testDeletingVisionModelRemovesProjectorAndManagedRuntime() throws {
+    let fixture = try makeFixture()
+    let modelURL = fixture.modelsURL.appending(path: "vision.gguf")
+    let projectorURL = fixture.modelsURL.appending(path: "vision-projector.gguf")
+    let runtimeURL = fixture.modelsURL.appending(path: "vision-runtime-fixture", directoryHint: .isDirectory)
+    let serverURL = runtimeURL.appending(path: "llama-server")
+    try Data("model".utf8).write(to: modelURL)
+    try Data("projector".utf8).write(to: projectorURL)
+    try FileManager.default.createDirectory(at: runtimeURL, withIntermediateDirectories: true)
+    try Data("server".utf8).write(to: serverURL)
+    let vision = LocalVisionConfiguration(projectorURL: projectorURL, serverExecutableURL: serverURL,
+      managedRuntimeDirectory: runtimeURL)
+    try fixture.writeLibrary([
+      FixtureRecord(id: "vision", displayName: "Vision", fileName: modelURL.lastPathComponent,
+        visionConfiguration: vision)
+    ], selected: "vision")
+
+    try fixture.store.deleteModel(id: "vision")
+
+    XCTAssertTrue(fixture.store.installedModels().isEmpty)
+    XCTAssertNil(fixture.store.installedModel())
+    XCTAssertFalse(FileManager.default.fileExists(atPath: modelURL.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: projectorURL.path))
+    XCTAssertFalse(FileManager.default.fileExists(atPath: runtimeURL.path))
+  }
+
   func testCorruptMetadataCannotBeSilentlyReplacedWithANewLibrary() throws {
     let fixture = try makeFixture()
     let selected = try fixture.store.install(fixture.input(id: "selected", bytes: "selected"))
@@ -315,6 +382,8 @@ private struct FixtureRecord: Codable, Sendable {
   let id: String
   let displayName: String
   let fileName: String
+  var catalogDescriptor: LocalModelDescriptor? = nil
+  var visionConfiguration: LocalVisionConfiguration? = nil
 }
 
 private struct FixtureLibrary: Codable, Sendable {

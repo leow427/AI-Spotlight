@@ -40,6 +40,7 @@ protocol LocalModelEngine: Sendable {
   func installedModel() async -> LocalModel?
   func installedModels() async -> [LocalModel]
   func selectModel(id: String) async throws
+  func deleteModel(id: String) async throws
   func download(
     _ model: LocalModelDescriptor,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
@@ -71,6 +72,10 @@ enum LocalInferenceError: LocalizedError, Equatable {
 }
 
 extension LocalModelEngine {
+  func deleteModel(id: String) async throws {
+    throw LocalInferenceError.bridgeFailure("This model cannot be deleted by the current local engine.")
+  }
+
   func benchmark() async throws -> LocalBenchmarkMetrics? { nil }
 
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
