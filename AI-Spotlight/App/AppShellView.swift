@@ -521,8 +521,12 @@ struct AppShellView: View {
       Spacer()
 
       VStack(spacing: 10) {
-        Image(systemName: selectedMode == .local ? "laptopcomputer" : "sparkles")
-          .font(.system(size: 28, weight: .light))
+        Image("SpotlightLogo")
+          .renderingMode(.template)
+          .resizable()
+          .scaledToFit()
+          .frame(width: 40, height: 40)
+          .accessibilityHidden(true)
           .foregroundStyle(NatureGlass.accent)
           .frame(width: 64, height: 64)
           .background(NatureGlass.accent.opacity(0.06), in: Circle())
