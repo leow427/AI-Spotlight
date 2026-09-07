@@ -47,6 +47,15 @@ final class LocalChatViewModel: ObservableObject {
 
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
 
+  // Presentation is immediate; persistence still waits for successful preparation.
+  @Published private(set) var pendingUserMessage: ChatMessage?
+  @Published private(set) var hasReceivedResponse = false
+  var presentationMessages: [ChatMessage] {
+    guard let pendingUserMessage, !messages.contains(where: { $0.id == pendingUserMessage.id }) else { return messages }
+    return messages + [pendingUserMessage]
+  }
+  var isWaitingForResponse: Bool { activeRequest != nil && !hasReceivedResponse }
+
   var selectedSession: ChatSession? {
     guard let selectedSessionID else { return nil }
     return sessions.first(where: { $0.id == selectedSessionID })
@@ -266,7 +275,7 @@ final class LocalChatViewModel: ObservableObject {
   /// File Mode has its own explicit route. Auto stays local; a write request never causes upload.
   func submitFiles(_ prompt: String, mode: ChatMode, cloudProvider: CloudProviderID,
                    cloudModelID: String, onAccepted: @escaping @MainActor () -> Void = {}) {
-    guard !isBusy, !files.isWorking, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+    guard !isBusy, !files.isWorking, !ThinkCommand.message(prompt).content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           files.selection != nil else { return }
     let local = mode != .cloud
     if local && installedModel == nil {
@@ -285,7 +294,9 @@ final class LocalChatViewModel: ObservableObject {
     let route = Route(mode: local ? .local : .cloud,
       providerID: local ? "llama.cpp" : CloudProviderID.chatGPT.rawValue,
       modelID: local ? model!.id : cloudModelID, usesNetwork: !local)
-    let history = messages + [ChatMessage(role: .user, content: prompt)]
+    var userMessage = ThinkCommand.message(prompt)
+    userMessage.attachments = files.selection?.attachments.map { MessageAttachment(name: $0.name, isDirectory: $0.isDirectory) }
+    let history = messages + [userMessage]
     let active = beginGeneration(route: route, modelDisplayName: local ? model!.displayName : cloudModelID)
     let sessionID = ensureSelectedSession()
     let responseID = UUID()
@@ -294,6 +305,7 @@ final class LocalChatViewModel: ObservableObject {
     autoRouteDecision = nil
     screenRouteDecision = nil
     append(history.last!, to: sessionID)
+    files.consumeSelection(for: fileTools.workspace)
     append(ChatMessage(id: responseID, role: .assistant, content: ""), to: sessionID)
     generationTask = Task { [weak self, fileInference, fileCodex, engine, files] in
       var failure: Error?
@@ -335,7 +347,7 @@ final class LocalChatViewModel: ObservableObject {
 
   func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedPrompt.isEmpty, !isBusy else { return }
+    guard !ThinkCommand.message(trimmedPrompt).content.isEmpty, !isBusy else { return }
     if let model = installedModel, model.supportsVision {
       submitScreen(trimmedPrompt, attachment: nil, decision: .text(model.screenModel), selectedMode: .local,
                    searchEnabled: searchEnabled, cloudUploadAllowed: { false }, onAccepted: onAccepted)
@@ -344,7 +356,7 @@ final class LocalChatViewModel: ObservableObject {
     screenRouteDecision = nil
     idleUnloadTask?.cancel()
     let responseID = UUID()
-    let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
+    let userMessage = ThinkCommand.message(trimmedPrompt)
     let request = LocalModelRequest(messages: messages + [userMessage])
     let active = beginGeneration(
       route: Route(mode: .local, providerID: "local", modelID: installedModel?.id ?? "", usesNetwork: searchEnabled),
@@ -352,6 +364,7 @@ final class LocalChatViewModel: ObservableObject {
     )
     contextNotice = nil
     state = .preparing
+    pendingUserMessage = userMessage
 
     generationTask = Task { [weak self, engine] in
       do {
@@ -423,7 +436,7 @@ final class LocalChatViewModel: ObservableObject {
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
     let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !prompt.isEmpty, !isBusy, let model = decision.model else { return }
+    guard !ThinkCommand.message(prompt).content.isEmpty, !isBusy, let model = decision.model else { return }
     guard selectedMode != .local || model.isLocal else {
       state = .failed(ScreenRequestError.cloudUploadNotAllowed.localizedDescription)
       return
@@ -432,12 +445,12 @@ final class LocalChatViewModel: ObservableObject {
       state = .failed(ScreenRequestError.textOnlyModel.localizedDescription)
       return
     }
-    let userMessage = ChatMessage(role: .user, content: prompt)
+    let userMessage = ThinkCommand.message(prompt)
     let preferOCR = attachment.map {
       ScreenRoutingPolicy.hasConfidentTextForLookup(prompt: prompt,
         ocr: ScreenOCRResult(text: $0.ocrText, confidence: $0.ocrConfidence))
     } ?? false
-    let requestText = attachment.map { ScreenPromptContext.text(userPrompt: prompt, ocr: $0.ocrText, preferOCR: preferOCR) } ?? prompt
+    let requestText = attachment.map { ScreenPromptContext.text(userPrompt: userMessage.content, ocr: $0.ocrText, preferOCR: preferOCR) } ?? userMessage.content
     var current = userMessage
     current.content = requestText
     let history = messages + [current]
@@ -448,6 +461,9 @@ final class LocalChatViewModel: ObservableObject {
     state = .preparing
     contextNotice = nil
     screenRouteDecision = attachment == nil ? nil : decision
+    var pending = userMessage
+    pending.imagePreview = attachment?.makeMessagePreview()
+    pendingUserMessage = pending
     generationTask = Task { [weak self, engine] in
       guard let owner = self else { return }
       var acceptedSession: UUID?
@@ -631,7 +647,7 @@ final class LocalChatViewModel: ObservableObject {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
     screenRouteDecision = nil
-    guard !trimmedPrompt.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
+    guard !ThinkCommand.message(trimmedPrompt).content.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
     idleUnloadTask?.cancel()
     let route = Route(
       mode: .cloud,
@@ -639,7 +655,7 @@ final class LocalChatViewModel: ObservableObject {
       modelID: trimmedModelID,
       usesNetwork: true
     )
-    let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
+    let userMessage = ThinkCommand.message(trimmedPrompt)
     let prepared: PreparedConversation
     contextNotice = nil
     do {
@@ -698,6 +714,7 @@ final class LocalChatViewModel: ObservableObject {
     let history = messages + [userMessage]
     let active = beginGeneration(route: route, modelDisplayName: route.modelID)
     state = .searching
+    pendingUserMessage = userMessage
     generationTask = Task { [weak self] in
       do {
         try Task.checkCancellation()
@@ -746,7 +763,7 @@ final class LocalChatViewModel: ObservableObject {
     searchEnabled: Bool = false,
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
-    guard !isBusy, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    guard !isBusy, !ThinkCommand.message(prompt).content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     state = .idle
     contextNotice = nil
     let decision = (searchEnabled || AutoRouter.shouldRun(for: .auto, cloud: cloud))
@@ -779,6 +796,7 @@ final class LocalChatViewModel: ObservableObject {
     files.revoke()
     // Revoke ownership before cancellation can release any queued events or cleanup.
     activeRequest = nil
+    pendingUserMessage = nil
     generationTask = nil
     state = .idle
     task.cancel()
@@ -848,12 +866,14 @@ final class LocalChatViewModel: ObservableObject {
   private func append(_ message: ChatMessage, to sessionID: UUID) {
     guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
     sessions[index].append(message)
+    if pendingUserMessage?.id == message.id { pendingUserMessage = nil }
     sortAndPersistSessions()
   }
 
   private func append(_ fragment: String, to messageID: UUID, in sessionID: UUID) {
     guard let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }),
           let messageIndex = sessions[sessionIndex].messages.firstIndex(where: { $0.id == messageID }) else { return }
+    if !fragment.isEmpty { hasReceivedResponse = true }
     sessions[sessionIndex].messages[messageIndex].content.append(fragment)
     sessions[sessionIndex].lastActivityAt = .now
     sortAndPersistSessions()
@@ -890,6 +910,8 @@ final class LocalChatViewModel: ObservableObject {
 
   private func beginGeneration(route: Route, modelDisplayName: String) -> ActiveRequest {
     let request = ActiveRequest(id: UUID(), route: route, modelDisplayName: modelDisplayName)
+    pendingUserMessage = nil
+    hasReceivedResponse = false
     activeRequest = request
     return request
   }
@@ -897,6 +919,7 @@ final class LocalChatViewModel: ObservableObject {
   private func finishGeneration(id: UUID, error: Error? = nil) {
     guard activeRequest?.id == id else { return }
     activeRequest = nil
+    pendingUserMessage = nil
     generationTask = nil
     state = error.map { .failed($0.localizedDescription) } ?? .idle
   }

@@ -17,7 +17,7 @@ enum LocalFileRuntime {
     }
     return ["-m", model.fileURL.path, "--host", "127.0.0.1", "--port", String(port), "--api-key", key,
       "--alias", alias, "--ctx-size", String(contextWindow(for: model)), "--parallel", "1", "--offline",
-      "--no-webui", "--jinja", "--no-context-shift", "--cache-ram", "0", "--reasoning-budget", "0", "--fit", "off"]
+      "--no-webui", "--jinja", "--no-context-shift", "--cache-ram", "0", "--reasoning-budget", "-1", "--fit", "off"]
   }
 
   static func contextWindow(for model: LocalModel) -> Int {
@@ -36,6 +36,8 @@ enum LocalFileRuntime {
     let encoded = try JSONEncoder().encode(messages)
     return .object(["model": .string(alias), "messages": try JSONDecoder().decode(CodexValue.self, from: encoded),
       "tools": .array(tools.map(\.llama)), "tool_choice": .string("auto"), "parallel_tool_calls": .bool(false),
+      "chat_template_kwargs": .object(["enable_thinking": .bool(messages.first?.extendedThinking == true)]),
+      "reasoning_budget": .number(messages.first?.extendedThinking == true ? 1_024 : 0),
       "stream": .bool(false), "max_tokens": .number(Double(maximumTokens)), "temperature": .number(0), "cache_prompt": .bool(false)])
   }
 

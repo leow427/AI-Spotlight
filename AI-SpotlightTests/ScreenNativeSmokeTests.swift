@@ -7,6 +7,25 @@ import XCTest
 /// Opt-in hardware smoke test. Never downloads models or changes the user's installed library.
 @MainActor
 final class ScreenNativeSmokeTests: XCTestCase {
+  func testInstalledGemmaThinkingAndOrdinaryReply() async throws {
+    let config = URL(fileURLWithPath: "/tmp/AI-Spotlight-Thinking-Smoke.json")
+    guard FileManager.default.fileExists(atPath: config.path) else { throw XCTSkip("Optional installed Gemma thinking test") }
+    let model = try JSONDecoder().decode(LocalModel.self, from: Data(contentsOf: config))
+    let runtime = LlamaServerVisionEngine()
+    var report = ""
+    do {
+      for prompt in ["/think A book and pen cost 110 kr together. The book costs 100 kr more than the pen. What does the pen cost? Give the amount and one sentence checking it.", "What is 19 plus 23? Answer only with the number."] {
+        let start = Date()
+        let answer = try await ScreenSearchContext.collect(runtime.stream(messages: [ThinkCommand.message(prompt)], image: nil, model: model), maximumBytes: 12_000)
+        XCTAssertTrue(answer.contains(prompt.hasPrefix("/think") ? "5" : "42"), answer)
+        XCTAssertFalse(answer.contains("<think>"), answer)
+        report += "Question: \(prompt)\nAnswer: \(answer)\nElapsed: \(Date().timeIntervalSince(start)) seconds\n\n"
+      }
+      await runtime.unload()
+    } catch { await runtime.unload(); throw error }
+    try report.write(toFile: "/tmp/AI-Spotlight-Thinking-Smoke-Result.txt", atomically: true, encoding: .utf8)
+  }
+
   func testGGUFAndProjectorThroughProductionLocalVisionEngine() async throws {
     let configURL = URL(fileURLWithPath: "/tmp/AI-Spotlight-Vision-Smoke.json")
     guard FileManager.default.fileExists(atPath: configURL.path) else {

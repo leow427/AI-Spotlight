@@ -3,7 +3,7 @@ import AppKit
 /// Full-resolution draft data. Neither originals nor sent-message previews enter chat storage.
 @MainActor
 struct ScreenAttachment: Identifiable {
-  enum Source: String { case screenRegion }
+  enum Source: String { case screenRegion, fullDesktop }
   enum Status: String { case captured = "Screenshot", reading = "Reading text…", localOCR = "Local OCR", vision = "Vision" }
   let id = UUID()
   let originalImage: NSImage
@@ -12,12 +12,13 @@ struct ScreenAttachment: Identifiable {
   let pixelHeight: Int
   var ocrText = ""
   var ocrConfidence: Float = 0
-  let source = Source.screenRegion
+  let source: Source
   var status = Status.captured
   var routingDecision: ScreenRoutingPolicy.Decision?
   let createdAt = Date()
 
-  init(image: NSImage) throws {
+  init(image: NSImage, source: Source = .screenRegion) throws {
+    self.source = source
     guard let pixels = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
           pixels.width > 0, pixels.height > 0 else { throw ScreenCaptureError.invalidImage }
     originalImage = image
@@ -57,14 +58,25 @@ struct ComposerCommands: Equatable {
   let prompt: String
   let screen: Bool
   let search: Bool
+  let snapshot: Bool
+  let think: Bool
 
   init(_ draft: String) {
     var remainder = draft
     var screen = false
     var search = false
+    var snapshot = false
+    var think = false
     while true {
       if let next = ScreenCommand.remainder(in: remainder) {
         screen = true
+        remainder = next
+      } else if let next = ThinkCommand.remainder(in: remainder, command: "/snapshot") {
+        screen = true
+        snapshot = true
+        remainder = next
+      } else if let next = ThinkCommand.remainder(in: remainder) {
+        think = true
         remainder = next
       } else if let next = SearchCommand.remainder(in: remainder) {
         search = true
@@ -74,7 +86,37 @@ struct ComposerCommands: Equatable {
     self.prompt = remainder
     self.screen = screen
     self.search = search
+    self.snapshot = snapshot
+    self.think = think
   }
 
-  var captureDraft: String { "/screen" + (prompt.isEmpty ? "" : " " + prompt) }
+  var submissionPrompt: String { (think ? "/think " : "") + prompt }
+  var captureDraft: String { (snapshot ? "/snapshot" : "/screen") + (submissionPrompt.isEmpty ? "" : " " + submissionPrompt) }
+}
+
+enum ThinkCommand {
+  static let guidance = "Think carefully before answering. Check assumptions, compare possible solutions, and verify the result. Return the answer with a concise explanation."
+
+  static func remainder(in prompt: String, command: String = "/think") -> String? {
+    let text = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard text.lowercased().hasPrefix(command) else { return nil }
+    let rest = text.dropFirst(command.count)
+    guard rest.isEmpty || rest.first?.isWhitespace == true else { return nil }
+    return rest.trimmingCharacters(in: .whitespacesAndNewlines)
+  }
+
+  static func message(_ prompt: String) -> ChatMessage {
+    let remainder = remainder(in: prompt)
+    var message = ChatMessage(role: .user, content: remainder ?? prompt)
+    message.extendedThinking = remainder == nil ? nil : true
+    return message
+  }
+
+  static func enabled(in messages: [ChatMessage]) -> Bool {
+    messages.last(where: { $0.role == .user })?.extendedThinking == true
+  }
+
+  static func localOutputTokens(_ messages: [ChatMessage]) -> Int {
+    enabled(in: messages) ? 2_048 : 512
+  }
 }

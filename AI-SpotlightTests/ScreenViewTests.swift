@@ -8,6 +8,86 @@ import XCTest
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testConversationBubblesAndSentAttachmentRender() throws {
+    var outgoing = ChatMessage(role: .user, content: "Could you review the notes I attached and suggest a clearer introduction?")
+    outgoing.attachments = [MessageAttachment(name: "Project notes.txt", isDirectory: false)]
+    let encoded = try JSONEncoder().encode(outgoing)
+    XCTAssertEqual(try JSONDecoder().decode(ChatMessage.self, from: encoded).attachments, outgoing.attachments)
+    let preview = VStack(alignment: .leading, spacing: 24) {
+      LocalMessageView(message: outgoing)
+      LocalMessageView(message: ChatMessage(role: .assistant, content: "Start with the purpose of the project, then explain who it helps. Keep the first paragraph focused on the reader.\n\nHere is a more direct opening you can build on."))
+      LocalMessageView(message: ChatMessage(role: .user, content: "That feels much clearer. Thank you."))
+    }.padding(28).frame(width: 620, height: 390).background(Color(nsColor: .windowBackgroundColor))
+    let view = NSHostingView(rootView: preview.environment(\.colorScheme, .dark))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 620, height: 390), styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = view
+    defer { window.contentView = nil }
+    view.frame = NSRect(x: 0, y: 0, width: 620, height: 390)
+    view.layoutSubtreeIfNeeded()
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Bubbles.png"))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Chat bubbles and sent attachments"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
+  func testRemovingWaitingRowKeepsFollowingButLiveScrollStillReleases() {
+    let document = ConversationTestDocument(flipped: true)
+    document.frame = NSRect(x: 0, y: 0, width: 400, height: 1600)
+    let observer = ConversationScrollObserver.ObserverView()
+    observer.frame = document.bounds
+    document.addSubview(observer)
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    scroll.documentView = document
+    let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = scroll
+    defer { window.contentView = nil }
+    observer.scrollToBottomIfFollowing()
+    document.setFrameSize(NSSize(width: 400, height: 1500))
+    // Simulate the offset adjustment SwiftUI makes after removing the leaf row.
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 1150))
+    XCTAssertTrue(observer.followsLatest)
+    observer.scrollToBottomIfFollowing()
+    XCTAssertEqual(scroll.contentView.bounds.maxY, document.bounds.maxY, accuracy: 1)
+    document.setFrameSize(NSSize(width: 400, height: 1450))
+    NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: 1000))
+    NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+    observer.scrollToBottomIfFollowing()
+    XCTAssertFalse(observer.followsLatest)
+    XCTAssertEqual(scroll.contentView.bounds.minY, 1000, accuracy: 1)
+  }
+
+  func testStreamRevisionFollowsEvenWithoutObserverFrameChanges() async throws {
+    let document = ConversationTestDocument(flipped: true)
+    document.frame = NSRect(x: 0, y: 0, width: 400, height: 1600)
+    let observer = ConversationScrollObserver.ObserverView()
+    observer.frame = document.bounds
+    document.addSubview(observer)
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    scroll.documentView = document
+    let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = scroll
+    defer { window.contentView = nil }
+    observer.scrollToBottomIfFollowing()
+    // Bounds-only growth deliberately does not send the document frame notification.
+    document.setBoundsSize(NSSize(width: 400, height: 1900))
+    observer.contentChanged("new streamed text")
+    let followed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+      abs(scroll.contentView.bounds.maxY - document.bounds.maxY) < 2
+    }, object: nil)
+    await fulfillment(of: [followed], timeout: 2)
+    XCTAssertTrue(observer.followsLatest)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.minY - 8))
+    observer.contentChanged("more streamed text")
+    observer.scrollToBottomIfFollowing()
+    XCTAssertFalse(observer.followsLatest)
+    XCTAssertGreaterThan(document.bounds.maxY - scroll.contentView.bounds.maxY, 2)
+  }
+
   func testConversationScrollPreservesReadingPositionAcrossLayoutAndStreaming() throws {
     for flipped in [true, false] {
       let document = ConversationTestDocument(flipped: flipped)

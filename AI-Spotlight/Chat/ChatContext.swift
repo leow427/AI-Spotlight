@@ -80,9 +80,12 @@ enum ChatContextPreparer {
     budget: ContextBudget,
     countTokens: ([ChatMessage]) throws -> Int
   ) throws -> PreparedConversation {
-    guard let current = messages.last, current.role == .user,
+    guard var current = messages.last, current.role == .user,
           !current.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw ChatContextError.missingCurrentPrompt
+    }
+    if current.extendedThinking == true, !current.content.hasPrefix(ThinkCommand.guidance) {
+      current.content = ThinkCommand.guidance + "\n\n" + current.content
     }
     var retained = [current]
     var tokenCount = try countTokens(retained)

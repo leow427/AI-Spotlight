@@ -10,6 +10,13 @@ enum CodexThinkingCapacity: String, CaseIterable, Identifiable, Sendable {
   case max
   case ultra
 
+  var forExtendedThinking: Self {
+    switch self {
+    case .none, .minimal, .low, .medium, .high: .xhigh
+    case .xhigh, .max, .ultra: self
+    }
+  }
+
   var id: Self { self }
 
   var displayName: String {

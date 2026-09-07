@@ -17,6 +17,8 @@ final class RequestLifecycleTests: XCTestCase {
       let viewModel = LocalChatViewModel(engine: engine, sessionStore: makeStore())
       await viewModel.refreshInstalledModel()
       viewModel.submit("A")
+      XCTAssertEqual(viewModel.presentationMessages.first?.content, "A")
+      XCTAssertTrue(viewModel.isWaitingForResponse)
       await fulfillment(of: [first.started], timeout: 2)
       await receive("A partial", from: first, in: viewModel)
       let firstSession = try XCTUnwrap(viewModel.selectedSessionID)

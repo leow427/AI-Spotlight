@@ -17,9 +17,11 @@ struct GeminiContentClient: ChatProvider {
           wire.httpMethod = "POST"
           wire.setValue(key, forHTTPHeaderField: "x-goog-api-key")
           wire.setValue("application/json", forHTTPHeaderField: "Content-Type")
+          var generationConfig: [String: Any] = ["maxOutputTokens": prepared.budget.outputTokens]
+          if ThinkCommand.enabled(in: prepared.messages) { generationConfig["thinkingConfig"] = model.hasPrefix("gemini-3") ? ["thinkingLevel": "high"] : ["thinkingBudget": 2_048] }
           wire.httpBody = try JSONSerialization.data(withJSONObject: [
             "contents": MultimodalSerialization.messages(prepared.messages, image: request.image, format: .gemini),
-            "generationConfig": ["maxOutputTokens": prepared.budget.outputTokens],
+            "generationConfig": generationConfig,
           ])
           var parser = ServerSentEventParser()
           var status: Int?

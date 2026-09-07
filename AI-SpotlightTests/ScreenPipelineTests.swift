@@ -42,6 +42,52 @@ final class ScreenPipelineTests: XCTestCase {
     XCTAssertEqual(ComposerCommands("/search question /screen").prompt, "question /screen")
   }
 
+  func testOutgoingMessageIsVisibleImmediatelyAndLeafEndsAtFirstText() async throws {
+    let stream = AsyncThrowingStream<String, Error>.makeStream()
+    let entered = expectation(description: "Model started")
+    let vision = PipelineVision(controlledStreams: [stream.stream], started: { _ in entered.fulfill() })
+    let fixture = try makeFixture(vision: vision, withVision: true)
+    await fixture.chat.refreshInstalledModel()
+    let prompt = "Show my first message immediately"
+    var accepted = false
+    fixture.chat.submit(prompt) { accepted = true }
+    // No yield: the bubble is available in the same turn as Send, before inference starts.
+    XCTAssertEqual(fixture.chat.presentationMessages.map(\.content), [prompt])
+    XCTAssertTrue(fixture.chat.isWaitingForResponse)
+    XCTAssertFalse(accepted)
+    await fulfillment(of: [entered], timeout: 3)
+    XCTAssertEqual(fixture.chat.pendingUserMessage?.content, prompt)
+    let firstText = expectation(description: "Response text received")
+    let token = fixture.chat.$hasReceivedResponse.filter { $0 }.prefix(1).sink { _ in firstText.fulfill() }
+    stream.continuation.yield("The answer")
+    await fulfillment(of: [firstText], timeout: 3)
+    token.cancel()
+    XCTAssertFalse(fixture.chat.isWaitingForResponse)
+    XCTAssertNil(fixture.chat.pendingUserMessage)
+    XCTAssertEqual(fixture.chat.presentationMessages.map(\.content), [prompt, "The answer"])
+    XCTAssertTrue(accepted)
+    await fixture.chat.stopStreaming()?.value
+    stream.continuation.finish()
+  }
+
+  func testPendingScreenshotIsVisibleAndClearsOnStopWithoutSavingUnacceptedTurn() async throws {
+    let stream = AsyncThrowingStream<String, Error>.makeStream()
+    let entered = expectation(description: "Model started")
+    let vision = PipelineVision(controlledStreams: [stream.stream], started: { _ in entered.fulfill() })
+    let fixture = try makeFixture(vision: vision, withVision: true)
+    fixture.chat.submitScreen("What color is this?", attachment: try attachment(),
+      decision: .vision(fixture.visual.screenModel), selectedMode: .local, cloudUploadAllowed: { false })
+    XCTAssertNotNil(fixture.chat.presentationMessages.first?.imagePreview)
+    XCTAssertTrue(fixture.chat.isWaitingForResponse)
+    await fulfillment(of: [entered], timeout: 3)
+    await fixture.chat.stopStreaming()?.value
+    stream.continuation.finish()
+    XCTAssertNil(fixture.chat.pendingUserMessage)
+    XCTAssertFalse(fixture.chat.isWaitingForResponse)
+    XCTAssertTrue(fixture.chat.messages.isEmpty)
+    XCTAssertTrue(fixture.chat.presentationMessages.isEmpty)
+  }
+
   func testSelectedModelPlansFromImageAndAnswersWithNoTextHandoff() async throws {
     let vision = PipelineVision(controlledStreams: [planningStream("Is 57 MB a lot of RAM usage?")])
     let search = PipelineSearch(onSearch: { _ in XCTAssertEqual(vision.requests.count, 1) })

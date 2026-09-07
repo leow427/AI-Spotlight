@@ -49,6 +49,7 @@ final class FileModeCoordinator: ObservableObject {
   @Published var conversationID: UUID?
   @Published private(set) var protectedWrite: ProtectedWriteNotice?
   private var protectedWritePrompt: String?
+  private var submittedSelection: WorkspaceSelection?
   private var activeTaskID: UUID?
   var visibleChanges: [WorkspaceChangeSet] {
     changes.filter { change in
@@ -109,6 +110,7 @@ final class FileModeCoordinator: ObservableObject {
     cancelPendingDeletion()
     selectionRevision = UUID()
     self.selection = selection
+    submittedSelection = nil
     protectedWrite = nil
     protectedWritePrompt = nil
     error = nil
@@ -138,6 +140,14 @@ final class FileModeCoordinator: ObservableObject {
     })
   }
 
+  /// Clear the next draft without revoking the already-created request workspace.
+  func consumeSelection(for workspace: WorkspaceService) {
+    guard activeWorkspace === workspace, isWorking else { return }
+    submittedSelection = selection
+    selection = nil
+    onSelectionChange?(nil)
+  }
+
   func finish(workspace: WorkspaceService) async {
     let changeSet = await workspace.finish()
     if changeSet.count > 0 {
@@ -148,6 +158,7 @@ final class FileModeCoordinator: ObservableObject {
       activeWorkspace = nil
       activeTaskID = nil
       isWorking = false
+      if protectedWrite == nil { submittedSelection = nil }
       cancelPendingDeletion()
     }
   }
@@ -184,6 +195,12 @@ final class FileModeCoordinator: ObservableObject {
           let prompt = protectedWritePrompt else { return nil }
     protectedWrite = nil
     protectedWritePrompt = nil
+    // The existing explicit cloud-consent action restores the original attachments.
+    if let submittedSelection {
+      selection = submittedSelection
+      self.submittedSelection = nil
+      onSelectionChange?(selection)
+    }
     return (prompt, modelID)
   }
 

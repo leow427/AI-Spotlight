@@ -2,18 +2,27 @@ import AppKit
 import Combine
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 /// Follow new layout only while the reader remains at the end of the chat.
 struct ConversationScrollObserver: NSViewRepresentable {
+  var contentRevision = ""
   func makeNSView(context: Context) -> ObserverView { ObserverView() }
-  func updateNSView(_ view: ObserverView, context: Context) {}
+  func updateNSView(_ view: ObserverView, context: Context) { view.contentChanged(contentRevision) }
 
   final class ObserverView: NSView {
+    private var contentRevision = ""
+    func contentChanged(_ revision: String) {
+      guard revision != contentRevision else { return }
+      contentRevision = revision
+      scheduleScroll()
+    }
     private var pendingScroll: DispatchWorkItem?
     private weak var observedScroll: NSScrollView?
     private var previousClipBounds = NSRect.zero
     private var previousDocumentSize = NSSize.zero
     private var isAdjustingScroll = false
+    private var isSettlingDocumentLayout = false
     private var isLiveScrolling = false
     private var hasPositionedInitially = false
     private(set) var followsLatest = true
@@ -74,6 +83,7 @@ struct ConversationScrollObserver: NSViewRepresentable {
     }
 
     @objc private func documentLayoutChanged() {
+      isSettlingDocumentLayout = followsLatest
       rememberGeometry()
       scheduleScroll()
     }
@@ -82,6 +92,7 @@ struct ConversationScrollObserver: NSViewRepresentable {
       isLiveScrolling = true
       followsLatest = false
       pendingScroll?.cancel()
+      pendingScroll = nil
     }
 
     @objc private func endScrolling() {
@@ -95,6 +106,14 @@ struct ConversationScrollObserver: NSViewRepresentable {
       guard let scroll = observedScroll else { return }
       defer { rememberGeometry() }
       guard !isAdjustingScroll, hasPositionedInitially else { return }
+      // Removing the waiting row can trigger a native offset correction after the
+      // document notification. That correction is layout, not reader navigation.
+      let event = NSApp.currentEvent
+      let input = event?.type
+      let recentInput = event.map { ProcessInfo.processInfo.systemUptime - $0.timestamp < 0.2 } ?? false
+      let navigationKey = input == .keyDown && [115, 116, 119, 121, 125, 126].contains(Int(event?.keyCode ?? 0))
+      let userNavigation = recentInput && (input == .scrollWheel || navigationKey || input == .leftMouseDragged || input == .leftMouseDown)
+      if isSettlingDocumentLayout && !isLiveScrolling && !userNavigation { return }
       // Resizing/streaming changes geometry too. Only an offset change at the
       // same size is navigation; live gestures suspend following before layout.
       let bounds = scroll.contentView.bounds
@@ -102,13 +121,12 @@ struct ConversationScrollObserver: NSViewRepresentable {
           && bounds.size == previousClipBounds.size
           && scroll.documentView?.bounds.size == previousDocumentSize) {
         followsLatest = !isLiveScrolling && isAtBottom
-        if !followsLatest { pendingScroll?.cancel() }
+        if !followsLatest { pendingScroll?.cancel(); pendingScroll = nil }
       }
     }
 
     private func scheduleScroll() {
-      pendingScroll?.cancel()
-      guard followsLatest, !isLiveScrolling else { return }
+      guard followsLatest, !isLiveScrolling, pendingScroll == nil else { return }
       let work = DispatchWorkItem { [weak self] in self?.scrollToBottomIfFollowing() }
       pendingScroll = work
       // Coalesce repeated lazy-row measurements; recheck reader intent at execution.
@@ -130,6 +148,7 @@ struct ConversationScrollObserver: NSViewRepresentable {
       scroll.reflectScrolledClipView(clip)
       isAdjustingScroll = false
       hasPositionedInitially = true
+      isSettlingDocumentLayout = false
       rememberGeometry()
     }
   }
@@ -298,7 +317,7 @@ struct AppShellView: View {
                 .foregroundStyle(.secondary)
               }
               compactModeControls
-              if let attachment = screen.attachment {
+              if let attachment = screen.attachment, localChat.pendingUserMessage == nil {
                 ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
                                      isBusy: localChat.isBusy || screen.isBusy,
                                      remove: screen.removeAttachment, retake: captureScreen)
@@ -307,7 +326,7 @@ struct AppShellView: View {
                 Text(error).font(.caption).foregroundStyle(.orange)
                   .fixedSize(horizontal: false, vertical: true)
               }
-              if files.selection != nil || files.error != nil {
+              if files.selection != nil || files.error != nil || files.protectedWrite != nil {
                 FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
                   useCodex: { isFileCloudConsentPresented = true })
               }
@@ -431,7 +450,7 @@ struct AppShellView: View {
       guard commands.search, value == draft else { return }
       isSearchPresented = true
       isSearchEnabled = true
-      draft = commands.screen ? commands.captureDraft : commands.prompt
+      draft = commands.screen ? commands.captureDraft : commands.submissionPrompt
     }
     .onChange(of: isSearchPresented) { _, _ in
       isComposerFocused = true
@@ -465,17 +484,13 @@ struct AppShellView: View {
   private var composer: some View {
     HStack(spacing: 10) {
       HStack(spacing: 0) {
-        WebSearchControls(
-          isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
-          isBusy: localChat.isBusy || screen.isBusy || files.isPicking || files.isWorking,
-          openSettings: openSettings, captureScreen: captureScreen,
-          attachFiles: { activateFileMode(from: .menu) }
-        )
-        ScreenToolButton(coordinator: screen, isBusy: localChat.isBusy, capture: captureScreen)
         FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
       }
 
-      TextField("Ask anything", text: $screen.draft, axis: .vertical)
+      TextField("Ask anything", text: Binding(
+        get: { localChat.pendingUserMessage == nil ? screen.draft : "" },
+        set: { screen.draft = $0 }), axis: .vertical)
+        .font(ChatTypography.body)
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($isComposerFocused)
@@ -511,13 +526,16 @@ struct AppShellView: View {
         .stroke(isComposerFocused ? NatureGlass.accent.opacity(0.55) : NatureGlass.accent.opacity(0.22),
                 lineWidth: isComposerFocused ? 1 : 0.5)
     }
+    .overlay {
+      if localChat.activeRequest != nil { ThinkingComposerGlow().allowsHitTesting(false) }
+    }
     .shadow(color: NatureGlass.accent.opacity(isComposerFocused ? 0.07 : 0), radius: 10, y: 2)
     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isComposerFocused)
   }
 
   @ViewBuilder
   private var conversation: some View {
-    if localChat.messages.isEmpty {
+    if localChat.presentationMessages.isEmpty && localChat.activeRequest == nil {
       Spacer()
 
       VStack(spacing: 10) {
@@ -533,7 +551,7 @@ struct AppShellView: View {
           .overlay { Circle().stroke(NatureGlass.edge, lineWidth: 0.75) }
           .padding(.bottom, 4)
         Text("How can I help?")
-          .font(.system(.title2, design: .rounded, weight: .medium))
+          .font(.system(size: 22, weight: .medium))
         Text(welcomeSubtitle)
           .font(.callout)
           .foregroundStyle(.secondary)
@@ -553,13 +571,16 @@ struct AppShellView: View {
     } else {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 18) {
-          ForEach(localChat.messages) { message in
-            LocalMessageView(message: message)
+          ForEach(localChat.presentationMessages) { message in
+            LocalMessageView(message: message, isThinking: localChat.isWaitingForResponse && message.id == localChat.presentationMessages.last?.id)
               .id(message.id)
+          }
+          if localChat.isWaitingForResponse && localChat.presentationMessages.last?.role != .assistant {
+            LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false)
           }
         }
         .padding(24)
-        .background(ConversationScrollObserver().allowsHitTesting(false))
+        .background(ConversationScrollObserver(contentRevision: (localChat.presentationMessages.last?.content ?? "") + String(localChat.presentationMessages.count)).allowsHitTesting(false))
       }
       .defaultScrollAnchor(.bottom, for: .initialOffset)
       .defaultScrollAnchor(.top, for: .alignment)
@@ -972,7 +993,7 @@ struct AppShellView: View {
       }
       return
     }
-    if commands.search { draft = commands.prompt }
+    if commands.search { draft = commands.submissionPrompt }
     if screen.isEnabled, let attachment = screen.attachment {
       submitScreenAttachment(attachment)
       return
@@ -1059,58 +1080,73 @@ struct AppShellView: View {
   }
 }
 
+enum ChatTypography {
+  static let body = Font.system(size: 15)
+  static let label = Font.system(size: 11, weight: .semibold)
+}
+
 struct LocalMessageView: View {
   let message: ChatMessage
+  var isThinking = false
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 6) {
-      HStack(spacing: 6) {
-        if message.role == .assistant {
-          Circle().fill(NatureGlass.accent).frame(width: 5, height: 5)
-            .accessibilityHidden(true)
-        }
-        Text(message.role == .user ? "You" : "AI Spotlight")
-          .font(.system(.caption, design: .rounded, weight: .semibold))
-          .foregroundStyle(.secondary)
-      }
-
-      if message.role == .user, let data = message.imagePreview, let image = NSImage(data: data) {
-        SentImagePreview(image: image)
-      }
-
-      if message.content.isEmpty {
-        ProgressView()
-          .controlSize(.small)
-      } else if message.role == .assistant {
-        Text(renderedMarkdown)
-          .textSelection(.enabled)
-      } else {
-        Text(verbatim: message.content)
-          .textSelection(.enabled)
-      }
-      if let sources = message.searchSources, !sources.isEmpty {
-        VStack(alignment: .leading, spacing: 5) {
-          Text("Sources · Brave Search")
-            .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
-          ForEach(sources) { source in
-            Link(destination: source.url) {
-              Label(source.title.isEmpty ? (source.url.host ?? source.url.absoluteString) : source.title,
-                    systemImage: "arrow.up.right")
-                .lineLimit(1)
+    Group {
+      if message.role == .user {
+        HStack(alignment: .top, spacing: 0) {
+          Spacer(minLength: 48)
+          VStack(alignment: .trailing, spacing: 8) {
+            if let attachments = message.attachments {
+              ForEach(attachments.indices, id: \.self) { index in
+                Label(attachments[index].name, systemImage: attachments[index].isDirectory ? "folder" : "doc")
+                  .font(ChatTypography.label)
+                  .lineLimit(2)
+                  .padding(.horizontal, 10).padding(.vertical, 6)
+                  .background(NatureGlass.accent.opacity(0.09), in: RoundedRectangle(cornerRadius: 9))
+              }
             }
-            .help(source.url.absoluteString)
+            if let data = message.imagePreview, let image = NSImage(data: data) {
+              SentImagePreview(image: image)
+            }
+            Text(verbatim: message.content)
+              .font(ChatTypography.body)
+              .textSelection(.enabled)
+              .padding(.horizontal, 16).padding(.vertical, 12)
+              .background(NatureGlass.accent.opacity(0.13), in: RoundedRectangle(cornerRadius: 18))
+              .overlay { RoundedRectangle(cornerRadius: 18).stroke(NatureGlass.edge, lineWidth: 0.6) }
+              .accessibilityLabel("You: " + message.content)
           }
+          .frame(maxWidth: 560, alignment: .trailing)
         }
-        .font(.caption)
-        .padding(.top, 6)
+        .frame(maxWidth: .infinity, alignment: .trailing)
+      } else {
+        VStack(alignment: .leading, spacing: 8) {
+          HStack(spacing: 6) {
+            Circle().fill(NatureGlass.accent).frame(width: 5, height: 5).accessibilityHidden(true)
+            Text("AI Spotlight").font(ChatTypography.label).foregroundStyle(.secondary)
+          }
+          if message.content.isEmpty {
+            if isThinking { LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false) }
+          } else {
+            Text(renderedMarkdown).font(ChatTypography.body).lineSpacing(4).textSelection(.enabled)
+          }
+          if let sources = message.searchSources, !sources.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+              Text("Sources · Brave Search").font(ChatTypography.label).foregroundStyle(.secondary)
+              ForEach(sources) { source in
+                Link(destination: source.url) {
+                  Label(source.title.isEmpty ? (source.url.host ?? source.url.absoluteString) : source.title,
+                        systemImage: "arrow.up.right").lineLimit(1)
+                }.help(source.url.absoluteString)
+              }
+            }.font(.caption).padding(.top, 6)
+          }
+        }.frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 
   private var renderedMarkdown: AttributedString {
-    (try? AttributedString(markdown: message.content)) ?? AttributedString(message.content)
+    (try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(message.content)
   }
 }
 
@@ -1167,9 +1203,11 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Send from the message field", keys: "Return")
           shortcut("Hide inactive tools", keys: "⇧ ⌘ H")
           shortcut("Enable Web Search", keys: "/search")
-          shortcut("Capture a screen region", keys: "/screen")
+          shortcut("Capture the full desktop", keys: "/screen")
+          shortcut("Capture a screen region", keys: "/snapshot")
+          shortcut("Think harder for this answer", keys: "/think")
           shortcut("Attach files or a folder", keys: "⇧ ⌥ F")
-          Text("/screen with a question captures and sends. /screen alone attaches a screenshot and waits for a question.")
+          Text("/screen captures all displays; /snapshot selects a region. Add a question to capture and send, or use the command alone to attach. /think applies to one answer.")
             .font(.caption).foregroundStyle(.secondary)
 
           Divider()
@@ -1541,5 +1579,41 @@ struct SettingsView: View {
       Label(message, systemImage: "exclamationmark.triangle.fill")
         .foregroundStyle(.red)
     }
+  }
+}
+
+
+private struct LeafThinkingView: NSViewRepresentable {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeNSView(context: Context) -> WKWebView {
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    let view = WKWebView(frame: .zero, configuration: configuration)
+    view.setValue(false, forKey: "drawsBackground")
+    view.setAccessibilityLabel("AI Spotlight is thinking")
+    return view
+  }
+
+  func updateNSView(_ view: WKWebView, context: Context) {
+    guard view.identifier?.rawValue != String(reduceMotion) else { return }
+    view.identifier = NSUserInterfaceItemIdentifier(String(reduceMotion))
+    guard let asset = NSDataAsset(name: "LeafThinking"), let svg = String(data: asset.data, encoding: .utf8) else { return }
+    let reducedStyle = reduceMotion ? ".leaf-cycle,.leaf-sway,.stem-grow,.leaf-unfurl,.leaf-tilt { animation: none !important; opacity: 1; transform: none; }" : ""
+    view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(reducedStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
+  }
+}
+
+private struct ThinkingComposerGlow: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  var body: some View {
+    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
+      let angle = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3) / 3 * 360
+      RoundedRectangle(cornerRadius: 18)
+        .stroke(AngularGradient(colors: [.green.opacity(0.1), .green.opacity(0.2), .green, .mint, .green.opacity(0.1)],
+                                center: .center, angle: .degrees(angle)), lineWidth: 2)
+        .shadow(color: .green.opacity(0.5), radius: 6)
+    }
+    .accessibilityHidden(true)
   }
 }

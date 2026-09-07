@@ -1,9 +1,20 @@
 # Screen
 
-Attach a region with **+ → Screen**, or submit **/screen your question** to capture
-and send. **/screen** alone captures and waits for a question. Leading `/screen`
-and `/search` commands can be combined in either order, including immediate Return
-after pasting. Commands inside the question remain literal text.
+The composer shows only **File Mode** as an attachment tool. Use **/screen** to
+capture the full desktop (all connected displays in their desktop arrangement),
+or **/snapshot** to select a region. Either command with a question captures and
+sends; the command alone attaches and waits. Retake repeats the attachment's
+capture type. Leading `/think`, `/screen`, `/snapshot`, and `/search` commands can
+be combined. Commands inside the actual question remain literal text.
+
+Use **/think your question** to request more reasoning for one answer. The local
+server enables thinking and reserves 2,048 output tokens, with 1,024 available for
+reasoning; ordinary replies keep their existing 512-token budget. File Mode also
+carries the request's thinking setting through its tool loop. Cloud adapters set
+provider-specific thinking controls; ChatGPT increases effort to at least Extra
+High without lowering a stronger existing setting. Reply history excludes the
+transient thinking setting and internal guidance. See
+[thinking and capture verification](Thinking-and-Capture.md).
 
 Capture preflights Screen Recording permission before hiding the panel. Permission
 denial, cancellation and failed retakes preserve the draft and previous attachment.

@@ -5,17 +5,14 @@ struct FileModeToolButton: View {
   let isBusy: Bool
   let activate: () -> Void
   var body: some View {
-    if files.selection != nil {
-      Button(action: activate) {
-        Image("FileMode").renderingMode(.template).resizable().scaledToFit()
-          .foregroundStyle(Color.pink).frame(width: 22, height: 22).padding(4)
-          .background(Color.pink.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
-      }
-      .buttonStyle(.plain).disabled(isBusy || files.isPicking || files.isWorking)
-      .padding(.leading, 10)
-      .accessibilityLabel("File Mode").accessibilityValue("On")
-      .help("Attach another file or folder · ⇧⌥F")
+    Button(action: activate) {
+      Image("FileMode").renderingMode(.template).resizable().scaledToFit()
+        .foregroundStyle(files.selection != nil || files.isPicking ? Color.green : .white).frame(width: 22, height: 22).padding(4)
+        .background(files.selection != nil || files.isPicking ? Color.green.opacity(0.12) : Color.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
     }
+    .buttonStyle(.plain).disabled(isBusy || files.isPicking || files.isWorking)
+    .accessibilityLabel("File Mode").accessibilityValue(files.selection == nil ? "Off" : "On")
+    .help("Attach a file or folder · ⇧⌥F")
   }
 }
 
@@ -31,7 +28,7 @@ struct FileModeAttachmentView: View {
       if let selection = files.selection {
         ForEach(selection.attachments) { attachment in
           HStack(spacing: 8) {
-            Image(systemName: attachment.isDirectory ? "folder" : "doc").foregroundStyle(.pink)
+            Image(systemName: attachment.isDirectory ? "folder" : "doc").foregroundStyle(.green)
             Text("\(attachment.name) — \(access.rawValue)").font(.caption.weight(.medium)).lineLimit(1)
             Spacer(minLength: 4)
             Button { files.remove(id: attachment.id) } label: { Image(systemName: "xmark.circle.fill") }
