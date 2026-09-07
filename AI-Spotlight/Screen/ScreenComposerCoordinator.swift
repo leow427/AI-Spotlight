@@ -14,6 +14,7 @@ final class ScreenComposerCoordinator: ObservableObject {
   private let captureService: any ScreenCapturing
   private let ocrService: any ScreenOCRReading
   private var revision = UUID()
+  private var lastCaptureWasDesktop = false
 
   init(captureService: any ScreenCapturing = ScreenCaptureService(), ocrService: any ScreenOCRReading = ScreenOCRService()) {
     self.captureService = captureService
@@ -24,17 +25,20 @@ final class ScreenComposerCoordinator: ObservableObject {
   func capture(submittedCommand: Bool = false) async -> String? {
     guard !isBusy else { return nil }
     let originalDraft = draft
-    let remainder = submittedCommand ? ScreenCommand.remainder(in: draft) : nil
+    let commands = ComposerCommands(draft)
+    let desktop = submittedCommand ? !commands.snapshot : lastCaptureWasDesktop
+    let remainder = submittedCommand && commands.screen ? commands.submissionPrompt : nil
     let operation = UUID()
     revision = operation
     isCapturing = true
     error = nil
     defer { isCapturing = false; isReading = false }
     do {
-      guard let image = try await captureRegion() else { return nil }
+      guard let image = try await captureRegion(desktop: desktop) else { return nil }
       try Task.checkCancellation()
       guard revision == operation else { return nil }
-      attachment = try ScreenAttachment(image: image)
+      attachment = try ScreenAttachment(image: image, source: desktop ? .fullDesktop : .screenRegion)
+      lastCaptureWasDesktop = desktop
       isPresented = true
       isEnabled = true
       isCapturing = false
@@ -52,7 +56,7 @@ final class ScreenComposerCoordinator: ObservableObject {
       }
       guard draft == originalDraft else { return nil }
       if let remainder { draft = remainder }
-      return remainder.flatMap { $0.isEmpty ? nil : $0 }
+      return remainder.flatMap { ThinkCommand.message($0).content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? nil : $0 }
     } catch is CancellationError {
       return nil
     } catch {
@@ -61,13 +65,13 @@ final class ScreenComposerCoordinator: ObservableObject {
     }
   }
 
-  private func captureRegion() async throws -> NSImage? {
+  private func captureRegion(desktop: Bool) async throws -> NSImage? {
     // Permission UI belongs in front of the visible panel. Hide only once the
     // process is authorized and interactive region selection is about to start.
     try captureService.prepareForCapture()
     NotificationCenter.default.post(name: .screenCaptureBegan, object: nil)
     defer { NotificationCenter.default.post(name: .screenCaptureEnded, object: nil) }
-    return try await captureService.capture()
+    return try await desktop ? captureService.captureDesktop() : captureService.capture()
   }
 
   func updateDecision(_ decision: ScreenRoutingPolicy.Decision) {

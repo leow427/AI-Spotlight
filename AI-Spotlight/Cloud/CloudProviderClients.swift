@@ -83,11 +83,12 @@ struct OpenAIResponsesClient: ChatProvider {
     }
 
     let prepared = try CloudContext.prepare(request)
-    let body: [String: Any] = [
+    var body: [String: Any] = [
       "model": request.route.modelID,
       "input": try MultimodalSerialization.messages(prepared.messages, image: request.image, format: .openAIResponses),
       "stream": true, "store": false, "max_output_tokens": prepared.budget.outputTokens,
     ]
+    if ThinkCommand.enabled(in: prepared.messages) { body["reasoning"] = ["effort": "high"] }
     var urlRequest = URLRequest(url: responsesURL)
     urlRequest.httpMethod = "POST"
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -222,11 +223,16 @@ struct AnthropicMessagesClient: ChatProvider {
     }
 
     let prepared = try CloudContext.prepare(request)
-    let body: [String: Any] = [
+    var body: [String: Any] = [
       "model": request.route.modelID, "max_tokens": prepared.budget.outputTokens,
       "messages": try MultimodalSerialization.messages(prepared.messages, image: request.image, format: .anthropic),
       "stream": true,
     ]
+    if ThinkCommand.enabled(in: prepared.messages) {
+      let manual = ["claude-3", "claude-sonnet-4-202", "claude-opus-4-202", "claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1", "claude-opus-4-5"].contains { request.route.modelID.hasPrefix($0) }
+      body["thinking"] = manual ? ["type": "enabled", "budget_tokens": 2_048] : ["type": "adaptive"]
+      if !manual { body["output_config"] = ["effort": "high"] }
+    }
     var urlRequest = URLRequest(url: messagesURL)
     urlRequest.httpMethod = "POST"
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")

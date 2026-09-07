@@ -47,6 +47,7 @@ struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   let createdAt: Date
   // Session-only UI data: never serialize screenshot pixels or send them as chat text.
   var imagePreview: Data? = nil
+  var extendedThinking: Bool? = nil
 
   private enum CodingKeys: String, CodingKey {
     case id, role, content, searchSources, createdAt

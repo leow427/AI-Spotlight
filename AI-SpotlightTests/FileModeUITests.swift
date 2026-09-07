@@ -16,6 +16,14 @@ final class FileModeUITests: XCTestCase {
   }
   override func tearDown() async throws { try FileManager.default.removeItem(at: root) }
 
+  func testInactiveFileButtonHasVisibleHitTarget() {
+    let files = FileModeCoordinator(journalDirectory: root.appendingPathComponent("Recovery"))
+    let view = NSHostingView(rootView: FileModeToolButton(files: files, isBusy: false, activate: {}))
+    XCTAssertNil(files.selection)
+    XCTAssertGreaterThanOrEqual(view.fittingSize.width, 30)
+    XCTAssertGreaterThanOrEqual(view.fittingSize.height, 30)
+  }
+
   func testMenuActivationPresentsPickerAndAllowsFileAndFolderSelection() async throws {
     let panel = FinderWorkspacePicker.panel()
     XCTAssertTrue(panel.canChooseFiles)

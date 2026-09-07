@@ -88,7 +88,7 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
     return ["-m", model.fileURL.path, "--mmproj", config.projectorURL.path,
             "--host", "127.0.0.1", "--port", String(port), "--api-key", key, "--alias", alias,
             "--ctx-size", String(config.contextWindow), "--parallel", "1", "--offline", "--no-webui",
-            "--jinja", "--no-context-shift", "--cache-ram", "0", "--reasoning-budget", "0",
+            "--jinja", "--no-context-shift", "--cache-ram", "0", "--reasoning-budget", "-1",
             "--fit", "off", "--image-max-tokens", "4096"]
   }
 
@@ -100,7 +100,7 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
     }
     if let image { try ScreenRequestGuard.validateImage(image) }
     return try ChatContextPreparer.prepare(messages,
-      budget: ContextBudget(contextWindow: config.contextWindow, outputTokens: 512, overheadTokens: 256),
+      budget: ContextBudget(contextWindow: config.contextWindow, outputTokens: ThinkCommand.localOutputTokens(messages), overheadTokens: 256),
       countTokens: { $0.reduce(image == nil ? 0 : 4096) { $0 + $1.content.utf8.count + 32 } })
   }
 
@@ -137,7 +137,7 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
         let client = LocalMultimodalClient(endpoint: session.base.appendingPathComponent("v1/chat/completions"),
           api: .openAICompatible, transport: URLSessionCloudTransport(session: session.network), apiKey: session.key)
         for try await text in client.stream(messages: prepared.messages, image: image, model: runtimeModel,
-                                            temperature: temperature) {
+                                            maximumTokens: prepared.budget.outputTokens, temperature: temperature) {
           try Task.checkCancellation()
           guard activeID == id else { throw CancellationError() }
           continuation.yield(text)
@@ -212,6 +212,7 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
   /// The controller owns the tool loop; this method only performs one inference step.
   func completeTools(messages: [AgentInferenceMessage], tools: [AgentToolDefinition],
                      model: LocalModel) async throws -> AgentInferenceMessage {
+    let fileMaximumTokens = messages.first?.extendedThinking == true ? max(self.fileMaximumTokens, 2_048) : self.fileMaximumTokens
     let id = UUID()
     let started = ProcessInfo.processInfo.systemUptime
     var diagnostic: [String: CodexValue] = ["limit": .number(Double(fileMaximumTokens)),

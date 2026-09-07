@@ -55,9 +55,9 @@ struct ScreenAttachmentView: View {
         .resizable().scaledToFit().frame(width: 76, height: 52)
         .background(.black.opacity(0.08), in: RoundedRectangle(cornerRadius: 6))
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .accessibilityLabel("Captured screen region")
+        .accessibilityLabel(attachment.source == .fullDesktop ? "Captured full desktop" : "Captured screen region")
       VStack(alignment: .leading, spacing: 3) {
-        Text("Screen region").font(.caption.weight(.medium))
+        Text(attachment.source == .fullDesktop ? "Full desktop" : "Screen region").font(.caption.weight(.medium))
         Text(isEnabled ? attachment.status.rawValue : "Off · excluded from prompt")
           .font(.caption2).foregroundStyle(.secondary)
       }

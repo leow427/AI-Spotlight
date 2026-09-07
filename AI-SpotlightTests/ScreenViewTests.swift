@@ -8,6 +8,33 @@ import XCTest
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testStreamRevisionFollowsEvenWithoutObserverFrameChanges() async throws {
+    let document = ConversationTestDocument(flipped: true)
+    document.frame = NSRect(x: 0, y: 0, width: 400, height: 1600)
+    let observer = ConversationScrollObserver.ObserverView()
+    observer.frame = document.bounds
+    document.addSubview(observer)
+    let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 400, height: 300))
+    scroll.documentView = document
+    let window = NSWindow(contentRect: scroll.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = scroll
+    defer { window.contentView = nil }
+    observer.scrollToBottomIfFollowing()
+    // Bounds-only growth deliberately does not send the document frame notification.
+    document.setBoundsSize(NSSize(width: 400, height: 1900))
+    observer.contentChanged("new streamed text")
+    let followed = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
+      abs(scroll.contentView.bounds.maxY - document.bounds.maxY) < 2
+    }, object: nil)
+    await fulfillment(of: [followed], timeout: 2)
+    XCTAssertTrue(observer.followsLatest)
+    scroll.contentView.scroll(to: NSPoint(x: 0, y: scroll.contentView.bounds.minY - 8))
+    observer.contentChanged("more streamed text")
+    observer.scrollToBottomIfFollowing()
+    XCTAssertFalse(observer.followsLatest)
+    XCTAssertGreaterThan(document.bounds.maxY - scroll.contentView.bounds.maxY, 2)
+  }
+
   func testConversationScrollPreservesReadingPositionAcrossLayoutAndStreaming() throws {
     for flipped in [true, false] {
       let document = ConversationTestDocument(flipped: flipped)

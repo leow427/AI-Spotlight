@@ -30,7 +30,7 @@ struct LocalModelRequest: Sendable, Equatable {
     temperature: Float = 0.7
   ) {
     self.messages = messages
-    self.maximumTokenCount = maximumTokenCount
+    self.maximumTokenCount = ThinkCommand.enabled(in: messages) ? max(maximumTokenCount, 2_048) : maximumTokenCount
     self.temperature = temperature
   }
 }

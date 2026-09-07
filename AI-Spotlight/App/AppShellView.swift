@@ -2,13 +2,21 @@ import AppKit
 import Combine
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 /// Follow new layout only while the reader remains at the end of the chat.
 struct ConversationScrollObserver: NSViewRepresentable {
+  var contentRevision = ""
   func makeNSView(context: Context) -> ObserverView { ObserverView() }
-  func updateNSView(_ view: ObserverView, context: Context) {}
+  func updateNSView(_ view: ObserverView, context: Context) { view.contentChanged(contentRevision) }
 
   final class ObserverView: NSView {
+    private var contentRevision = ""
+    func contentChanged(_ revision: String) {
+      guard revision != contentRevision else { return }
+      contentRevision = revision
+      scheduleScroll()
+    }
     private var pendingScroll: DispatchWorkItem?
     private weak var observedScroll: NSScrollView?
     private var previousClipBounds = NSRect.zero
@@ -82,6 +90,7 @@ struct ConversationScrollObserver: NSViewRepresentable {
       isLiveScrolling = true
       followsLatest = false
       pendingScroll?.cancel()
+      pendingScroll = nil
     }
 
     @objc private func endScrolling() {
@@ -102,13 +111,12 @@ struct ConversationScrollObserver: NSViewRepresentable {
           && bounds.size == previousClipBounds.size
           && scroll.documentView?.bounds.size == previousDocumentSize) {
         followsLatest = !isLiveScrolling && isAtBottom
-        if !followsLatest { pendingScroll?.cancel() }
+        if !followsLatest { pendingScroll?.cancel(); pendingScroll = nil }
       }
     }
 
     private func scheduleScroll() {
-      pendingScroll?.cancel()
-      guard followsLatest, !isLiveScrolling else { return }
+      guard followsLatest, !isLiveScrolling, pendingScroll == nil else { return }
       let work = DispatchWorkItem { [weak self] in self?.scrollToBottomIfFollowing() }
       pendingScroll = work
       // Coalesce repeated lazy-row measurements; recheck reader intent at execution.
@@ -431,7 +439,7 @@ struct AppShellView: View {
       guard commands.search, value == draft else { return }
       isSearchPresented = true
       isSearchEnabled = true
-      draft = commands.screen ? commands.captureDraft : commands.prompt
+      draft = commands.screen ? commands.captureDraft : commands.submissionPrompt
     }
     .onChange(of: isSearchPresented) { _, _ in
       isComposerFocused = true
@@ -465,13 +473,6 @@ struct AppShellView: View {
   private var composer: some View {
     HStack(spacing: 10) {
       HStack(spacing: 0) {
-        WebSearchControls(
-          isEnabled: $isSearchEnabled, isPresented: $isSearchPresented,
-          isBusy: localChat.isBusy || screen.isBusy || files.isPicking || files.isWorking,
-          openSettings: openSettings, captureScreen: captureScreen,
-          attachFiles: { activateFileMode(from: .menu) }
-        )
-        ScreenToolButton(coordinator: screen, isBusy: localChat.isBusy, capture: captureScreen)
         FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
       }
 
@@ -511,13 +512,16 @@ struct AppShellView: View {
         .stroke(isComposerFocused ? NatureGlass.accent.opacity(0.55) : NatureGlass.accent.opacity(0.22),
                 lineWidth: isComposerFocused ? 1 : 0.5)
     }
+    .overlay {
+      if localChat.activeRequest != nil { ThinkingComposerGlow().allowsHitTesting(false) }
+    }
     .shadow(color: NatureGlass.accent.opacity(isComposerFocused ? 0.07 : 0), radius: 10, y: 2)
     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isComposerFocused)
   }
 
   @ViewBuilder
   private var conversation: some View {
-    if localChat.messages.isEmpty {
+    if localChat.messages.isEmpty && localChat.activeRequest == nil {
       Spacer()
 
       VStack(spacing: 10) {
@@ -554,12 +558,15 @@ struct AppShellView: View {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 18) {
           ForEach(localChat.messages) { message in
-            LocalMessageView(message: message)
+            LocalMessageView(message: message, isThinking: localChat.activeRequest != nil)
               .id(message.id)
+          }
+          if localChat.activeRequest != nil && localChat.messages.last?.content.isEmpty != true {
+            LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false)
           }
         }
         .padding(24)
-        .background(ConversationScrollObserver().allowsHitTesting(false))
+        .background(ConversationScrollObserver(contentRevision: (localChat.messages.last?.content ?? "") + String(localChat.messages.count)).allowsHitTesting(false))
       }
       .defaultScrollAnchor(.bottom, for: .initialOffset)
       .defaultScrollAnchor(.top, for: .alignment)
@@ -972,7 +979,7 @@ struct AppShellView: View {
       }
       return
     }
-    if commands.search { draft = commands.prompt }
+    if commands.search { draft = commands.submissionPrompt }
     if screen.isEnabled, let attachment = screen.attachment {
       submitScreenAttachment(attachment)
       return
@@ -1061,6 +1068,7 @@ struct AppShellView: View {
 
 struct LocalMessageView: View {
   let message: ChatMessage
+  var isThinking = false
 
   var body: some View {
     VStack(alignment: .leading, spacing: 6) {
@@ -1079,8 +1087,7 @@ struct LocalMessageView: View {
       }
 
       if message.content.isEmpty {
-        ProgressView()
-          .controlSize(.small)
+        if isThinking { LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false) }
       } else if message.role == .assistant {
         Text(renderedMarkdown)
           .textSelection(.enabled)
@@ -1167,9 +1174,11 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Send from the message field", keys: "Return")
           shortcut("Hide inactive tools", keys: "⇧ ⌘ H")
           shortcut("Enable Web Search", keys: "/search")
-          shortcut("Capture a screen region", keys: "/screen")
+          shortcut("Capture the full desktop", keys: "/screen")
+          shortcut("Capture a screen region", keys: "/snapshot")
+          shortcut("Think harder for this answer", keys: "/think")
           shortcut("Attach files or a folder", keys: "⇧ ⌥ F")
-          Text("/screen with a question captures and sends. /screen alone attaches a screenshot and waits for a question.")
+          Text("/screen captures all displays; /snapshot selects a region. Add a question to capture and send, or use the command alone to attach. /think applies to one answer.")
             .font(.caption).foregroundStyle(.secondary)
 
           Divider()
@@ -1541,5 +1550,41 @@ struct SettingsView: View {
       Label(message, systemImage: "exclamationmark.triangle.fill")
         .foregroundStyle(.red)
     }
+  }
+}
+
+
+private struct LeafThinkingView: NSViewRepresentable {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  func makeNSView(context: Context) -> WKWebView {
+    let configuration = WKWebViewConfiguration()
+    configuration.websiteDataStore = .nonPersistent()
+    let view = WKWebView(frame: .zero, configuration: configuration)
+    view.setValue(false, forKey: "drawsBackground")
+    view.setAccessibilityLabel("AI Spotlight is thinking")
+    return view
+  }
+
+  func updateNSView(_ view: WKWebView, context: Context) {
+    guard view.identifier?.rawValue != String(reduceMotion) else { return }
+    view.identifier = NSUserInterfaceItemIdentifier(String(reduceMotion))
+    guard let asset = NSDataAsset(name: "LeafThinking"), let svg = String(data: asset.data, encoding: .utf8) else { return }
+    let reducedStyle = reduceMotion ? ".leaf-cycle,.leaf-sway,.stem-grow,.leaf-unfurl,.leaf-tilt { animation: none !important; opacity: 1; transform: none; }" : ""
+    view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(reducedStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
+  }
+}
+
+private struct ThinkingComposerGlow: View {
+  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+  var body: some View {
+    TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
+      let angle = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3) / 3 * 360
+      RoundedRectangle(cornerRadius: 18)
+        .stroke(AngularGradient(colors: [.green.opacity(0.1), .green.opacity(0.2), .green, .mint, .green.opacity(0.1)],
+                                center: .center, angle: .degrees(angle)), lineWidth: 2)
+        .shadow(color: .green.opacity(0.5), radius: 6)
+    }
+    .accessibilityHidden(true)
   }
 }

@@ -160,7 +160,7 @@ struct CodexSubscriptionClient: ChatProvider {
               params: Self.turnParameters(
                 threadID: id,
                 request: boundedRequest,
-                thinkingCapacity: thinkingCapacity(),
+                thinkingCapacity: ThinkCommand.enabled(in: request.messages) ? thinkingCapacity().forExtendedThinking : thinkingCapacity(),
                 workspace: selection
               )
             )

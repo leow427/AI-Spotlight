@@ -14,13 +14,17 @@ struct LocalMultimodalClient: Sendable {
     if image != nil && !model.canUseVision { throw ScreenRequestError.textOnlyModel }
     let format: MultimodalSerialization.Format = api == .ollama ? .ollama : .openAIChat
     var body: [String: Any] = ["model": model.id, "messages": try MultimodalSerialization.messages(messages, image: image, format: format), "stream": true]
-    if api == .ollama { body["options"] = ["num_predict": maximumTokens, "temperature": temperature] }
+    if api == .ollama {
+      body["options"] = ["num_predict": maximumTokens, "temperature": temperature]
+      body["think"] = ThinkCommand.enabled(in: messages)
+    }
     else {
       body["max_tokens"] = maximumTokens
       body["temperature"] = temperature
       body["cache_prompt"] = false
       body["stream_options"] = ["include_usage": true]
-      body["chat_template_kwargs"] = ["enable_thinking": false]
+      body["chat_template_kwargs"] = ["enable_thinking": ThinkCommand.enabled(in: messages)]
+      body["reasoning_budget"] = ThinkCommand.enabled(in: messages) ? 1_024 : 0
     }
     var request = URLRequest(url: endpoint)
     request.httpMethod = "POST"

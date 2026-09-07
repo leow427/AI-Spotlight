@@ -266,7 +266,7 @@ final class LocalChatViewModel: ObservableObject {
   /// File Mode has its own explicit route. Auto stays local; a write request never causes upload.
   func submitFiles(_ prompt: String, mode: ChatMode, cloudProvider: CloudProviderID,
                    cloudModelID: String, onAccepted: @escaping @MainActor () -> Void = {}) {
-    guard !isBusy, !files.isWorking, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+    guard !isBusy, !files.isWorking, !ThinkCommand.message(prompt).content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           files.selection != nil else { return }
     let local = mode != .cloud
     if local && installedModel == nil {
@@ -285,7 +285,7 @@ final class LocalChatViewModel: ObservableObject {
     let route = Route(mode: local ? .local : .cloud,
       providerID: local ? "llama.cpp" : CloudProviderID.chatGPT.rawValue,
       modelID: local ? model!.id : cloudModelID, usesNetwork: !local)
-    let history = messages + [ChatMessage(role: .user, content: prompt)]
+    let history = messages + [ThinkCommand.message(prompt)]
     let active = beginGeneration(route: route, modelDisplayName: local ? model!.displayName : cloudModelID)
     let sessionID = ensureSelectedSession()
     let responseID = UUID()
@@ -335,7 +335,7 @@ final class LocalChatViewModel: ObservableObject {
 
   func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedPrompt.isEmpty, !isBusy else { return }
+    guard !ThinkCommand.message(trimmedPrompt).content.isEmpty, !isBusy else { return }
     if let model = installedModel, model.supportsVision {
       submitScreen(trimmedPrompt, attachment: nil, decision: .text(model.screenModel), selectedMode: .local,
                    searchEnabled: searchEnabled, cloudUploadAllowed: { false }, onAccepted: onAccepted)
@@ -344,7 +344,7 @@ final class LocalChatViewModel: ObservableObject {
     screenRouteDecision = nil
     idleUnloadTask?.cancel()
     let responseID = UUID()
-    let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
+    let userMessage = ThinkCommand.message(trimmedPrompt)
     let request = LocalModelRequest(messages: messages + [userMessage])
     let active = beginGeneration(
       route: Route(mode: .local, providerID: "local", modelID: installedModel?.id ?? "", usesNetwork: searchEnabled),
@@ -423,7 +423,7 @@ final class LocalChatViewModel: ObservableObject {
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
     let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !prompt.isEmpty, !isBusy, let model = decision.model else { return }
+    guard !ThinkCommand.message(prompt).content.isEmpty, !isBusy, let model = decision.model else { return }
     guard selectedMode != .local || model.isLocal else {
       state = .failed(ScreenRequestError.cloudUploadNotAllowed.localizedDescription)
       return
@@ -432,12 +432,12 @@ final class LocalChatViewModel: ObservableObject {
       state = .failed(ScreenRequestError.textOnlyModel.localizedDescription)
       return
     }
-    let userMessage = ChatMessage(role: .user, content: prompt)
+    let userMessage = ThinkCommand.message(prompt)
     let preferOCR = attachment.map {
       ScreenRoutingPolicy.hasConfidentTextForLookup(prompt: prompt,
         ocr: ScreenOCRResult(text: $0.ocrText, confidence: $0.ocrConfidence))
     } ?? false
-    let requestText = attachment.map { ScreenPromptContext.text(userPrompt: prompt, ocr: $0.ocrText, preferOCR: preferOCR) } ?? prompt
+    let requestText = attachment.map { ScreenPromptContext.text(userPrompt: userMessage.content, ocr: $0.ocrText, preferOCR: preferOCR) } ?? userMessage.content
     var current = userMessage
     current.content = requestText
     let history = messages + [current]
@@ -631,7 +631,7 @@ final class LocalChatViewModel: ObservableObject {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
     screenRouteDecision = nil
-    guard !trimmedPrompt.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
+    guard !ThinkCommand.message(trimmedPrompt).content.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
     idleUnloadTask?.cancel()
     let route = Route(
       mode: .cloud,
@@ -639,7 +639,7 @@ final class LocalChatViewModel: ObservableObject {
       modelID: trimmedModelID,
       usesNetwork: true
     )
-    let userMessage = ChatMessage(role: .user, content: trimmedPrompt)
+    let userMessage = ThinkCommand.message(trimmedPrompt)
     let prepared: PreparedConversation
     contextNotice = nil
     do {
@@ -746,7 +746,7 @@ final class LocalChatViewModel: ObservableObject {
     searchEnabled: Bool = false,
     onAccepted: @escaping @MainActor () -> Void = {}
   ) {
-    guard !isBusy, !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    guard !isBusy, !ThinkCommand.message(prompt).content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     state = .idle
     contextNotice = nil
     let decision = (searchEnabled || AutoRouter.shouldRun(for: .auto, cloud: cloud))

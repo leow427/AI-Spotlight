@@ -209,6 +209,7 @@ struct AgentInferenceMessage: Codable, Sendable, Equatable {
   var content: String?
   var toolCalls: [AgentToolCall]? = nil
   var toolCallID: String? = nil
+  var extendedThinking: Bool? = nil
   enum CodingKeys: String, CodingKey {
     case role, content
     case toolCalls = "tool_calls"
@@ -238,6 +239,10 @@ struct LocalFileAgent: Sendable {
     var history = [AgentInferenceMessage(role: "system", content:
       AgentFileTools.instructions + "\n" + AgentFileTools.localInstructions + "\nAccess: \(level.rawValue)\n" + selection.context)]
       + messages.map { AgentInferenceMessage(role: $0.role.rawValue, content: $0.content) }
+    if ThinkCommand.enabled(in: messages) {
+      history[0].extendedThinking = true
+      history[0].content = ThinkCommand.guidance + "\n\n" + (history[0].content ?? "")
+    }
     let definitions = AgentFileTools.definitions(access: level)
     let mutationNames: Set<String> = ["apply_patch", "write_file", "append_file", "create_file", "move_file", "delete_file"]
     var successfulMutations = Set<Data>()

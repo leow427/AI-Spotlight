@@ -4,10 +4,12 @@ import CoreGraphics
 protocol ScreenCapturing: Sendable {
   @MainActor func prepareForCapture() throws
   @MainActor func capture() async throws -> NSImage?
+  @MainActor func captureDesktop() async throws -> NSImage?
 }
 
 extension ScreenCapturing {
   @MainActor func prepareForCapture() throws {}
+  @MainActor func captureDesktop() async throws -> NSImage? { try await capture() }
 }
 
 enum ScreenCaptureError: LocalizedError, Equatable {
@@ -31,6 +33,7 @@ final class ScreenCaptureService: ScreenCapturing {
     var requestAccess: () -> Bool = { CGRequestScreenCaptureAccess() }
     var waitForPanel: () async throws -> Void = { try await Task.sleep(for: .milliseconds(200)) }
     var run: (URL) async throws -> Void = ScreenCaptureService.runSelection
+    var desktop: () async throws -> NSImage? = ScreenCaptureService.runDesktop
     var temporaryDirectory = FileManager.default.temporaryDirectory
   }
   private let environment: Environment
@@ -45,7 +48,11 @@ final class ScreenCaptureService: ScreenCapturing {
     hasPreparedCapture = true
   }
 
-  func capture() async throws -> NSImage? {
+  func capture() async throws -> NSImage? { try await capture(fullDesktop: false) }
+
+  func captureDesktop() async throws -> NSImage? { try await capture(fullDesktop: true) }
+
+  private func capture(fullDesktop: Bool) async throws -> NSImage? {
     guard !isCapturing else { throw ScreenCaptureError.alreadyCapturing }
     let wasPrepared = hasPreparedCapture
     hasPreparedCapture = false
@@ -54,6 +61,7 @@ final class ScreenCaptureService: ScreenCapturing {
     if !wasPrepared { try ensurePermission() }
     try await environment.waitForPanel()
     try Task.checkCancellation()
+    if fullDesktop { return try await environment.desktop() }
     let url = environment.temporaryDirectory.appendingPathComponent("ai-spotlight-screen-\(UUID().uuidString).png")
     defer { try? FileManager.default.removeItem(at: url) }
     try await environment.run(url)
@@ -73,10 +81,36 @@ final class ScreenCaptureService: ScreenCapturing {
     guard environment.preflight() else { throw ScreenCaptureError.restartRequired }
   }
 
+  /// Capture every attached display and preserve their desktop arrangement.
+  private static func runDesktop() async throws -> NSImage? {
+    let screens = NSScreen.screens
+    guard !screens.isEmpty else { throw ScreenCaptureError.invalidImage }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ai-spotlight-desktop-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let urls = screens.indices.map { directory.appendingPathComponent("display-\($0).png") }
+    try await runCapture(["-x"] + urls.map(\.path))
+    try Task.checkCancellation()
+    let bounds = screens.reduce(NSRect.null) { $0.union($1.frame) }
+    let result = NSImage(size: bounds.size)
+    result.lockFocus()
+    defer { result.unlockFocus() }
+    for (screen, url) in zip(screens, urls) {
+      guard let image = NSImage(data: try Data(contentsOf: url)) else { throw ScreenCaptureError.invalidImage }
+      image.draw(in: screen.frame.offsetBy(dx: -bounds.minX, dy: -bounds.minY),
+                 from: .zero, operation: .copy, fraction: 1)
+    }
+    return result
+  }
+
   private static func runSelection(_ url: URL) async throws {
+    try await runCapture(["-i", "-x", url.path])
+  }
+
+  private static func runCapture(_ arguments: [String]) async throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-    process.arguments = ["-i", "-x", url.path]
+    process.arguments = arguments
     process.standardOutput = FileHandle.nullDevice
     process.standardError = FileHandle.nullDevice
     try await withTaskCancellationHandler {

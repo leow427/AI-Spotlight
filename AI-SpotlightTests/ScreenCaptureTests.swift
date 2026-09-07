@@ -4,6 +4,46 @@ import XCTest
 
 @MainActor
 final class ScreenCaptureTests: XCTestCase {
+  func testSnapshotAndThinkingCommandsComposeWithoutEatingLiteralText() {
+    let commands = ComposerCommands("/think /snapshot /search explain /screen literally")
+    XCTAssertTrue(commands.screen)
+    XCTAssertTrue(commands.snapshot)
+    XCTAssertTrue(commands.think)
+    XCTAssertTrue(commands.search)
+    XCTAssertEqual(commands.prompt, "explain /screen literally")
+    XCTAssertEqual(commands.captureDraft, "/snapshot /think explain /screen literally")
+    XCTAssertFalse(ComposerCommands("/snapshotting hi").screen)
+    XCTAssertFalse(ComposerCommands("/thinker hi").think)
+    XCTAssertFalse(ComposerCommands("explain /think").think)
+  }
+
+  func testDesktopAndSnapshotUseDifferentCapturePathsAndRetakeMatches() async throws {
+    let capture = CaptureModeProbe()
+    let coordinator = ScreenComposerCoordinator(captureService: capture)
+    coordinator.draft = "/screen /think explain"
+    let prompt = await coordinator.capture(submittedCommand: true)
+    XCTAssertEqual(prompt, "/think explain")
+    XCTAssertEqual(capture.desktopCount, 1)
+    _ = await coordinator.capture()
+    XCTAssertEqual(capture.desktopCount, 2)
+    coordinator.draft = "/snapshot explain"
+    _ = await coordinator.capture(submittedCommand: true)
+    XCTAssertEqual(capture.regionCount, 1)
+    _ = await coordinator.capture()
+    XCTAssertEqual(capture.regionCount, 2)
+  }
+
+  func testDesktopCaptureWaitsForPanelAndPreflightsPermission() async throws {
+    var environment = ScreenCaptureService.Environment()
+    var waited = false
+    environment.preflight = { true }
+    environment.waitForPanel = { waited = true }
+    environment.desktop = { XCTAssertTrue(waited); return NSImage(size: NSSize(width: 20, height: 20)) }
+    environment.run = { _ in XCTFail("Desktop must not select a region") }
+    let image = try await ScreenCaptureService(environment: environment).captureDesktop()
+    XCTAssertNotNil(image)
+  }
+
   func testCommandParsing() {
     XCTAssertEqual(ScreenCommand.remainder(in: "/screen what is the answer?"), "what is the answer?")
     XCTAssertEqual(ScreenCommand.remainder(in: " /SCREEN\ncode? "), "code?")
@@ -253,5 +293,18 @@ private actor SuspendedPanelOCR: ScreenOCRReading {
   func complete() {
     continuation?.resume(returning: ScreenOCRResult(text: "late extracted text", confidence: 0.99))
     continuation = nil
+  }
+}
+
+@MainActor
+private final class CaptureModeProbe: ScreenCapturing {
+  var desktopCount = 0
+  var regionCount = 0
+  func capture() async throws -> NSImage? { regionCount += 1; return image() }
+  func captureDesktop() async throws -> NSImage? { desktopCount += 1; return image() }
+  private func image() -> NSImage {
+    let image = NSImage(size: NSSize(width: 20, height: 20))
+    image.lockFocus(); NSColor.white.setFill(); NSRect(x: 0, y: 0, width: 20, height: 20).fill(); image.unlockFocus()
+    return image
   }
 }
