@@ -17,7 +17,8 @@ Implemented against `0f66362` on the current integration branch.
 - File Mode is always available; Search and Screen no longer appear as composer
   tool buttons or plus-menu options. Slash commands remain available.
 - The supplied SVG is bundled as a data asset (only trailing whitespace normalized). A local, nonpersistent
-  WebKit view preserves its authored growth animation at the left of the chat.
+  WebKit view preserves its authored growth animation at the left of the chat
+  until the first visible response text arrives.
   The composer displays a rotating green gradient while a request is active.
   Reduce Motion stops both animations; completion, Stop, and failure remove them.
 
@@ -58,3 +59,6 @@ The exact animation asset:
 
 Provider controls follow the [Claude thinking documentation](https://platform.claude.com/docs/en/build-with-claude/extended-thinking)
 and [Gemini thinking documentation](https://ai.google.dev/gemini-api/docs/generate-content/thinking).
+
+The subsequent [chat presentation update](Chat-Presentation.md) adds immediate
+outgoing bubbles, Avenir Next typography, and per-message attachments.

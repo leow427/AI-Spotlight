@@ -34,6 +34,11 @@ protocol ChatProvider: Sendable {
   func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error>
 }
 
+struct MessageAttachment: Codable, Sendable, Equatable {
+  let name: String
+  let isDirectory: Bool
+}
+
 struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   enum Role: String, Codable, Sendable {
     case user
@@ -48,9 +53,10 @@ struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   // Session-only UI data: never serialize screenshot pixels or send them as chat text.
   var imagePreview: Data? = nil
   var extendedThinking: Bool? = nil
+  var attachments: [MessageAttachment]? = nil
 
   private enum CodingKeys: String, CodingKey {
-    case id, role, content, searchSources, createdAt
+    case id, role, content, searchSources, createdAt, attachments
   }
 
   init(id: UUID = UUID(), role: Role, content: String, createdAt: Date = .now, searchSources: [WebSearchSource]? = nil) {

@@ -117,6 +117,9 @@ final class FileModeUITests: XCTestCase {
     let token = chat.$state.dropFirst().filter { $0 == .idle }.prefix(1).sink { _ in finished.fulfill() }
     chat.submitFiles("Please edit hello.txt", mode: .auto, cloudProvider: .chatGPT, cloudModelID: "unused")
     XCTAssertEqual(chat.activeRequest?.route.mode, .local)
+    XCTAssertNil(files.selection, "Sending clears attachments from the next draft")
+    XCTAssertNil(chat.selectedSession?.workspace)
+    XCTAssertEqual(chat.presentationMessages.first?.attachments, [MessageAttachment(name: "MyProject", isDirectory: true)])
     await fulfillment(of: [finished], timeout: 3)
     token.cancel()
     let calls = await inference.count
@@ -180,6 +183,7 @@ final class FileModeUITests: XCTestCase {
     let handoff = try XCTUnwrap(files.prepareProtectedCloudDraft())
     XCTAssertEqual(handoff.prompt, "Update code.swift")
     XCTAssertEqual(handoff.modelID, "configured-codex")
+    XCTAssertEqual(files.selection?.attachments.first?.name, "MyProject", "Explicit cloud handoff restores the original attachment")
     XCTAssertNil(chat.activeRequest)
     XCTAssertFalse(files.isWorking)
     XCTAssertNil(files.protectedWrite)
@@ -239,13 +243,13 @@ final class FileModeUITests: XCTestCase {
     window.displayIfNeeded()
     let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
     view.cacheDisplay(in: view.bounds, to: bitmap)
-    let pinkPixels = (0..<bitmap.pixelsWide).reduce(0) { total, x in
+    let greenPixels = (0..<bitmap.pixelsWide).reduce(0) { total, x in
       total + (0..<bitmap.pixelsHigh).filter { y in
         guard let color = bitmap.colorAt(x: x, y: y)?.usingColorSpace(.deviceRGB) else { return false }
-        return color.redComponent > 0.6 && color.greenComponent < 0.5 && color.blueComponent > 0.2
+        return color.greenComponent > 0.45 && color.greenComponent > color.redComponent * 1.3 && color.greenComponent > color.blueComponent * 1.15
       }.count
     }
-    XCTAssertGreaterThan(pinkPixels, 100)
+    XCTAssertGreaterThan(greenPixels, 100)
     let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
     try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-FileMode-Preview.png"))
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")

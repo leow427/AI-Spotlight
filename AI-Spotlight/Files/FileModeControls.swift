@@ -7,8 +7,8 @@ struct FileModeToolButton: View {
   var body: some View {
     Button(action: activate) {
       Image("FileMode").renderingMode(.template).resizable().scaledToFit()
-        .foregroundStyle(Color.pink).frame(width: 22, height: 22).padding(4)
-        .background(Color.pink.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+        .foregroundStyle(files.selection != nil || files.isPicking ? Color.green : .white).frame(width: 22, height: 22).padding(4)
+        .background(files.selection != nil || files.isPicking ? Color.green.opacity(0.12) : Color.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
     }
     .buttonStyle(.plain).disabled(isBusy || files.isPicking || files.isWorking)
     .accessibilityLabel("File Mode").accessibilityValue(files.selection == nil ? "Off" : "On")
@@ -28,7 +28,7 @@ struct FileModeAttachmentView: View {
       if let selection = files.selection {
         ForEach(selection.attachments) { attachment in
           HStack(spacing: 8) {
-            Image(systemName: attachment.isDirectory ? "folder" : "doc").foregroundStyle(.pink)
+            Image(systemName: attachment.isDirectory ? "folder" : "doc").foregroundStyle(.green)
             Text("\(attachment.name) — \(access.rawValue)").font(.caption.weight(.medium)).lineLimit(1)
             Spacer(minLength: 4)
             Button { files.remove(id: attachment.id) } label: { Image(systemName: "xmark.circle.fill") }
