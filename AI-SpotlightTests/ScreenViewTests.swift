@@ -4,10 +4,56 @@ import LocalAuthentication
 import Security
 import SwiftUI
 import XCTest
+import WebKit
 @testable import PrimaryAgent
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testElasticThinkingRendersMotionAndReducedMotion() async throws {
+    XCTAssertNotNil(NSDataAsset(name: "ElasticJuggle"))
+    for reduced in [false, true] {
+      let view = NSHostingView(rootView: ThinkingIndicatorContent(reduceMotion: reduced)
+        .padding(16).frame(width: 200, height: 96).background(NatureGlass.canvas))
+      let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 96),
+        styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = view
+      defer { window.contentView = nil }
+      view.layoutSubtreeIfNeeded()
+      let web = try XCTUnwrap(descendants(view).compactMap { $0 as? WKWebView }.first)
+      let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+      var ready = false
+      repeat {
+        ready = (try? await web.evaluateJavaScript("document.readyState === 'complete' && !!document.querySelector('.ej-still')")) as? Bool == true
+        if !ready { await Task.yield() }
+      } while !ready && ContinuousClock.now < deadline
+      XCTAssertTrue(ready, "The bundled SVG must finish loading")
+      let motionDisplay = try await web.evaluateJavaScript("getComputedStyle(document.querySelector('.ej-motion')).display") as? String
+      let stillDisplay = try await web.evaluateJavaScript("getComputedStyle(document.querySelector('.ej-still')).display") as? String
+      XCTAssertEqual(motionDisplay == "none", reduced)
+      XCTAssertEqual(stillDisplay == "none", !reduced)
+      _ = try await web.evaluateJavaScript("document.querySelector('svg').pauseAnimations(); document.querySelector('svg').setCurrentTime(0); true")
+      let first = try await web.takeSnapshot(configuration: nil)
+      let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(first.cgImage(forProposedRect: nil, context: nil, hints: nil)))
+      let visible = (0..<bitmap.pixelsWide).reduce(0) { count, x in
+        count + (0..<bitmap.pixelsHigh).filter { y in (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.2 }.count
+      }
+      XCTAssertGreaterThan(visible, 10, "Juggle artwork must render, not a blank web view")
+      if !reduced {
+        _ = try await web.evaluateJavaScript("document.querySelector('svg').setCurrentTime(1); true")
+        let next = try await web.takeSnapshot(configuration: nil)
+        XCTAssertNotEqual(first.tiffRepresentation, next.tiffRepresentation, "The supplied juggle must change across its timeline")
+      }
+      let preview = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: preview)
+      let png = try XCTUnwrap(preview.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/engima-Thinking-\(reduced ? "Still" : "Animated").png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = reduced ? "Thinking · Reduce Motion" : "Thinking · elastic juggle"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+  }
+
   func testLiquidGlassSettingsAndAssetsRender() throws {
     for name in ["ForestBackdrop", "TemplateAttachment"] {
       let image = try XCTUnwrap(NSImage(named: name))

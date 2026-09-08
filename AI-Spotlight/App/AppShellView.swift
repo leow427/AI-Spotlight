@@ -672,7 +672,7 @@ struct AppShellView: View {
               .id(message.id)
           }
           if localChat.isWaitingForResponse && localChat.presentationMessages.last?.role != .assistant {
-            LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false)
+            ThinkingStatusView().allowsHitTesting(false)
           }
         }
         .padding(24)
@@ -1219,7 +1219,7 @@ struct LocalMessageView: View {
       } else {
         VStack(alignment: .leading, spacing: 8) {
           if message.content.isEmpty {
-            if isThinking { LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false) }
+            if isThinking { ThinkingStatusView().allowsHitTesting(false) }
           } else {
             Text(renderedMarkdown).font(ChatTypography.body).lineSpacing(4).textSelection(.enabled)
           }
@@ -1721,8 +1721,45 @@ struct SettingsView: View {
 }
 
 
-private struct LeafThinkingView: NSViewRepresentable {
+struct ThinkingStatusView: View {
   @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+  var body: some View { ThinkingIndicatorContent(reduceMotion: reduceMotion) }
+}
+
+struct ThinkingIndicatorContent: View {
+  let reduceMotion: Bool
+
+  var body: some View {
+    HStack(spacing: 2) {
+      ElasticJuggleView(reduceMotion: reduceMotion).frame(width: 80, height: 64).accessibilityHidden(true)
+      Text("Thinking")
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(.white.opacity(0.45))
+        .overlay {
+          if !reduceMotion {
+            GeometryReader { geometry in
+              TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+                let progress = timeline.date.timeIntervalSinceReferenceDate
+                  .truncatingRemainder(dividingBy: 2) / 2
+                LinearGradient(colors: [.clear, .white, .clear], startPoint: .leading, endPoint: .trailing)
+                  .frame(width: 32)
+                  .offset(x: -32 + (geometry.size.width + 64) * progress)
+              }
+            }
+            .mask(Text("Thinking").font(.system(size: 14, weight: .medium)))
+            .accessibilityHidden(true)
+          }
+        }
+    }
+    .fixedSize()
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Thinking")
+  }
+}
+
+private struct ElasticJuggleView: NSViewRepresentable {
+  let reduceMotion: Bool
 
   func makeNSView(context: Context) -> WKWebView {
     let configuration = WKWebViewConfiguration()
@@ -1736,8 +1773,8 @@ private struct LeafThinkingView: NSViewRepresentable {
   func updateNSView(_ view: WKWebView, context: Context) {
     guard view.identifier?.rawValue != String(reduceMotion) else { return }
     view.identifier = NSUserInterfaceItemIdentifier(String(reduceMotion))
-    guard let asset = NSDataAsset(name: "LeafThinking"), let svg = String(data: asset.data, encoding: .utf8) else { return }
-    let reducedStyle = reduceMotion ? ".leaf-cycle,.leaf-sway,.stem-grow,.leaf-unfurl,.leaf-tilt { animation: none !important; opacity: 1; transform: none; }" : ""
+    guard let asset = NSDataAsset(name: "ElasticJuggle"), let svg = String(data: asset.data, encoding: .utf8) else { return }
+    let reducedStyle = reduceMotion ? ".ej-motion { display: none !important; } .ej-still { display: inline !important; }" : ""
     view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(reducedStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
   }
 }
