@@ -489,7 +489,7 @@ struct AppShellView: View {
     }) { _ in
       VStack(alignment: .leading, spacing: 16) {
         Text("Replace Selection").font(.headline)
-        Text("Review or edit the text that will replace the original selection.").font(.caption)
+        Text("Review or edit the text to paste into the source app’s current selection.").font(.caption)
         TextEditor(text: $replacementText).font(.body).scrollContentBackground(.hidden)
         HStack {
           Button("Cancel") { replacementMessage = nil }
@@ -1355,7 +1355,7 @@ private struct KeyboardShortcutsHelpView: View {
             Text("Normal").tag(0.35)
             Text("Relaxed").tag(0.5)
           }
-          Text("Highlight text in another app, then tap the chosen key twice by itself (Option by default). Context stays in a temporary chat and follows your selected model and Web Search settings. Replace Selection checks the original field and selected text again before editing. Browser editors can use a verified copy-and-paste fallback. Changing the source selection invalidates replacement. Password fields are excluded.")
+          Text("Highlight text in another app, then tap the chosen key twice by itself (Option by default). Context stays in a temporary chat and follows your selected model and Web Search settings. Replace Selection pastes into the selection currently active in the source app. Your clipboard is preserved. Password fields are excluded.")
             .font(.caption).foregroundStyle(.secondary)
           Label(selectionAccess.isGranted ? "Accessibility enabled" : "Accessibility permission required",
                 systemImage: selectionAccess.isGranted ? "checkmark.circle" : "hand.raised")

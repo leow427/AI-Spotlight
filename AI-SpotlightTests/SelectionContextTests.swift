@@ -5,88 +5,119 @@ import XCTest
 
 @MainActor
 final class SelectionContextTests: XCTestCase {
-  func testCopiedBrowserSelectionNeverReusesHiddenPlaceholderRange() {
-    let placeholder = CFRange(location: 0, length: 1)
-    XCTAssertNil(SelectionReplacementPolicy.rangeForReplacement(placeholder, usedCopy: true, hasWebDocument: true))
-    XCTAssertNil(SelectionReplacementPolicy.rangeForReplacement(CFRange(location: 0, length: 0), usedCopy: true, hasWebDocument: true))
-    XCTAssertEqual(SelectionReplacementPolicy.rangeForReplacement(placeholder, usedCopy: false, hasWebDocument: true)?.length, 1)
-    XCTAssertEqual(SelectionReplacementPolicy.rangeForReplacement(placeholder, usedCopy: true, hasWebDocument: false)?.length, 1)
-  }
-
-  func testCanvasAnchorRequiresCopiedSelectionAndIdentifiedEditableDocument() {
-    for url in ["https://docs.google.com/document/d/test/edit", "https://mail.google.com/mail/u/0/#drafts/test", "file:///tmp/test.html"] {
-      XCTAssertTrue(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "selected words",
-        hasDocument: true, documentURL: url, editable: true))
-    }
-    for url: String? in [nil, "", "about:blank", "javascript:void(0)"] {
-      XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "selected words",
-        hasDocument: true, documentURL: url, editable: true))
-    }
-    for copied: String? in [nil, "", " \n\u{00a0}"] {
-      XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: copied,
-        hasDocument: true, documentURL: "https://docs.google.com/document/d/test/edit", editable: true))
-    }
-    XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "words",
-      hasDocument: false, documentURL: "https://example.com", editable: true))
-    XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "words",
-      hasDocument: true, documentURL: "https://example.com", editable: false))
-    XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: true, copiedText: "words",
-      hasDocument: true, documentURL: "https://example.com", editable: true))
-  }
-
-  func testCanvasReverificationAcceptsExactCopyWithoutAnAccessibilityRange() async {
-    var copies = 0
-    let result = await SelectionCopyVerification.matches(expected: "A document passage 👋", isTargetValid: { true }, copy: {
-      copies += 1
-      return "A document passage 👋"
-    })
-    XCTAssertTrue(result)
-    XCTAssertEqual(copies, 1)
-  }
-
-  func testCanvasReverificationRefusesCopyWhenSourceAlreadyChanged() async {
-    let result = await SelectionCopyVerification.matches(expected: "same words", isTargetValid: { false }, copy: {
-      XCTFail("Do not copy from an invalidated document, window, or field")
-      return "same words"
-    })
-    XCTAssertFalse(result)
-  }
-
-  func testCanvasReverificationRejectsIdenticalTextAfterNavigationOrReselection() async {
-    var sourceIsUnchanged = true
-    var pasted = false
-    let verified = await SelectionCopyVerification.matches(expected: "same words", isTargetValid: { sourceIsUnchanged }, copy: {
-      // Navigation, or a click selecting another occurrence, during async copy.
-      sourceIsUnchanged = false
-      return "same words"
-    })
-    if verified { pasted = true }
-    XCTAssertFalse(pasted)
-  }
-
-  func testCanvasReverificationRejectsEmptyChangedOrFailedCopy() async {
-    for value: String? in [nil, "", "different", "original "] {
-      let verified = await SelectionCopyVerification.matches(expected: "original", isTargetValid: { true }, copy: { value })
-      XCTAssertFalse(verified)
-    }
-  }
-
-  func testVerifiedSelectionReplacesOnlyHighlightedTextInNativeEditorFixture() async {
+  func testPasteUsesRememberedPIDAndCurrentSelectionThenRestoresAllClipboardItems() async throws {
+    let board = NSPasteboard(name: .init(UUID().uuidString))
+    defer { board.releaseGlobally() }
+    let rich = NSPasteboardItem()
+    rich.setString("original clipboard", forType: .string)
+    rich.setData(Data("{\\rtf1 preserved}".utf8), forType: .rtf)
+    let file = NSPasteboardItem()
+    file.setString("file:///tmp/preserved.txt", forType: .fileURL)
+    board.writeObjects([rich, file])
+    let original = try XCTUnwrap(SelectionPasteboardSnapshot(board))
     let editor = NSTextView()
-    editor.string = "Before: hello 👋. After."
-    let selection = (editor.string as NSString).range(of: "hello 👋")
-    editor.setSelectedRange(selection)
-    let expected = (editor.string as NSString).substring(with: selection)
-    let verified = await SelectionCopyVerification.matches(expected: expected, isTargetValid: {
-      editor.selectedRange() == selection
-    }, copy: {
-      (editor.string as NSString).substring(with: editor.selectedRange())
-    })
-    XCTAssertTrue(verified)
-    if verified { editor.insertText("goodbye 🌍", replacementRange: editor.selectedRange()) }
-    XCTAssertEqual(editor.string, "Before: goodbye 🌍. After.")
-    XCTAssertTrue(SelectionReplacementPolicy.confirms(originalValue: "Before: hello 👋. After.", currentValue: editor.string,
-      range: CFRange(location: selection.location, length: selection.length), originalSelection: expected, replacement: "goodbye 🌍"))
+    editor.string = "Originally selected. Now selected."
+    editor.setSelectedRange((editor.string as NSString).range(of: "Now selected"))
+    var operations: [String] = []
+    let result = await SelectionPasteTransaction.perform(text: "replacement", pid: 1234, board: board,
+      isAvailable: { true }, activate: { operations.append("activate"); return true },
+      isSafeToPaste: { operations.append("password check"); return true }, postPaste: { pid in
+        XCTAssertEqual(pid, 1234)
+        XCTAssertNotNil(board.data(forType: .init("org.nspasteboard.TransientType")))
+        XCTAssertNotNil(board.data(forType: .init("org.nspasteboard.AutoGeneratedType")))
+        editor.insertText(board.string(forType: .string)!, replacementRange: editor.selectedRange())
+        operations.append("paste")
+        return true
+      }, settle: {
+        XCTAssertEqual(board.string(forType: .string), "replacement")
+        operations.append("settle")
+      })
+    XCTAssertEqual(result, .sent)
+    XCTAssertEqual(editor.string, "Originally selected. replacement.")
+    XCTAssertEqual(operations, ["activate", "password check", "paste", "settle"])
+    XCTAssertEqual(SelectionPasteboardSnapshot(board)?.items, original.items)
+  }
+
+  func testPasteAllowsCurrentInsertionPointWithoutOriginalRangeOrDocument() async {
+    let board = NSPasteboard(name: .init(UUID().uuidString))
+    defer { board.releaseGlobally() }
+    let editor = NSTextView()
+    editor.string = "New document: "
+    editor.setSelectedRange(NSRange(location: (editor.string as NSString).length, length: 0))
+    let result = await SelectionPasteTransaction.perform(text: "hello", pid: 42, board: board,
+      isAvailable: { true }, activate: { true }, isSafeToPaste: { true }, postPaste: { _ in
+        editor.insertText(board.string(forType: .string)!, replacementRange: editor.selectedRange())
+        return true
+      }, settle: {})
+    XCTAssertEqual(result, .sent)
+    XCTAssertEqual(editor.string, "New document: hello")
+    XCTAssertTrue(board.pasteboardItems?.isEmpty ?? true)
+  }
+
+  func testUnavailablePermissionOrTerminatedSourceDoesNotActivateOrTouchClipboard() async {
+    let board = NSPasteboard(name: .init(UUID().uuidString))
+    defer { board.releaseGlobally() }
+    board.setString("keep", forType: .string)
+    let count = board.changeCount
+    let result = await SelectionPasteTransaction.perform(text: "new", pid: 1, board: board,
+      isAvailable: { false }, activate: { XCTFail("Must not activate"); return true },
+      isSafeToPaste: { XCTFail("Must not inspect source"); return true },
+      postPaste: { _ in XCTFail("Must not paste"); return true }, settle: { XCTFail("Must not wait") })
+    XCTAssertEqual(result, .unavailable)
+    XCTAssertEqual(board.changeCount, count)
+  }
+
+  func testFailedActivationAndPasswordFocusPreventPasteWithoutTouchingClipboard() async {
+    for activates in [false, true] {
+      let board = NSPasteboard(name: .init(UUID().uuidString))
+      defer { board.releaseGlobally() }
+      board.setString("keep", forType: .string)
+      let count = board.changeCount
+      let result = await SelectionPasteTransaction.perform(text: "new", pid: 1, board: board,
+        isAvailable: { true }, activate: { activates }, isSafeToPaste: { false },
+        postPaste: { _ in XCTFail("Must not paste"); return true }, settle: { XCTFail("Must not wait") })
+      XCTAssertEqual(result, .unavailable)
+      XCTAssertEqual(board.changeCount, count)
+    }
+  }
+
+  func testSecureInputOrPermissionRevocationDuringActivationPreventsPaste() async {
+    let board = NSPasteboard(name: .init(UUID().uuidString))
+    defer { board.releaseGlobally() }
+    var available = true
+    let result = await SelectionPasteTransaction.perform(text: "new", pid: 1, board: board,
+      isAvailable: { available }, activate: { available = false; return true }, isSafeToPaste: { true },
+      postPaste: { _ in XCTFail("Must not paste"); return true }, settle: {})
+    XCTAssertEqual(result, .unavailable)
+  }
+
+  func testUnobservablePasteIsSentOnlyOnceAndNewClipboardCopyWins() async {
+    let board = NSPasteboard(name: .init(UUID().uuidString))
+    defer { board.releaseGlobally() }
+    board.setString("old", forType: .string)
+    var pastes = 0
+    let result = await SelectionPasteTransaction.perform(text: "new", pid: 9, board: board,
+      isAvailable: { true }, activate: { true }, isSafeToPaste: { true },
+      postPaste: { _ in pastes += 1; return true }, settle: {
+        board.clearContents()
+        board.setString("user copied something else", forType: .string)
+      })
+    XCTAssertEqual(result, .sent)
+    XCTAssertEqual(pastes, 1)
+    XCTAssertEqual(board.string(forType: .string), "user copied something else")
+  }
+
+  func testEventCreationFailureRestoresClipboardWithoutRetry() async {
+    let board = NSPasteboard(name: .init(UUID().uuidString))
+    defer { board.releaseGlobally() }
+    board.setString("keep", forType: .string)
+    var attempts = 0
+    let result = await SelectionPasteTransaction.perform(text: "new", pid: 1, board: board,
+      isAvailable: { true }, activate: { true }, isSafeToPaste: { true },
+      postPaste: { _ in attempts += 1; return false }, settle: { XCTFail("No event was posted") })
+    XCTAssertEqual(result, .eventUnavailable)
+    XCTAssertEqual(attempts, 1)
+    XCTAssertEqual(board.string(forType: .string), "keep")
   }
 
   func testReplacementReleasesPanelAndRestoresTheSameChatWindow() throws {
@@ -104,22 +135,6 @@ final class SelectionContextTests: XCTestCase {
     XCTAssertTrue(field.window === window)
     XCTAssertEqual(window.frame, frame)
     XCTAssertEqual(field.stringValue, "Keep this draft")
-  }
-
-  func testReplacementAcknowledgementRequiresExactExpectedEdit() {
-    let range = CFRange(location: 4, length: 5)
-    XCTAssertTrue(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "Say goodbye now",
-      range: range, originalSelection: "hello", replacement: "goodbye"))
-    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "Say hello now",
-      range: range, originalSelection: "hello", replacement: "goodbye"))
-    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "goodbye",
-      range: range, originalSelection: "hello", replacement: "goodbye"))
-    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: nil, currentValue: "goodbye",
-      range: range, originalSelection: "hello", replacement: "goodbye"))
-    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "Say goodbye now",
-      range: CFRange(location: 400, length: 5), originalSelection: "hello", replacement: "goodbye"))
-    XCTAssertTrue(SelectionReplacementPolicy.confirms(originalValue: "Hi 👋!", currentValue: "Hi 🌍!",
-      range: CFRange(location: 3, length: 2), originalSelection: "👋", replacement: "🌍"))
   }
 
   func testAccessibilityRequestOpensSettingsEvenWhenSystemPromptDoesNotGrantAccess() {
@@ -249,18 +264,6 @@ final class SelectionContextTests: XCTestCase {
     board.setString("temporary", forType: .string)
     snapshot.restore(board, ifUnchanged: board.changeCount)
     XCTAssertTrue(board.pasteboardItems?.isEmpty ?? true)
-  }
-
-  func testExpiredChangedOrEmptyTargetsCannotBeReplaced() {
-    let date = Date(timeIntervalSince1970: 1000)
-    XCTAssertTrue(SelectionReplacementPolicy.isFresh(capturedAt: date, now: date.addingTimeInterval(299)))
-    XCTAssertFalse(SelectionReplacementPolicy.isFresh(capturedAt: date, now: date.addingTimeInterval(300)))
-    XCTAssertFalse(SelectionReplacementPolicy.isFresh(capturedAt: date, now: date.addingTimeInterval(-1)))
-    let range = CFRange(location: 10, length: 20)
-    XCTAssertTrue(SelectionReplacementPolicy.matches(original: range, current: range))
-    XCTAssertFalse(SelectionReplacementPolicy.matches(original: range, current: CFRange(location: 11, length: 20)))
-    XCTAssertFalse(SelectionReplacementPolicy.matches(original: range, current: CFRange(location: 10, length: 0)))
-    XCTAssertFalse(SelectionReplacementPolicy.matches(original: CFRange(location: 0, length: 0), current: CFRange(location: 0, length: 0)))
   }
 
   func testContextIsBudgetedWithoutChangingPromptOrSerializingSourceText() throws {

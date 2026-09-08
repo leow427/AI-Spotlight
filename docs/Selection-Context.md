@@ -60,86 +60,47 @@ including rich text, images and file data. If a representation cannot be preserv
 or the clipboard changes during the snapshot, fallback is declined. A private
 marker distinguishes unchanged clipboard contents from a copy result. Restoration
 uses change-count ownership, so a subsequent user clipboard write wins. Keyboard,
-mouse, scroll and focus changes abort capture/replacement. Synthetic events are
+mouse, scroll and focus changes abort capture. Synthetic events are
 addressed to the source process and marked to distinguish them from user input.
 
-Replace Selection opens an editable preview of the exact replacement text and
-requires an explicit second click. It requires a verifiable editable AX field and
-original window. Native editors use the original nonempty range. Web editors such
-as Google Docs and Gmail may instead use a copy-backed selection anchor when the
-field has no usable range: capture must produce nonempty copied text, and the
-outer web document must have a stable HTTP(S) or file URL. Hidden textarea values
-are ignored when the browser reports an empty range. The outer document is tracked
-rather than an editor's `about:blank` iframe. Capabilities expire after five minutes.
-The original field, window, document identity/URL, text, editability and secure
-status must still match after activation. Range-backed targets also require the
-original range. Copy-backed targets copy again immediately before replacement and
-must match the original selection exactly. Identity is checked both before and
-after the asynchronous copy. A scoped event-metadata monitor invalidates the
-capability on external source-app typing, clicking or scrolling, including moving
-to another occurrence of identical text. It reads no text and stops at invalidation,
-discard, replacement, or expiry. The review sheet finishes dismissing and the nonactivating
-panel leaves the window server before returning focus to the source; activating
-an already-frontmost source alone does not release panel keyboard focus. Enigma
-never reselects a stale range. It uses AXSelectedText when writable in native
-editors and a guarded paste for web content, where a setter can acknowledge a
-write without editing the document. When a range is exposed, both paths check the resulting text before
-reporting success. Canvas editors may hide all resulting text; after one guarded
-paste Enigma reports "Replacement sent" and asks the user to confirm the document,
-without claiming a verified edit or retrying. Temporary replacement clipboard
-contents are marked transient/auto-generated for clipboard managers that honor
-these types. The same panel returns to display success or failure. An ambiguous write is never
-retried automatically. Read-only browser selections remain usable as context but
-cannot be replaced. A target without enough AX identity is capture-only.
+Replace Selection opens an editable preview and requires an explicit second click.
+Capture remembers the source application (including its PID) and the context ID.
+Replacement activates that same running application and sends one Cmd+V directly
+to its PID using CGEvent. The app's normal paste command acts on its **current**
+selection or insertion point. There is no original AX element, range, text,
+document/URL, continuity, or expiry requirement. Moving the selection or opening
+another document in the same source app does not revoke replacement.
+
+The review sheet closes and the floating panel releases keyboard focus before the
+source app is activated. Accessibility permission, a still-running source,
+successful activation, Secure Event Input, and the current field's password or
+protected status are checked. Unknown password status fails closed. No AX text
+write, re-copy, re-selection, or post-paste readback is performed. All clipboard
+items and representations are preserved; temporary content is tagged transient
+and auto-generated. The pasteboard stays available for 600 ms before restoration.
+A newer clipboard write wins. The same Enigma panel then returns. The notice says
+"Replacement sent" because dispatch does not prove that an external editor
+accepted the paste. A dispatched attempt consumes the replacement action and is
+never retried automatically.
 
 ## Verification and compatibility limits
 
-Automated regression tests cover solo-tap recognition and rejection, screen-edge
-placement (including negative display coordinates), all-item clipboard restoration
-and competing writes, expiry/range safety, budgeted request context, temporary-chat
-archive isolation, follow-ups and removal, local/cloud/search integration, and a
-native render of the context card. Replacement regressions also cover releasing
-the panel and restoring the same window/draft, unchanged or incorrect write
-results, out-of-bounds ranges, and UTF-16 text replacement. The build, full test suite, and analyzer are
-required before publication.
+Automated tests cover remembered-PID delivery, replacing the current selection in
+an NSTextView fixture, insertion into a different document with no selection range,
+complete clipboard restoration, transient markers, competing clipboard writes,
+failed activation, permission revocation, password/secure-input blocking, event
+creation failure, and one-shot dispatch without editor acknowledgement. Existing
+capture, shortcut, placement, temporary-chat, context-routing, and panel tests
+remain in place. Original-selection guard tests were replaced to reflect the
+explicitly requested September 9 change in behavior, not to hide failures.
 
-Interactive verification on September 8, 2026: with the signed Xcode build, the
-user invoked Selection Context and confirmed replacement in the disposable Safari
-contenteditable fixture. Computer-use inspection independently read the changed
-source value (`hello`) and Enigma’s `Selection replaced.` result. Physical global
-shortcut invocation was performed by the user because background computer-use
-keystrokes do not reproduce that macOS focus transition. A subsequent patch adds the copy-backed fallback for canvas editors. Automated
-fixtures cover copied selection without an AX range, document eligibility, identity
-changes during copy, mismatching/empty/failed copies, and exact native NSTextView
-replacement with surrounding text and Unicode preserved. Live Google Docs/Gmail
-verification remains pending: the user requested no further Safari interaction,
-and Chrome was unavailable to computer use. These fixtures do not establish
-cross-app event delivery or Google Docs/Gmail compatibility by themselves.
-
-Other cross-app permission and editing behavior still needs interactive verification
-with the **stably signed Xcode app**. Do not launch the unsigned verification app
-for that purpose. App-hosted unit tests do not establish that every version of
-Chrome, Safari/Google Docs, Notes, Word, VS Code, Xcode or Slack exposes the same
-Accessibility attributes. Some apps need their own accessibility mode enabled.
-Unsupported or unverifiable fields intentionally attach nothing or disable
-replacement rather than guess. macOS clipboard copying/pasting has no universal
-completion acknowledgement: fallbacks wait at most 600 ms and restore their owned
-clipboard; unusually delayed apps can fail or return an unconfirmed outcome.
-
-Interactive acceptance matrix (not claimed as completed by automated tests):
-
-| Check | Expected |
-|---|---|
-| Each listed app, with selection | Source-attributed card; natural follow-up answers |
-| No selection, including VS Code | Fresh temporary chat, no current-line capture |
-| Password fields and Secure Event Input | No text captured or replaced |
-| Option typing, Option shortcuts, long holds, mixed modifiers | No summon |
-| Secondary display, menu bar/Dock edges | Panel fits visible frame near pointer |
-| Existing rich text/image/file/multiple-item clipboard | Restored after copy and paste |
-| New user copy or focus/selection change during fallback | User clipboard wins; operation aborts |
-| Editable selection unchanged | Explicit AX/paste replacement only after preview |
-| Read-only, moved, deleted, expired, or changed target | No replacement/paste |
-| Five saved chats, repeated invocation, app restart | Saved chats unchanged; temporary chat not restored |
+The September 8 signed Safari editor test verified the previous paste route.
+The simplified September 9 route has automated coverage; live Google Docs,
+Gmail, and Word verification remains pending. Do not infer universal compatibility
+from unit tests. Safari was left alone at the user's request. Use the stably signed
+Xcode build for future interactive checks, never the unsigned verification host.
+Some editors may delay or reject paste; the clipboard has no universal consumption
+acknowledgement, so unusually delayed apps may not receive the temporary text.
 
 API references: [Apple AXSelectedText](https://developer.apple.com/documentation/applicationservices/kaxselectedtextattribute)
 and [Apple event monitoring](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/EventOverview/MonitoringEvents/MonitoringEvents.html).
