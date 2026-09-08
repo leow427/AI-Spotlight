@@ -28,12 +28,14 @@ final class SettingsWindowController: NSWindowController {
 
   init(contentView: NSView) {
     let window = NSWindow(
-      contentRect: NSRect(x: 0, y: 0, width: 560, height: 740),
+      contentRect: NSRect(x: 0, y: 0, width: 820, height: 680),
       styleMask: [.titled, .closable, .miniaturizable],
       backing: .buffered,
       defer: false
     )
-    window.title = "AI Spotlight Settings"
+    window.title = "engima Settings"
+    window.appearance = NSAppearance(named: .darkAqua)
+    window.titlebarAppearsTransparent = true
     // Apply the same best-effort capture exclusion as the chat panel.
     window.sharingType = .none
     // Match the chat panel's level so Settings can appear in front without hiding it.

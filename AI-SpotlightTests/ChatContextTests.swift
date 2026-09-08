@@ -119,10 +119,10 @@ final class ChatContextTests: XCTestCase {
       ChatMessage(role: .user, content: "What did I ask you to remember?"),
     ]
     let formatted = try format(messages, template: "chatml")
-    XCTAssertEqual(formatted, "<|im_start|>user\nRemember blåbær<|im_end|>\n<|im_start|>assistant\nI will remember blåbær<|im_end|>\n<|im_start|>user\nWhat did I ask you to remember?<|im_end|>\n<|im_start|>assistant\n")
+    XCTAssertEqual(formatted, "<|im_start|>user\n\(ChatResponseStyle.instructions)\n\nRemember blåbær<|im_end|>\n<|im_start|>assistant\nI will remember blåbær<|im_end|>\n<|im_start|>user\nWhat did I ask you to remember?<|im_end|>\n<|im_start|>assistant\n")
     let other = try format([ChatMessage(role: .user, content: "Separate chat")], template: "chatml")
     XCTAssertFalse(other.contains("blåbær"))
-    XCTAssertEqual(other, "<|im_start|>user\nSeparate chat<|im_end|>\n<|im_start|>assistant\n")
+    XCTAssertEqual(other, "<|im_start|>user\n\(ChatResponseStyle.instructions)\n\nSeparate chat<|im_end|>\n<|im_start|>assistant\n")
   }
 
   func testNativeFormatterDoesNotSilentlyDropHistoryForUnsupportedTemplates() throws {
@@ -142,5 +142,59 @@ final class ChatContextTests: XCTestCase {
 
   private func format(_ messages: [ChatMessage], template: String) throws -> String {
     try LocalChatBridge.formatted(messages, template: template)
+  }
+}
+
+final class ChatMarkdownTests: XCTestCase {
+  func testRepairsClearFormattingAndWhitespace() {
+    XCTAssertEqual(ChatResponseNormalizer.normalize("\\### Heading"), "### Heading")
+    XCTAssertEqual(ChatResponseNormalizer.normalize(#"\* item"#), "* item")
+    XCTAssertEqual(ChatResponseNormalizer.normalize(#"1\. item"#), "1. item")
+    XCTAssertEqual(ChatResponseNormalizer.normalize(#"\> quote"#), "> quote")
+    XCTAssertEqual(ChatResponseNormalizer.normalize(#"\*\*bold\*\* and \*italic\*"#), "**bold** and *italic*")
+    XCTAssertEqual(ChatResponseNormalizer.normalize("a\u{00a0}b\u{202f}c\u{200b}\r\nd"), "a b c\nd")
+  }
+
+  func testPreservesCodePathsAndAmbiguousEscapes() {
+    for input in [#"C:\Users\leo\notes.md"#, #"\\server\share\*.txt"#, #"Use \n or \d+ and an unmatched \*"#,
+                  "`\\*literal\\*` and ``a ` \\###``", "    \\* code\u{00a0}  ",
+                  "```swift\n\\### code\u{00a0}\n```", "~~~\n\\* code\n~~~",
+                  "```\n\\### unfinished", "`\\*unfinished", "`code\n\\*literal\\*\nend`", "``code\n\\### untouched\nend``"] {
+      XCTAssertEqual(ChatResponseNormalizer.normalize(input), input)
+    }
+  }
+
+  func testRenderedPathsKeepLiteralBackslashes() {
+    for path in [#"C:\Users\leo\*.txt"#, #"\\server\share\_notes"#, #".\folder\file.txt"#] {
+      XCTAssertEqual(ChatMarkdown.blocks("Path: " + path).map { String($0.text.characters) }.joined(), "Path: " + path)
+    }
+    XCTAssertEqual(ChatResponseNormalizer.normalize("\\#\\#\\# Heading"), "### Heading")
+    XCTAssertEqual(ChatResponseNormalizer.normalize(#"\[Example\]\(https://example.com\)"#), "[Example](https://example.com)")
+  }
+
+  func testNormalizationIsIdempotentAndStreamingSafe() {
+    let source = "\\### Heading\n\n\\*\\*bold\\*\\*\n\n```swift\nlet path = #\"C:\\temp\"#\n```"
+    for count in 0...source.count {
+      let prefix = String(source.prefix(count))
+      let normalized = ChatResponseNormalizer.normalize(prefix)
+      XCTAssertEqual(ChatResponseNormalizer.normalize(normalized), normalized)
+      _ = ChatMarkdown.blocks(prefix)
+    }
+  }
+
+  func testFullMarkdownParserProducesSemanticBlocksAndInlineStyles() throws {
+    let blocks = ChatMarkdown.blocks("# Heading\n\n- **bold** and *italic* and `code` and [link](https://example.com)\n- second\n\n3. third\n\n> quote\n\n```swift\nlet path = #\"C:\\temp\"#\n```\n\n| A | B |\n|---|---|\n| x | y |")
+    let kinds = blocks.flatMap { $0.components.map(\.kind) }
+    XCTAssertTrue(kinds.contains(.header(level: 1)))
+    XCTAssertTrue(kinds.contains(.unorderedList))
+    XCTAssertTrue(kinds.contains(.orderedList))
+    XCTAssertTrue(kinds.contains(.blockQuote))
+    XCTAssertTrue(kinds.contains(.codeBlock(languageHint: "swift")))
+    XCTAssertEqual(blocks.filter { $0.components.contains { if case .tableCell = $0.kind { return true }; return false } }.count, 4)
+    let runs = blocks.flatMap { Array($0.text.runs) }
+    XCTAssertTrue(runs.contains { $0.inlinePresentationIntent?.contains(.stronglyEmphasized) == true })
+    XCTAssertTrue(runs.contains { $0.inlinePresentationIntent?.contains(.emphasized) == true })
+    XCTAssertTrue(runs.contains { $0.inlinePresentationIntent?.contains(.code) == true })
+    XCTAssertTrue(runs.contains { $0.link == URL(string: "https://example.com") })
   }
 }

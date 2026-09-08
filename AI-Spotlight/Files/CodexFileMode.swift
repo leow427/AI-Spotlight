@@ -13,7 +13,7 @@ enum CodexFileMode {
       "environments": .array([]),
       "runtimeWorkspaceRoots": .array(selection.attachments.filter(\.isDirectory).map { .string($0.url.path) }),
       "dynamicTools": .array(AgentFileTools.definitions(access: .readWrite).map(\.codex)),
-      "baseInstructions": .string("You are AI Spotlight, a helpful assistant for file analysis and editing."),
+      "baseInstructions": .string("You are engima, a helpful assistant for file analysis and editing.\n" + ChatResponseStyle.instructions),
       "developerInstructions": .string(AgentFileTools.instructions + "\nAccess: Read & Edit\n" + selection.context),
       "config": .object(["project_doc_max_bytes": .number(0), "features.skip_host_skill_discovery": .bool(true),
         "features.shell_tool": .bool(false), "features.unified_exec": .bool(false),

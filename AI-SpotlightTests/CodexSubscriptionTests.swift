@@ -273,6 +273,7 @@ final class CodexSubscriptionTests: XCTestCase {
     let requests = await transport.recordedRequests
     let thread = try XCTUnwrap(requests.first { $0.method == "thread/start" })
     XCTAssertEqual(thread.params["model"].string, "gpt-5.6-luna")
+    XCTAssertTrue(thread.params["baseInstructions"].string?.contains(ChatResponseStyle.instructions) == true)
     let turn = try XCTUnwrap(requests.first { $0.method == "turn/start" })
     XCTAssertEqual(turn.params["threadId"].string, "thread-one")
     XCTAssertEqual(turn.params["effort"].string, "ultra")

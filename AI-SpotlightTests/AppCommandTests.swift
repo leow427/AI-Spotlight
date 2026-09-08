@@ -4,6 +4,53 @@ import XCTest
 @testable import PrimaryAgent
 
 final class AppCommandTests: XCTestCase {
+  func testDoubleControlRequiresTwoShortTapsAndResetsAfterToggling() {
+    var gesture = ControlDoubleTap()
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 1.08))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 62, modifiers: .control, timestamp: 1.18))
+    XCTAssertTrue(gesture.flagsChanged(keyCode: 62, modifiers: [], timestamp: 1.25))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 1.3))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 1.35))
+  }
+
+  func testDoubleControlRejectsSlowTapsHoldsAndOtherModifiers() {
+    var gesture = ControlDoubleTap()
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 2))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 2.1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 2.2))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 3))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [.control, .shift], timestamp: 3.2))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.3))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 3.4))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.45))
+    gesture.reset() // Typing, clicking, or leaving the panel cancels pending taps.
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 3.5))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.55))
+  }
+
+  @MainActor
+  func testDoubleControlWorksWhileEditingWithoutChangingDraft() throws {
+    let field = NSTextField(string: "Keep my unsent text")
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(field.window)
+    XCTAssertTrue(window.makeFirstResponder(field))
+    let delivered = expectation(forNotification: .sidebarToggleRequested, object: nil)
+    for (time, flags) in [(1.0, NSEvent.ModifierFlags.control), (1.05, []), (1.15, .control), (1.2, [])] {
+      let event = try XCTUnwrap(NSEvent.keyEvent(with: .flagsChanged, location: .zero,
+        modifierFlags: flags, timestamp: time, windowNumber: window.windowNumber,
+        context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 59))
+      window.sendEvent(event)
+    }
+    wait(for: [delivered], timeout: 1)
+    XCTAssertEqual(field.stringValue, "Keep my unsent text")
+    XCTAssertTrue(controller.isVisible)
+  }
+
   func testMenuCommandsHaveExpectedOrderAndTitles() {
     XCTAssertEqual(
       AppCommand.allCases.map(\.rawValue),
