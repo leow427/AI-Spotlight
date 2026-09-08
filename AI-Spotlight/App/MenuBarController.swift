@@ -18,8 +18,8 @@ final class MenuBarController: NSObject {
       logo?.size = NSSize(width: 18, height: 18)
       logo?.isTemplate = true
       button.image = logo
-      button.setAccessibilityLabel("AI Spotlight")
-      button.toolTip = "AI Spotlight"
+      button.setAccessibilityLabel("engima")
+      button.toolTip = "engima"
     }
 
     let menu = NSMenu()

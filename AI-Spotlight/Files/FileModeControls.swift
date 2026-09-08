@@ -7,7 +7,7 @@ struct FileModeToolButton: View {
   var body: some View {
     Button(action: activate) {
       Image("TemplateAttachment").renderingMode(.template).resizable().scaledToFit()
-        .foregroundStyle(files.selection != nil || files.isPicking ? NatureGlass.accent : NatureGlass.primary).frame(width: 24, height: 24).frame(width: 44, height: 44)
+        .foregroundStyle(files.selection != nil || files.isPicking ? NatureGlass.accent : NatureGlass.primary).frame(width: 20, height: 20).frame(width: 36, height: 36)
         .background(files.selection != nil || files.isPicking ? NatureGlass.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
     }
     .buttonStyle(.plain).disabled(isBusy || files.isPicking || files.isWorking)

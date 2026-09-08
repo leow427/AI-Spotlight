@@ -19,11 +19,11 @@ final class ScreenViewTests: XCTestCase {
       codexAvailable: { false })
     for destination in SettingsView.SettingsDestination.allCases {
       let view = NSHostingView(rootView: SettingsView(settings: settings, initialDestination: destination))
-      let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 740), styleMask: [.borderless], backing: .buffered, defer: false)
+      let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 680), styleMask: [.borderless], backing: .buffered, defer: false)
       window.contentView = view
       defer { window.contentView = nil }
       view.layoutSubtreeIfNeeded()
-      XCTAssertEqual(view.fittingSize, NSSize(width: 900, height: 740))
+      XCTAssertEqual(view.fittingSize, NSSize(width: 820, height: 680))
       let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
       view.cacheDisplay(in: view.bounds, to: bitmap)
       let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
@@ -516,6 +516,28 @@ final class ScreenViewTests: XCTestCase {
     }
     window.setContentSize(NSSize(width: 752, height: 462))
 
+    screen.draft = "Preserve this draft while toggling history"
+    NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
+    await Task.yield()
+    view.layoutSubtreeIfNeeded()
+    let hiddenBitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: hiddenBitmap)
+    let hiddenText = try await ScreenOCRService().recognize(XCTUnwrap(hiddenBitmap.cgImage)).text.lowercased()
+    XCTAssertTrue(hiddenText.contains("help"), "Help must remain visible without the sidebar")
+    XCTAssertEqual(screen.draft, "Preserve this draft while toggling history")
+    XCTAssertEqual(chat.selectedSessionID, session)
+    let hiddenPNG = try XCTUnwrap(hiddenBitmap.representation(using: .png, properties: [:]))
+    try hiddenPNG.write(to: URL(fileURLWithPath: "/tmp/engima-Hidden-Sidebar.png"))
+    let hiddenAttachment = XCTAttachment(data: hiddenPNG, uniformTypeIdentifier: "public.png")
+    hiddenAttachment.name = "Hidden history with accessible Help"
+    hiddenAttachment.lifetime = .keepAlways
+    add(hiddenAttachment)
+    NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
+    await Task.yield()
+    try await assertPanelControls(view, phase: "sidebar restored")
+    XCTAssertEqual(chat.selectedSessionID, session)
+    screen.draft = ""
+
     // The layout failure is also reachable on a first blocked request; it
     // depends on the detail's measurement, not a global submission counter.
     screen.draft = "Describe the colors in this diagram."
@@ -616,7 +638,7 @@ final class ScreenViewTests: XCTestCase {
     })
     let historyFrame = view.convert(history.bounds, from: history)
     XCTAssertFalse(history.isHiddenOrHasHiddenAncestor)
-    XCTAssertGreaterThan(historyFrame.width, 180)
+    XCTAssertGreaterThanOrEqual(historyFrame.width, 176)
     XCTAssertLessThan(historyFrame.width, 270)
     XCTAssertEqual(historyFrame.minY, 12, accuracy: 1, "Inset sidebar moved during \(phase)")
     XCTAssertEqual(historyFrame.height, view.bounds.height - 24, accuracy: 1)

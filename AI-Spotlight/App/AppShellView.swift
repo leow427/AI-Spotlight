@@ -254,6 +254,7 @@ struct AppShellView: View {
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
+  @State private var isSidebarVisible = true
   @State private var selectedMode = ChatMode.auto
   @FocusState private var isComposerFocused: Bool
 
@@ -284,12 +285,15 @@ struct AppShellView: View {
 
       GeometryReader { geometry in
         HStack(spacing: 0) {
-          sidebar(compact: geometry.size.width < 900)
-            .frame(width: min(360, max(220, geometry.size.width * 0.3)))
+          if isSidebarVisible {
+            sidebar(compact: geometry.size.width < 900)
+              .frame(width: min(288, max(200, geometry.size.width * 0.27)))
+          }
           // Bound detail measurement so wrapped notices cannot push the
           // composer outside a small panel.
           GeometryReader { _ in
             VStack(spacing: 0) {
+              if !isSidebarVisible { hiddenSidebarNavigation }
               conversation
 
               VStack(alignment: .trailing, spacing: 8) {
@@ -357,6 +361,9 @@ struct AppShellView: View {
 
   private var observedShell: some View {
     shellLayout
+    .onReceive(NotificationCenter.default.publisher(for: .sidebarToggleRequested)) { _ in
+      isSidebarVisible.toggle()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .fileModeRequested)) { _ in
       activateFileMode(from: .keyboard)
     }
@@ -476,24 +483,44 @@ struct AppShellView: View {
 
   private var welcomeBackground: some View { ForestBackdrop() }
 
+  private var hiddenSidebarNavigation: some View {
+    HStack(spacing: 12) {
+      Button { isSidebarVisible = true } label: { Image(systemName: "sidebar.left") }
+        .accessibilityLabel("Show chat history").help("Show chat history · double-tap Control")
+      Button { isHelpPresented = true } label: { Label("Help", systemImage: "questionmark.circle") }
+      Spacer()
+      Button(action: openSettings) { Image(systemName: "gearshape") }.accessibilityLabel("Settings")
+      Button { NotificationCenter.default.post(name: .newChatRequested, object: nil) } label: {
+        Image(systemName: "square.and.pencil")
+      }.accessibilityLabel("New chat")
+    }
+    .font(.system(size: 13))
+    .buttonStyle(.borderless)
+    .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 4)
+  }
+
   private func sidebar(compact: Bool) -> some View {
     ScrollView {
       VStack(alignment: .leading, spacing: 24) {
-        HStack(spacing: compact ? 6 : 12) {
+        HStack(spacing: compact ? 4 : 12) {
           Image("SpotlightLogo").renderingMode(.template).resizable().scaledToFit()
-            .foregroundStyle(NatureGlass.accent).frame(width: compact ? 32 : 56, height: compact ? 32 : 56).accessibilityHidden(true)
-          Text(compact ? "Spotlight" : "AI Spotlight").font(.system(size: compact ? 16 : 23, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            .foregroundStyle(NatureGlass.accent).frame(width: compact ? 28 : 40, height: compact ? 28 : 40).accessibilityHidden(true)
+          Text("engima").font(.system(size: compact ? 15 : 19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
           Spacer(minLength: 0)
+          Button { isSidebarVisible = false } label: {
+            Image(systemName: "sidebar.left").font(.system(size: 14)).frame(width: 24, height: 32)
+          }.buttonStyle(NatureButtonStyle()).accessibilityLabel("Hide chat history")
+            .help("Hide chat history · double-tap Control")
           Button {
             NotificationCenter.default.post(name: .newChatRequested, object: nil)
           } label: {
-            Image(systemName: "square.and.pencil").font(.system(size: 21))
-              .foregroundStyle(NatureGlass.accent).frame(width: 44, height: 44)
+            Image(systemName: "square.and.pencil").font(.system(size: 17))
+              .foregroundStyle(NatureGlass.accent).frame(width: 36, height: 36)
               .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
               .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.19)) }
           }.buttonStyle(NatureButtonStyle()).accessibilityLabel("New chat")
         }
-        .padding(.horizontal, 8)
+        .padding(.horizontal, compact ? 0 : 8)
 
         VStack(spacing: 4) {
           if localChat.sessions.isEmpty {
@@ -513,16 +540,16 @@ struct AppShellView: View {
           Divider().overlay(NatureGlass.secondary.opacity(0.25)).padding(.horizontal, 16)
           Button { isHelpPresented = true } label: {
             Label("Help", systemImage: "questionmark.circle")
-              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 52).contentShape(Rectangle())
+              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
           }.buttonStyle(NatureButtonStyle())
           Button(action: openSettings) {
             Label("Settings", systemImage: "gearshape")
-              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 52).contentShape(Rectangle())
+              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
           }.buttonStyle(NatureButtonStyle())
           DeveloperToolsView(glassAppearance: glassAppearance, advisor: modelAdvisor, chat: localChat)
             .padding(.vertical, 16)
         }
-        .font(.system(size: compact ? 14 : 16))
+        .font(.system(size: compact ? 13 : 14))
         .padding(.horizontal, compact ? 12 : 24)
       }
       .padding(.horizontal, 8)
@@ -535,18 +562,18 @@ struct AppShellView: View {
 
   private func sidebarRow(title: String, date: Date? = nil, selected: Bool, compact: Bool, action: @escaping () -> Void) -> some View {
     Button(action: action) {
-      HStack(spacing: compact ? 12 : 24) {
-        Image(systemName: "bubble.left").font(.system(size: 20)).frame(width: 24)
+      HStack(spacing: compact ? 10 : 16) {
+        Image(systemName: "bubble.left").font(.system(size: 16)).frame(width: 20)
           .foregroundStyle(selected ? NatureGlass.accent : NatureGlass.primary)
         VStack(alignment: .leading, spacing: 3) {
-          Text(title).font(.system(size: compact ? 14 : 17, weight: selected ? .medium : .regular)).lineLimit(1)
+          Text(title).font(.system(size: compact ? 13 : 14, weight: selected ? .medium : .regular)).lineLimit(1)
           if let date {
-            Text(date, format: .dateTime.month(.abbreviated).day()).font(.system(size: 13)).foregroundStyle(NatureGlass.secondary)
+            Text(date, format: .dateTime.month(.abbreviated).day()).font(.system(size: 11)).foregroundStyle(NatureGlass.secondary)
           }
         }
         Spacer(minLength: 0)
       }
-      .padding(.horizontal, compact ? 12 : 24).frame(height: compact ? 52 : (date == nil ? 60 : 68))
+      .padding(.horizontal, compact ? 12 : 24).frame(height: compact ? 42 : (date == nil ? 46 : 52))
       .background(selected ? NatureGlass.accent.opacity(0.14) : .clear, in: Capsule())
       .overlay { if selected { Capsule().strokeBorder(NatureGlass.accent.opacity(0.2)) } }
       .overlay(alignment: .leading) {
@@ -567,7 +594,7 @@ struct AppShellView: View {
       TextField("Ask anything...", text: Binding(
         get: { localChat.pendingUserMessage == nil ? screen.draft : "" },
         set: { screen.draft = $0 }), axis: .vertical)
-        .font(.system(size: compact ? 15 : 18))
+        .font(.system(size: compact ? 14 : 15))
         .textFieldStyle(.plain)
         .lineLimit(1...5)
         .focused($isComposerFocused)
@@ -582,7 +609,7 @@ struct AppShellView: View {
           Image(systemName: "chevron.down").font(.system(size: 10))
         }
         .font(.system(size: 14, weight: .medium))
-        .padding(.horizontal, compact ? 8 : 12).frame(height: compact ? 40 : 48)
+        .padding(.horizontal, compact ? 8 : 12).frame(height: compact ? 32 : 38)
         .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.1)) }
       }.buttonStyle(NatureButtonStyle()).fixedSize().accessibilityLabel("Mode and model")
@@ -591,9 +618,9 @@ struct AppShellView: View {
         if isResponding { localChat.stopStreaming() } else { submitDraft() }
       } label: {
         Image(systemName: isResponding ? "stop.fill" : "paperplane.fill")
-          .font(.system(size: 21, weight: .medium))
+          .font(.system(size: 14, weight: .medium))
           .foregroundStyle(NatureGlass.canvas)
-          .frame(width: compact ? 44 : 56, height: compact ? 44 : 56)
+          .frame(width: compact ? 36 : 44, height: compact ? 36 : 44)
           .background(NatureGlass.accent, in: Circle())
           .overlay { Circle().strokeBorder(.white.opacity(0.48)) }
       }
@@ -602,7 +629,7 @@ struct AppShellView: View {
         || screen.isBusy || files.isWorking || files.isPicking))
       .accessibilityLabel(isResponding ? "Stop response" : "Send message")
     }
-    .padding(.leading, 12).padding(.trailing, compact ? 12 : 16).padding(.vertical, compact ? 12 : 16)
+    .padding(.leading, 12).padding(.trailing, compact ? 10 : 12).padding(.vertical, compact ? 10 : 12)
     .modifier(NatureGlassSurface(radius: 44, enabled: glassAppearance.isEnabled, clarity: glassAppearance.clarity))
     .overlay {
       if localChat.activeRequest != nil { ThinkingComposerGlow().allowsHitTesting(false) }
@@ -616,18 +643,18 @@ struct AppShellView: View {
     if localChat.presentationMessages.isEmpty && localChat.activeRequest == nil {
       GeometryReader { geometry in
         let compact = geometry.size.height < 370
-        VStack(spacing: compact ? 12 : 32) {
+        VStack(spacing: compact ? 12 : 24) {
           Spacer(minLength: 8)
           if geometry.size.height >= 250 {
             Image("SpotlightLogo")
               .renderingMode(.template).resizable().scaledToFit()
-              .frame(width: compact ? 92 : 160, height: compact ? 92 : 160)
+              .frame(width: compact ? 72 : 120, height: compact ? 72 : 120)
               .foregroundStyle(NatureGlass.accent)
               .shadow(color: NatureGlass.accent.opacity(0.22), radius: 16)
               .accessibilityHidden(true)
           }
           Text("How can I help?")
-            .font(.system(size: compact ? 26 : 42, weight: .semibold)).tracking(-0.8)
+            .font(.system(size: compact ? 23 : 32, weight: .semibold)).tracking(-0.8)
           compactModeControls
           if selectedMode == .local && localChat.installedModel == nil {
             Button("Choose GGUF Model") { isModelImporterPresented = true }
@@ -831,8 +858,8 @@ struct AppShellView: View {
       ForEach(ChatMode.allCases) { mode in
         Button { selectedMode = mode } label: {
           Label(mode.displayName, systemImage: mode.systemImage)
-            .font(.system(size: 17, weight: .medium))
-            .frame(maxWidth: .infinity).frame(height: 48)
+            .font(.system(size: 14, weight: .medium))
+            .frame(maxWidth: .infinity).frame(height: 38)
             .foregroundStyle(selectedMode == mode ? NatureGlass.canvas : NatureGlass.primary)
             .background(selectedMode == mode ? NatureGlass.accent : .clear, in: Capsule())
         }
@@ -840,7 +867,7 @@ struct AppShellView: View {
         .accessibilityAddTraits(selectedMode == mode ? .isSelected : [])
       }
     }
-    .padding(8).frame(maxWidth: 400)
+    .padding(8).frame(maxWidth: 320)
     .modifier(NatureGlassSurface(radius: 32, enabled: glassAppearance.isEnabled, clarity: glassAppearance.clarity))
     .padding(.horizontal, 16)
     .accessibilityLabel("Routing mode")
@@ -1152,7 +1179,7 @@ struct AppShellView: View {
 }
 
 enum ChatTypography {
-  static let body = Font.system(size: 15)
+  static let body = Font.system(size: 14)
   static let label = Font.system(size: 11, weight: .semibold)
 }
 
@@ -1191,10 +1218,6 @@ struct LocalMessageView: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
       } else {
         VStack(alignment: .leading, spacing: 8) {
-          HStack(spacing: 6) {
-            Circle().fill(NatureGlass.accent).frame(width: 5, height: 5).accessibilityHidden(true)
-            Text("AI Spotlight").font(ChatTypography.label).foregroundStyle(.secondary)
-          }
           if message.content.isEmpty {
             if isThinking { LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false) }
           } else {
@@ -1258,7 +1281,7 @@ private struct KeyboardShortcutsHelpView: View {
         VStack(alignment: .leading, spacing: 16) {
           Text("Anywhere on your Mac")
             .font(.headline)
-          shortcut("Show or hide AI Spotlight", keys: "⌥ Space")
+          shortcut("Show or hide engima", keys: "⌥ Space")
           shortcut("Open Advanced Settings", keys: "⌥ S")
 
           Divider()
@@ -1270,6 +1293,7 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Open or close Mode & Model", keys: "⌘ K")
           shortcut("Stop the response", keys: "⌘ .")
           shortcut("Next recent chat", keys: "⌃ Tab")
+          shortcut("Show or hide chat history", keys: "⌃ twice")
           shortcut("Open Settings", keys: "⌘ ,")
           shortcut("Send from the message field", keys: "Return")
           shortcut("Hide inactive tools", keys: "⇧ ⌘ H")
@@ -1406,14 +1430,14 @@ struct SettingsView: View {
       VStack(alignment: .leading, spacing: 28) {
         HStack(spacing: 12) {
           Image("SpotlightLogo").renderingMode(.template).resizable().scaledToFit()
-            .frame(width: 44, height: 44).foregroundStyle(NatureGlass.accent)
-          Text("Settings").font(.system(size: 24, weight: .semibold))
+            .frame(width: 36, height: 36).foregroundStyle(NatureGlass.accent)
+          Text("Settings").font(.system(size: 20, weight: .semibold))
         }.padding(.horizontal, 12)
         VStack(spacing: 8) {
           ForEach(SettingsDestination.allCases) { item in
             Button { destination = item } label: {
               Label(item.rawValue, systemImage: item.symbol)
-                .font(.system(size: 16, weight: .medium))
+                .font(.system(size: 14, weight: .medium))
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(16)
                 .background(destination == item ? NatureGlass.accent.opacity(0.14) : .clear, in: Capsule())
@@ -1423,12 +1447,12 @@ struct SettingsView: View {
           }
         }
         Spacer()
-        Text("AI Spotlight").font(.caption).foregroundStyle(NatureGlass.secondary).padding(16)
+        Text("engima").font(.caption).foregroundStyle(NatureGlass.secondary).padding(16)
       }
-      .padding(16).frame(width: 240)
+      .padding(12).frame(width: 208)
       .natureSurface(navigation: true).padding(12)
       VStack(alignment: .leading, spacing: 8) {
-        Text(destination.rawValue).font(.system(size: 30, weight: .semibold)).padding(.horizontal, 20).padding(.top, 24)
+        Text(destination.rawValue).font(.system(size: 24, weight: .semibold)).padding(.horizontal, 20).padding(.top, 24)
         Text(destination == .local ? "Intelligence, right on your Mac." : "Connect your models and the web.")
           .foregroundStyle(NatureGlass.secondary).padding(.horizontal, 20)
         Group {
@@ -1445,7 +1469,7 @@ struct SettingsView: View {
       }
       .padding(.trailing, 20).padding(.bottom, 20)
     }
-    .frame(width: 900, height: 740)
+    .frame(width: 820, height: 680)
     .naturePresentation()
   }
 
@@ -1612,7 +1636,7 @@ struct SettingsView: View {
       }
     }
     .formStyle(.grouped)
-    .navigationTitle("AI Spotlight Settings")
+    .navigationTitle("engima Settings")
     .task {
       await settings.refreshChatGPTAccount()
       await settings.loadCachedModels()
@@ -1705,7 +1729,7 @@ private struct LeafThinkingView: NSViewRepresentable {
     configuration.websiteDataStore = .nonPersistent()
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.setValue(false, forKey: "drawsBackground")
-    view.setAccessibilityLabel("AI Spotlight is thinking")
+    view.setAccessibilityLabel("engima is thinking")
     return view
   }
 
