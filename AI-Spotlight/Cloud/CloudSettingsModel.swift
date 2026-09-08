@@ -214,8 +214,7 @@ final class CloudSettingsModel: ObservableObject {
 
   func hasAPIKey(for provider: CloudProviderID) -> Bool {
     guard provider != .chatGPT else { return false }
-    guard let apiKey = try? credentialStore.apiKey(for: provider) else { return false }
-    return !apiKey.isEmpty
+    return (try? credentialStore.containsAPIKey(for: provider)) ?? false
   }
 
   func saveAPIKey(_ apiKey: String, for provider: CloudProviderID) throws {

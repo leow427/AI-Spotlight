@@ -38,6 +38,7 @@ final class CloudModeTests: XCTestCase {
     XCTAssertEqual(sentRequest.value(forHTTPHeaderField: "Authorization"), "Bearer openai-secret")
     let body = try XCTUnwrap(sentRequest.httpBody)
     let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
+    XCTAssertEqual(object["instructions"] as? String, ChatResponseStyle.instructions)
     XCTAssertEqual(object["store"] as? Bool, false)
     XCTAssertEqual(object["stream"] as? Bool, true)
     XCTAssertNil(object["previous_response_id"])
@@ -68,6 +69,7 @@ final class CloudModeTests: XCTestCase {
     let body = try XCTUnwrap(sentRequest.httpBody)
     let object = try XCTUnwrap(JSONSerialization.jsonObject(with: body) as? [String: Any])
     XCTAssertEqual(object["stream"] as? Bool, true)
+    XCTAssertEqual(object["system"] as? String, ChatResponseStyle.instructions)
     XCTAssertEqual(object["max_tokens"] as? Int, 4_096)
   }
 

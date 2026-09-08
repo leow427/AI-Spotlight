@@ -58,6 +58,7 @@ enum CodexError: LocalizedError, Equatable {
   case notInstalled
   case notSignedIn
   case invalidResponse
+  case fileModePreparationFailed(Int32)
   case disconnected
   case timedOut
   case browserUnavailable
@@ -70,7 +71,9 @@ enum CodexError: LocalizedError, Equatable {
     case .notSignedIn:
       "Sign in with ChatGPT in Settings to use your plan's Codex allowance."
     case .invalidResponse:
-      "Codex returned an unsupported response. Update the Codex CLI and try again."
+      "AI Spotlight could not read the Codex response. Try again."
+    case .fileModePreparationFailed(let status):
+      "AI Spotlight could not prepare Codex File Mode (startup check exited with code \(status)). Restart AI Spotlight and try again."
     case .disconnected:
       "The Codex connection closed. Try again; if it persists, update the Codex CLI."
     case .timedOut:
@@ -88,13 +91,17 @@ struct CodexRuntimeConfiguration: Sendable {
       .appending(path: "AI Spotlight/Codex", directoryHint: .isDirectory)
   )
 
+  static let fileMode = CodexRuntimeConfiguration(directory: live.directory, allowsFileTools: true)
+
   let directory: URL
+  var allowsFileTools = false
 
   static func executableURL(environment: [String: String] = ProcessInfo.processInfo.environment) -> URL? {
     let home = FileManager.default.homeDirectoryForCurrentUser.path
     let candidates = [environment["AI_SPOTLIGHT_CODEX_PATH"]].compactMap { $0 }
       + ["/opt/homebrew/bin/codex", "/usr/local/bin/codex", "\(home)/.local/bin/codex",
-         "/Applications/Codex.app/Contents/Resources/codex"]
+         "/Applications/Codex.app/Contents/Resources/codex",
+         "/Applications/ChatGPT.app/Contents/Resources/codex"]
       + (environment["PATH"] ?? "").split(separator: ":").map { "\($0)/codex" }
     return candidates.first { $0.hasPrefix("/") && FileManager.default.isExecutableFile(atPath: $0) }
       .map { URL(fileURLWithPath: $0) }
@@ -119,7 +126,10 @@ struct CodexRuntimeConfiguration: Sendable {
       "features.apps=false", "features.plugins=false", "features.remote_plugin=false",
       "features.hooks=false", "features.multi_agent=false", "features.browser_use=false",
       "features.computer_use=false", "features.image_generation=false", "features.view_image=false",
-      "features.skill_search=false", "tools.view_image=false",
+      "features.skill_search=false", "tools.view_image=false", "project_doc_max_bytes=0",
+      "features.skip_host_skill_discovery=true", "features.workspace_dependencies=false",
+      "features.code_mode=false", "features.code_mode_host=\(allowsFileTools)", "features.artifact=false",
+      "features.memories=false", "features.tool_suggest=false", "features.goals=false",
     ]
     return ["app-server", "--listen", "stdio://"] + overrides.flatMap { ["-c", $0] }
   }
@@ -128,10 +138,20 @@ struct CodexRuntimeConfiguration: Sendable {
 protocol CodexRPCTransport: Sendable {
   func request(_ method: String, params: CodexValue) async throws -> CodexValue
   func notifications() async throws -> CodexNotificationSubscription
+  func prepareFileMode() async throws
+  func setFileHandler(threadID: String, handler: CodexServerRequestHandler?) async throws
+}
+
+extension CodexRPCTransport {
+  func prepareFileMode() async throws { throw FileModeError.operation("This Codex connection does not support File Mode.") }
+  func setFileHandler(threadID: String, handler: CodexServerRequestHandler?) async throws {
+    if handler != nil { throw FileModeError.inactive }
+  }
 }
 
 actor CodexAppServer: CodexRPCTransport {
   static let shared = CodexAppServer()
+  static let fileMode = CodexAppServer(configuration: .fileMode)
 
   private let configuration: CodexRuntimeConfiguration
   private let executable: @Sendable () -> URL?
@@ -144,6 +164,9 @@ actor CodexAppServer: CodexRPCTransport {
   private var generation = UUID()
   private var buffer = Data()
   private var nextID = 0
+  private var fileHandlers: [String: CodexServerRequestHandler] = [:]
+  private var fileCalls: [String: Task<CodexValue, Never>] = [:]
+  private var fileModeVerified = false
   private var pending: [Int: CheckedContinuation<CodexValue, Error>] = [:]
   private var timeouts: [Int: Task<Void, Never>] = [:]
   private var observers: [UUID: AsyncThrowingStream<CodexNotification, Error>.Continuation] = [:]
@@ -177,6 +200,74 @@ actor CodexAppServer: CodexRPCTransport {
     })
   }
 
+  func prepareFileMode() async throws {
+    if fileModeVerified { return }
+    guard let executableURL = executable() else { throw CodexError.notInstalled }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ai-spotlight-schema-" + UUID().uuidString)
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let process = Process()
+    process.executableURL = executableURL
+    process.arguments = ["app-server", "generate-json-schema", "--out", directory.path, "--experimental"]
+    // Match the app-server isolation. Xcode's injected libraries and the user's CLI
+    // environment must not leak into this short-lived compatibility check.
+    try FileManager.default.createDirectory(at: configuration.directory, withIntermediateDirectories: true)
+    process.environment = configuration.environment
+    process.currentDirectoryURL = directory
+    process.standardInput = FileHandle.nullDevice
+    process.standardOutput = FileHandle.nullDevice
+    process.standardError = FileHandle.nullDevice
+    try process.run()
+    let deadline = ContinuousClock.now.advanced(by: .seconds(20))
+    do {
+      while process.isRunning {
+        try Task.checkCancellation()
+        guard ContinuousClock.now < deadline else { throw CodexError.timedOut }
+        try await Task.sleep(for: .milliseconds(50))
+      }
+      guard process.terminationStatus == 0 else { throw CodexError.fileModePreparationFailed(process.terminationStatus) }
+      try CodexFileModeSupport.validateSchema(at: directory)
+      fileModeVerified = true
+    } catch {
+      if process.isRunning { process.terminate() }
+      throw error
+    }
+  }
+
+  func setFileHandler(threadID: String, handler: CodexServerRequestHandler?) {
+    fileHandlers[threadID] = handler
+    if handler == nil {
+      for key in fileCalls.keys.filter({ $0.hasPrefix(threadID + ":") }) {
+        fileCalls.removeValue(forKey: key)?.cancel()
+      }
+    }
+  }
+
+  private func receiveServerRequest(_ message: CodexValue, method: String) {
+    let params = message["params"]
+    let threadID = params["threadId"].string ?? ""
+    guard let handler = fileHandlers[threadID] else {
+      try? write(.object(["id": message["id"], "error": .object([
+        "code": .number(-32601), "message": .string("Unsupported by AI Spotlight")])]))
+      return
+    }
+    let generation = generation
+    // Deduplicate native tool call IDs so a replay cannot apply an edit twice.
+    let key = threadID + ":" + (params["callId"].string ?? UUID().uuidString)
+    let task: Task<CodexValue, Never>
+    if let existing = fileCalls[key] { task = existing }
+    else {
+      guard fileCalls.count < 256 else { close(with: FileModeError.tooLarge); return }
+      task = Task { await handler(method, params) }
+      fileCalls[key] = task
+    }
+    Task {
+      let result = await task.value
+      guard generation == self.generation else { return }
+      try? write(.object(["id": message["id"], "result": result]))
+    }
+  }
+
   func disconnect() {
     close(with: CodexError.disconnected)
   }
@@ -191,7 +282,7 @@ actor CodexAppServer: CodexRPCTransport {
         "clientInfo": .object([
           "name": .string("ai_spotlight"), "title": .string("AI Spotlight"), "version": .string("1.0"),
         ]),
-        "capabilities": .object(["experimentalApi": .bool(false)]),
+        "capabilities": .object(["experimentalApi": .bool(true)]),
       ]))
       try write(.object(["method": .string("initialized")]))
     }
@@ -294,11 +385,7 @@ actor CodexAppServer: CodexRPCTransport {
       }
       if let method = message["method"].string {
         if message["id"] != .null {
-          // This text-only client never approves tools, permissions, or external actions.
-          try? write(.object([
-            "id": message["id"],
-            "error": .object(["code": .number(-32601), "message": .string("Unsupported by AI Spotlight")]),
-          ]))
+          receiveServerRequest(message, method: method)
         } else {
           let notification = CodexNotification(method: method, params: message["params"])
           for observer in observers.values { observer.yield(notification) }
@@ -339,5 +426,8 @@ actor CodexAppServer: CodexRPCTransport {
     for id in Array(pending.keys) { finish(id, result: .failure(error)) }
     for observer in observers.values { observer.finish(throwing: error) }
     observers.removeAll()
+    fileHandlers.removeAll()
+    for task in fileCalls.values { task.cancel() }
+    fileCalls.removeAll()
   }
 }

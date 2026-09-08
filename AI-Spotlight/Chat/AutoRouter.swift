@@ -29,7 +29,7 @@ struct AutoRouter: Sendable {
       case .noLocalModel:
         "Choose a local model or connect Cloud before using Auto."
       case .unavailableCapability(.webSearch):
-        "This request needs a web-capable cloud model, which is not configured."
+        "Enable Web Search with the search icon or /search to look this up with Brave."
       case .unavailableCapability(.coding):
         "No available model is configured for this coding request."
       case .unavailableCapability(.advancedReasoning):
@@ -87,25 +87,36 @@ struct AutoRouter: Sendable {
 
   struct Request: Equatable, Sendable {
     let selectedMode: ChatMode
+    let webSearchEnabled: Bool
     let prompt: String
     let contextMessages: [ChatMessage]
     let localModel: LocalModel?
     let localCapabilities: ModelCapabilities
+    let additionalInputTokens: Int
     let cloud: CloudConfiguration?
 
     init(
       selectedMode: ChatMode,
+      webSearchEnabled: Bool = false,
       prompt: String,
       contextMessages: [ChatMessage],
       localModel: LocalModel?,
-      localCapabilities: ModelCapabilities = .localDefault,
+      localCapabilities: ModelCapabilities? = nil,
+      additionalInputTokens: Int = 0,
       cloud: CloudConfiguration?
     ) {
       self.selectedMode = selectedMode
+      self.webSearchEnabled = webSearchEnabled
       self.prompt = prompt
       self.contextMessages = contextMessages
       self.localModel = localModel
-      self.localCapabilities = localCapabilities
+      self.additionalInputTokens = max(0, min(additionalInputTokens, 1_000_000))
+      self.localCapabilities = localCapabilities ?? ModelCapabilities(
+        maximumContextTokens: localModel?.visionConfiguration?.contextWindow
+          ?? localModel?.catalogDescriptor?.recommendedContextSize ?? ModelContextPolicy.localContextWindow,
+        supportsCoding: localModel?.catalogDescriptor?.supportsVision == true,
+        supportsWebSearch: false,
+        reasoningLevel: localModel?.catalogDescriptor?.supportsVision == true ? .advanced : .basic)
       self.cloud = cloud
     }
   }
@@ -136,6 +147,15 @@ struct AutoRouter: Sendable {
   }
 
   static func decide(_ request: Request) -> Decision {
+    let decision = decideModel(request)
+    guard request.webSearchEnabled, let route = decision.route else { return decision }
+    return Decision(
+      route: Route(mode: route.mode, providerID: route.providerID, modelID: route.modelID, usesNetwork: true),
+      modelDisplayName: decision.modelDisplayName, reason: decision.reason, limitation: decision.limitation
+    )
+  }
+
+  private static func decideModel(_ request: Request) -> Decision {
     switch request.selectedMode {
     case .local:
       guard let localModel = request.localModel else {
@@ -173,7 +193,7 @@ struct AutoRouter: Sendable {
   ) -> Decision {
     let prompt = request.prompt.lowercased()
 
-    if requiresWebSearch(prompt) {
+    if requiresWebSearch(prompt), !request.webSearchEnabled {
       guard cloud.capabilities.supportsWebSearch else {
         return Decision(
           route: nil,
@@ -192,7 +212,7 @@ struct AutoRouter: Sendable {
     )
     // This is a cheap conservative routing estimate. Local acceptance uses the
     // selected GGUF's real template/tokenizer and effective runtime context.
-    let localInputCount = candidateMessages.reduce(0) { $0 + $1.content.utf8.count + 32 }
+    let localInputCount = candidateMessages.reduce(request.additionalInputTokens) { $0 + $1.content.utf8.count + 32 }
     if localInputCount > localBudget.availableInputTokens {
       var cloudBudget = ModelContextPolicy.cloud(provider: cloud.provider, modelID: cloud.modelID)
       cloudBudget = ContextBudget(

@@ -10,6 +10,13 @@ enum CodexThinkingCapacity: String, CaseIterable, Identifiable, Sendable {
   case max
   case ultra
 
+  var forExtendedThinking: Self {
+    switch self {
+    case .none, .minimal, .low, .medium, .high: .xhigh
+    case .xhigh, .max, .ultra: self
+    }
+  }
+
   var id: Self { self }
 
   var displayName: String {
@@ -30,6 +37,7 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
   case chatGPT = "chatgpt-codex"
   case openAI = "openai"
   case anthropic
+  case gemini
 
   var id: Self { self }
 
@@ -38,6 +46,7 @@ enum CloudProviderID: String, Codable, CaseIterable, Identifiable, Sendable {
     case .chatGPT: "ChatGPT via Codex"
     case .openAI: "OpenAI"
     case .anthropic: "Anthropic"
+    case .gemini: "Gemini"
     }
   }
 }
@@ -85,9 +94,16 @@ enum CloudProviderError: LocalizedError, Equatable, Sendable {
 }
 
 protocol CloudCredentialStore: Sendable {
+  func containsAPIKey(for provider: CloudProviderID) throws -> Bool
   func apiKey(for provider: CloudProviderID) throws -> String?
   func setAPIKey(_ apiKey: String, for provider: CloudProviderID) throws
   func removeAPIKey(for provider: CloudProviderID) throws
+}
+
+extension CloudCredentialStore {
+  func containsAPIKey(for provider: CloudProviderID) throws -> Bool {
+    try apiKey(for: provider)?.isEmpty == false
+  }
 }
 
 enum CloudNetworkEvent: Sendable, Equatable {

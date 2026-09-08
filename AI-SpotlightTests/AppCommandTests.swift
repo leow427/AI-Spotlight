@@ -1,8 +1,56 @@
 import AppKit
+@preconcurrency import Carbon
 import XCTest
 @testable import PrimaryAgent
 
 final class AppCommandTests: XCTestCase {
+  func testDoubleControlRequiresTwoShortTapsAndResetsAfterToggling() {
+    var gesture = ControlDoubleTap()
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 1.08))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 62, modifiers: .control, timestamp: 1.18))
+    XCTAssertTrue(gesture.flagsChanged(keyCode: 62, modifiers: [], timestamp: 1.25))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 1.3))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 1.35))
+  }
+
+  func testDoubleControlRejectsSlowTapsHoldsAndOtherModifiers() {
+    var gesture = ControlDoubleTap()
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 2))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 2.1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 2.2))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 3))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.1))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [.control, .shift], timestamp: 3.2))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.3))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 3.4))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.45))
+    gesture.reset() // Typing, clicking, or leaving the panel cancels pending taps.
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: .control, timestamp: 3.5))
+    XCTAssertFalse(gesture.flagsChanged(keyCode: 59, modifiers: [], timestamp: 3.55))
+  }
+
+  @MainActor
+  func testDoubleControlWorksWhileEditingWithoutChangingDraft() throws {
+    let field = NSTextField(string: "Keep my unsent text")
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(field.window)
+    XCTAssertTrue(window.makeFirstResponder(field))
+    let delivered = expectation(forNotification: .sidebarToggleRequested, object: nil)
+    for (time, flags) in [(1.0, NSEvent.ModifierFlags.control), (1.05, []), (1.15, .control), (1.2, [])] {
+      let event = try XCTUnwrap(NSEvent.keyEvent(with: .flagsChanged, location: .zero,
+        modifierFlags: flags, timestamp: time, windowNumber: window.windowNumber,
+        context: nil, characters: "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: 59))
+      window.sendEvent(event)
+    }
+    wait(for: [delivered], timeout: 1)
+    XCTAssertEqual(field.stringValue, "Keep my unsent text")
+    XCTAssertTrue(controller.isVisible)
+  }
+
   func testMenuCommandsHaveExpectedOrderAndTitles() {
     XCTAssertEqual(
       AppCommand.allCases.map(\.rawValue),
@@ -55,6 +103,39 @@ final class AppCommandTests: XCTestCase {
       .newChat
     )
     XCTAssertNil(PanelShortcut.resolve(characters: "n", modifiers: []))
+  }
+
+  func testHideInactiveToolsShortcutRequiresCommandShiftH() {
+    XCTAssertEqual(PanelShortcut.resolve(characters: "H", modifiers: [.command, .shift]), .hideInactiveTools)
+    XCTAssertEqual(PanelShortcut.resolve(characters: "h", modifiers: [.command, .shift, .capsLock]), .hideInactiveTools)
+    XCTAssertNil(PanelShortcut.resolve(characters: "h", modifiers: .command))
+    XCTAssertNil(PanelShortcut.resolve(characters: "h", modifiers: .shift))
+    XCTAssertNil(PanelShortcut.resolve(characters: "h", modifiers: [.command, .option, .shift]))
+  }
+
+  @MainActor
+  func testHideInactiveToolsShortcutWorksWhileTypingWithoutChangingDraft() throws {
+    let field = NSTextField(string: "Keep my unsent text")
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(field.window)
+    XCTAssertTrue(window.makeFirstResponder(field))
+    let delivered = expectation(forNotification: .hideInactiveToolsRequested, object: nil)
+    let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+      modifierFlags: [.command, .shift], timestamp: 0, windowNumber: window.windowNumber,
+      context: nil, characters: "H", charactersIgnoringModifiers: "h", isARepeat: false, keyCode: 4))
+    XCTAssertTrue(window.performKeyEquivalent(with: event))
+    wait(for: [delivered], timeout: 1)
+    XCTAssertEqual(field.stringValue, "Keep my unsent text")
+    XCTAssertTrue(controller.isVisible)
+  }
+
+  func testGlobalHotKeysUseOptionSpaceAndOptionS() {
+    XCTAssertEqual(GlobalHotKey.togglePanel.keyCode, UInt32(kVK_Space))
+    XCTAssertEqual(GlobalHotKey.togglePanel.modifiers, UInt32(optionKey))
+    XCTAssertEqual(GlobalHotKey.openSettings.keyCode, UInt32(kVK_ANSI_S))
+    XCTAssertEqual(GlobalHotKey.openSettings.modifiers, UInt32(optionKey))
   }
 
   func testPanelSizeStoreUsesDefaultAndPersistsOnlySize() {

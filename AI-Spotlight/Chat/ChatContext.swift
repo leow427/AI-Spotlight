@@ -80,9 +80,12 @@ enum ChatContextPreparer {
     budget: ContextBudget,
     countTokens: ([ChatMessage]) throws -> Int
   ) throws -> PreparedConversation {
-    guard let current = messages.last, current.role == .user,
+    guard var current = messages.last, current.role == .user,
           !current.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw ChatContextError.missingCurrentPrompt
+    }
+    if current.extendedThinking == true, !current.content.hasPrefix(ThinkCommand.guidance) {
+      current.content = ThinkCommand.guidance + "\n\n" + current.content
     }
     var retained = [current]
     var tokenCount = try countTokens(retained)
@@ -142,6 +145,7 @@ enum CloudContext {
   }
 
   static func prepare(_ request: ChatRequest) throws -> PreparedConversation {
+    try ScreenRequestGuard.validateCloud(request)
     guard let provider = CloudProviderID(rawValue: request.route.providerID) else {
       throw CloudProviderError.invalidResponse
     }
@@ -151,7 +155,14 @@ enum CloudContext {
     return try ChatContextPreparer.prepare(
       request.messages,
       budget: ModelContextPolicy.cloud(provider: provider, modelID: request.route.modelID),
-      countTokens: { try inputTokenCount($0, provider: provider) }
+      countTokens: { try inputTokenCount($0, provider: provider) + (request.image == nil ? 0 : 4096) }
     )
   }
+}
+
+/// Shared response style guidance, independent of provider and persisted history.
+enum ChatResponseStyle {
+  static let instructions = """
+    Use clean standard Markdown for responses: headings, lists, emphasis, code, links, blockquotes, and tables when useful. Do not put backslashes before Markdown formatting characters. Preserve literal backslashes in paths and code; put code and paths in code spans or fenced code blocks.
+    """
 }

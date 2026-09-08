@@ -4,6 +4,8 @@ struct LocalModel: Codable, Sendable, Equatable, Identifiable {
   let id: String
   let displayName: String
   let fileURL: URL
+  var catalogDescriptor: LocalModelDescriptor? = nil
+  var visionConfiguration: LocalVisionConfiguration? = nil
 }
 
 struct LocalModelRequest: Sendable, Equatable {
@@ -28,7 +30,7 @@ struct LocalModelRequest: Sendable, Equatable {
     temperature: Float = 0.7
   ) {
     self.messages = messages
-    self.maximumTokenCount = maximumTokenCount
+    self.maximumTokenCount = ThinkCommand.enabled(in: messages) ? max(maximumTokenCount, 2_048) : maximumTokenCount
     self.temperature = temperature
   }
 }
@@ -38,6 +40,7 @@ protocol LocalModelEngine: Sendable {
   func installedModel() async -> LocalModel?
   func installedModels() async -> [LocalModel]
   func selectModel(id: String) async throws
+  func deleteModel(id: String) async throws
   func download(
     _ model: LocalModelDescriptor,
     progress: @escaping @Sendable (ModelDownloadProgress) async -> Void
@@ -45,6 +48,7 @@ protocol LocalModelEngine: Sendable {
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error>
   func unload() async
+  func benchmark() async throws -> LocalBenchmarkMetrics?
 }
 
 enum LocalInferenceError: LocalizedError, Equatable {
@@ -68,6 +72,12 @@ enum LocalInferenceError: LocalizedError, Equatable {
 }
 
 extension LocalModelEngine {
+  func deleteModel(id: String) async throws {
+    throw LocalInferenceError.bridgeFailure("This model cannot be deleted by the current local engine.")
+  }
+
+  func benchmark() async throws -> LocalBenchmarkMetrics? { nil }
+
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
     try ChatContextPreparer.prepare(
       request.messages,

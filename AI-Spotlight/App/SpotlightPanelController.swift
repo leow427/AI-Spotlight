@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct PanelSizeStore {
-  static let defaultSize = NSSize(width: 760, height: 520)
+  static let defaultSize = NSSize(width: 1200, height: 780)
   static let minimumSize = NSSize(width: 640, height: 420)
 
   private enum Key {
@@ -53,7 +53,9 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   private let panel: SpotlightPanel
   private let sizeStore: PanelSizeStore
 
-  var isVisible: Bool { panel.isVisible }
+  private(set) var isCapturingScreen = false
+  private var captureHiddenWindows: [NSWindow] = []
+  var isVisible: Bool { panel.isVisible && !isCapturingScreen }
 
   init(
     glassAppearance: GlassAppearanceSettings,
@@ -70,7 +72,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     super.init()
 
     panel.delegate = self
-    panel.title = "AI Spotlight"
+    panel.title = "engima"
     // Best-effort exclusion for capture clients that honor the legacy window flag.
     // ScreenCaptureKit may still include this window; keep it visible locally.
     panel.sharingType = .none
@@ -88,6 +90,9 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       rootView: AppShellView(glassAppearance: glassAppearance)
     )
 
+    NotificationCenter.default.addObserver(self, selector: #selector(beginScreenCapture), name: .screenCaptureBegan, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(endScreenCapture), name: .screenCaptureEnded, object: nil)
+
     panel.onHide = { [weak self] in
       self?.hide()
     }
@@ -97,9 +102,34 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func show() {
+    guard !isCapturingScreen else { return }
     centerOnActiveDisplay()
     panel.orderFrontRegardless()
     panel.makeKey()
+    NotificationCenter.default.post(name: .panelPresented, object: nil)
+  }
+
+  @objc private func beginScreenCapture() {
+    guard !isCapturingScreen else { return }
+    isCapturingScreen = true
+    captureHiddenWindows = NSApp.windows.filter { $0 !== panel && $0.isVisible }
+    captureHiddenWindows.forEach { $0.orderOut(nil) }
+    // Removing the panel from the window server avoids capturing it and gives
+    // SwiftUI a fresh compositor surface when the panel is restored. Keeping an
+    // ordered window at zero alpha can leave that surface transparent after the
+    // system screenshot picker disconnects on macOS 26.
+    panel.orderOut(nil)
+  }
+
+  @objc private func endScreenCapture() {
+    guard isCapturingScreen else { return }
+    captureHiddenWindows.forEach { $0.orderFrontRegardless() }
+    captureHiddenWindows = []
+    isCapturingScreen = false
+    panel.orderFrontRegardless()
+    panel.makeKey()
+    panel.contentView?.needsLayout = true
+    panel.contentView?.needsDisplay = true
     NotificationCenter.default.post(name: .panelPresented, object: nil)
   }
 
@@ -109,6 +139,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func toggle() {
+    guard !isCapturingScreen else { return }
     panel.isVisible ? hide() : show()
   }
 
@@ -132,6 +163,10 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
   private func perform(_ shortcut: PanelShortcut) {
     switch shortcut {
+    case .toggleSidebar:
+      NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
+    case .fileMode:
+      NotificationCenter.default.post(name: .fileModeRequested, object: nil)
     case .newChat:
       NotificationCenter.default.post(name: .newChatRequested, object: nil)
     case .modePalette:
@@ -142,16 +177,35 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       NotificationCenter.default.post(name: .recentChatCycleRequested, object: nil)
     case .settings:
       NotificationCenter.default.post(name: .settingsRequested, object: nil)
+    case .hideInactiveTools:
+      NotificationCenter.default.post(name: .hideInactiveToolsRequested, object: nil)
     }
   }
 }
 
 private final class SpotlightPanel: NSPanel {
+  private var controlDoubleTap = ControlDoubleTap()
   var onHide: (() -> Void)?
   var onShortcut: ((PanelShortcut) -> Void)?
 
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
+
+  override func sendEvent(_ event: NSEvent) {
+    if event.type == .flagsChanged {
+      if isKeyWindow && controlDoubleTap.flagsChanged(keyCode: event.keyCode, modifiers: event.modifierFlags, timestamp: event.timestamp) {
+        onShortcut?(.toggleSidebar)
+      }
+    } else if [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
+      controlDoubleTap.reset()
+    }
+    super.sendEvent(event)
+  }
+
+  override func resignKey() {
+    controlDoubleTap.reset()
+    super.resignKey()
+  }
 
   override func keyDown(with event: NSEvent) {
     guard event.keyCode != 53 else {
@@ -162,12 +216,15 @@ private final class SpotlightPanel: NSPanel {
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    controlDoubleTap.reset()
     if event.keyCode == 53 {
+      if let editor = firstResponder as? SlashCommandTextView, editor.completion?.dismiss() == true { return true }
       onHide?()
       return true
     }
     if let shortcut = PanelShortcut.resolve(
-      characters: event.charactersIgnoringModifiers,
+      characters: event.keyCode == 3 && event.modifierFlags.intersection([.shift, .option, .command, .control]) == [.shift, .option]
+        ? "f" : event.charactersIgnoringModifiers,
       modifiers: event.modifierFlags
     ) {
       onShortcut?(shortcut)

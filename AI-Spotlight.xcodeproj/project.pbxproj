@@ -3,15 +3,41 @@
 	archiveVersion = 1;
 	classes = {
 	};
-	objectVersion = 56;
+	objectVersion = 60;
 	objects = {
 
 /* Begin PBXBuildFile section */
-		C50000000000000000000004 /* CloudModelCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000003 /* CloudModelCapabilities.swift */; };
-		C50000000000000000000002 /* CloudModelSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000001 /* CloudModelSelectionTests.swift */; };
-		C30000000000000000000002 /* LocalModelInstallationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */; };
-		C40000000000000000000002 /* CloudStreamingTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40000000000000000000001 /* CloudStreamingTransportTests.swift */; };
-		B30000000000000000000002 /* RequestLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000001 /* RequestLifecycleTests.swift */; };
+		CA1200000000000000000002 /* SlashCommandComposer in Sources */ = {isa = PBXBuildFile; fileRef = CA1100000000000000000002; };
+		CA1200000000000000000001 /* SlashCommand in Sources */ = {isa = PBXBuildFile; fileRef = CA1100000000000000000001; };
+		DE1000000000000000000002 /* ChatMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000001; };
+		14069C4454E33368512BA2E9 /* WorkspaceDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */; };
+		5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */; };
+		0009134391031E5AE19F8236 /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCD3B0B99B28590527862FF /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift */; };
+		0A2F49485CA3846EE1AC4B0E /* AI-SpotlightTests/ScreenRoutingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95BC0902BF24E66AE8E86868 /* AI-SpotlightTests/ScreenRoutingTests.swift */; };
+		0AF3BC1AE08E378481D15AE6 /* AI-SpotlightTests/ScreenPipelineTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D267E54BF81B4240CEC2339 /* AI-SpotlightTests/ScreenPipelineTests.swift */; };
+		0C22F41F6C6A79FFFDD2AB4C /* AI-SpotlightTests/AppBundleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8423E65D659544F0E0BC57F6 /* AI-SpotlightTests/AppBundleTests.swift */; };
+		119F917FD36890D94019A810 /* AI-Spotlight/Files/WorkspaceWritePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 139FA002CA94953FE2BB73CF /* AI-Spotlight/Files/WorkspaceWritePolicy.swift */; };
+		1D8E6439046419E40B3F2C9E /* AI-SpotlightTests/WorkspaceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DA71017E0A573695B2D29C84 /* AI-SpotlightTests/WorkspaceTests.swift */; };
+		2F715B4E2EEB2D2248A01C88 /* AI-SpotlightTests/ScreenProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C542D9E2DAF3988DEF908F68 /* AI-SpotlightTests/ScreenProviderTests.swift */; };
+		32E976745B12847D6DFF8EE0 /* AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5EF3ECB645A8E5BE4CCF4D /* AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift */; };
+		32FDB12D7B19D9FC87A3B01D /* AI-SpotlightTests/FileModeUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 358F0E6213F24E6E5A6BF331 /* AI-SpotlightTests/FileModeUITests.swift */; };
+		3380FAAA1FD88010F2C908EE /* AI-Spotlight/LocalInference/LocalMultimodalClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E27CB37860D9B990072ECD9D /* AI-Spotlight/LocalInference/LocalMultimodalClient.swift */; };
+		3ED4FD09347F3C0EA6A0C43D /* AI-SpotlightTests/ScreenCaptureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 60390EBB47C5984E535868B3 /* AI-SpotlightTests/ScreenCaptureTests.swift */; };
+		41785BB5B087C2B0E954509E /* AI-SpotlightTests/FileModeRuntimeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6FC52FEA0B2ED0E36AEE5AD /* AI-SpotlightTests/FileModeRuntimeTests.swift */; };
+		4305A94A1AB1814FEA59FBFB /* AI-Spotlight/Screen/ScreenSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9D078BE01A99A60B0E8E696A /* AI-Spotlight/Screen/ScreenSettings.swift */; };
+		4A1B110A0BF0B8AED87B3572 /* AI-Spotlight/Screen/ScreenImagePreprocessor.swift in Sources */ = {isa = PBXBuildFile; fileRef = DC739E5346C6C117334001F2 /* AI-Spotlight/Screen/ScreenImagePreprocessor.swift */; };
+		52FB913A027D7DEBFD96E69D /* AI-SpotlightTests/ScreenViewTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF75EE2F32B58204588607B5 /* AI-SpotlightTests/ScreenViewTests.swift */; };
+		573FCAC21400EDC7D918408C /* AI-Spotlight/Files/WorkspaceAccess.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7CED3473E2C0640A46466B8F /* AI-Spotlight/Files/WorkspaceAccess.swift */; };
+		692FE1D5B808E9F46279D3EB /* AI-Spotlight/Files/CodexFileMode.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7FD7EC4D72EA2C56D79D6BAF /* AI-Spotlight/Files/CodexFileMode.swift */; };
+		749A74810619BC2371A900AB /* AI-SpotlightTests/ScreenNativeSmokeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 41B9B38819695DE62E80CBE1 /* AI-SpotlightTests/ScreenNativeSmokeTests.swift */; };
+		7558BA92C2D5C3CE65628DD2 /* AI-Spotlight/Files/LocalFileRuntimeSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = D52189CDD3B416D1EA547D5A /* AI-Spotlight/Files/LocalFileRuntimeSetup.swift */; };
+		7DA95EF27FA01D16D79D8564 /* AI-SpotlightTests/ScreenTestSupport.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6FFFAEF314B962C515678BC9 /* AI-SpotlightTests/ScreenTestSupport.swift */; };
+		82A42145C9B572B1BAFD7D74 /* AI-SpotlightTests/LocalVisionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83494E8BB06B4D31BD549663 /* AI-SpotlightTests/LocalVisionTests.swift */; };
+		83D50AC929DE904DAFAD9A60 /* AI-Spotlight/Screen/ScreenRoutingPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 719D8CBD719A760BFDB4DF71 /* AI-Spotlight/Screen/ScreenRoutingPolicy.swift */; };
+		85E2E0F86DCBFAAE24CCDACC /* AI-Spotlight/Chat/MultimodalContent.swift in Sources */ = {isa = PBXBuildFile; fileRef = 703B0466136101680BB0167F /* AI-Spotlight/Chat/MultimodalContent.swift */; };
+		8D4A4990E8B9E4E923600F9E /* AI-SpotlightTests/ScreenOCRTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3760C4828242374C1E75975C /* AI-SpotlightTests/ScreenOCRTests.swift */; };
+		905F6E0F59B1620D167CED63 /* AI-Spotlight/Screen/ScreenPromptContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = 94BB01ACD0F227248768A381 /* AI-Spotlight/Screen/ScreenPromptContext.swift */; };
+		9FD261360A6825094B8FB5CA /* AI-Spotlight/Screen/ScreenCaptureService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4CDFFE38743C4F2899C932DC /* AI-Spotlight/Screen/ScreenCaptureService.swift */; };
 		A10000000000000000000001 /* AI_SpotlightApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000001 /* AI_SpotlightApp.swift */; };
 		A10000000000000000000002 /* ApplicationDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000002 /* ApplicationDelegate.swift */; };
 		A10000000000000000000003 /* AppCommand.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000003 /* AppCommand.swift */; };
@@ -22,6 +48,34 @@
 		A10000000000000000000008 /* GlobalHotKeyMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000011 /* GlobalHotKeyMonitor.swift */; };
 		A10000000000000000000009 /* PanelShortcut.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000012 /* PanelShortcut.swift */; };
 		A1000000000000000000000A /* SpotlightPanelController.swift in Sources */ = {isa = PBXBuildFile; fileRef = A20000000000000000000013 /* SpotlightPanelController.swift */; };
+		A8D1A4BB12B6A723B10D5435 /* AI-Spotlight/Files/FileModeControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = 65367875DCBEC279D08F684E /* AI-Spotlight/Files/FileModeControls.swift */; };
+		AB0200000000000000000001 /* LocalHardwareProfile.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000001 /* LocalHardwareProfile.swift */; };
+		AB0200000000000000000002 /* LocalModelSelection.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000002 /* LocalModelSelection.swift */; };
+		AB0200000000000000000003 /* LocalModelBenchmark.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000003 /* LocalModelBenchmark.swift */; };
+		AB0200000000000000000004 /* LocalCatalogUpdates.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000004 /* LocalCatalogUpdates.swift */; };
+		AB0200000000000000000005 /* LocalModelAdvisor.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000005 /* LocalModelAdvisor.swift */; };
+		AB0200000000000000000006 /* BundledLocalModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000006 /* BundledLocalModels.swift */; };
+		AB0200000000000000000007 /* LocalModelManagerView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0100000000000000000007 /* LocalModelManagerView.swift */; };
+		AB0300000000000000000002 /* LocalModelSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AB0300000000000000000001 /* LocalModelSelectionTests.swift */; };
+		AD9DCA3F261F97353BA3A2F6 /* AI-Spotlight/Files/FileModeCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F854E7BC1B8BD8048823C508 /* AI-Spotlight/Files/FileModeCoordinator.swift */; };
+		B30000000000000000000002 /* RequestLifecycleTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B30000000000000000000001 /* RequestLifecycleTests.swift */; };
+		B5173475932912D82BC87FC7 /* AI-Spotlight/Screen/ScreenConnectivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1EE3DCA5464103C0AD1533B9 /* AI-Spotlight/Screen/ScreenConnectivity.swift */; };
+		B60000000000000000000101 /* BraveSearchClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000001 /* BraveSearchClient.swift */; };
+		B60000000000000000000102 /* WebSearchSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000002 /* WebSearchSettings.swift */; };
+		B60000000000000000000103 /* WebSearchContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000003 /* WebSearchContext.swift */; };
+		B60000000000000000000104 /* WebSearchControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000004 /* WebSearchControls.swift */; };
+		B60000000000000000000202 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000201 /* Assets.xcassets */; };
+		B60000000000000000000402 /* WebSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000401 /* WebSearchTests.swift */; };
+		BADDBDB66366EC60115687D5 /* AI-Spotlight/Screen/ScreenComposerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3AE294B06E2598E6419AF1E /* AI-Spotlight/Screen/ScreenComposerCoordinator.swift */; };
+		C10000000000000000000002 /* ChatContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* ChatContext.swift */; };
+		C20000000000000000000002 /* ChatContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* ChatContextTests.swift */; };
+		C30000000000000000000002 /* LocalModelInstallationStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */; };
+		C40000000000000000000002 /* CloudStreamingTransportTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C40000000000000000000001 /* CloudStreamingTransportTests.swift */; };
+		C461A3249BD254564E9FA9E6 /* AI-Spotlight/Files/WorkspaceService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9DB984D58DB712EC44001FDD /* AI-Spotlight/Files/WorkspaceService.swift */; };
+		C50000000000000000000002 /* CloudModelSelectionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000001 /* CloudModelSelectionTests.swift */; };
+		C50000000000000000000004 /* CloudModelCapabilities.swift in Sources */ = {isa = PBXBuildFile; fileRef = C50000000000000000000003 /* CloudModelCapabilities.swift */; };
+		CA0F234239D0AE49BA5AB66D /* AI-SpotlightTests/FileAgentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6737F803E809057721E621C7 /* AI-SpotlightTests/FileAgentTests.swift */; };
+		CB0228C45D6046A5112037B1 /* AI-Spotlight/Files/AgentFileTools.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1C6689B264C3ACCED690935 /* AI-Spotlight/Files/AgentFileTools.swift */; };
 		D10000000000000000000001 /* LocalModelEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000001 /* LocalModelEngine.swift */; };
 		D10000000000000000000002 /* LocalModelInstallationStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000002 /* LocalModelInstallationStore.swift */; };
 		D10000000000000000000003 /* LlamaCPPModelEngine.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000003 /* LlamaCPPModelEngine.swift */; };
@@ -29,12 +83,15 @@
 		D10000000000000000000005 /* LlamaBridge in Frameworks */ = {isa = PBXBuildFile; productRef = D40000000000000000000001 /* LlamaBridge */; };
 		D10000000000000000000006 /* LocalInferenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000005 /* LocalInferenceTests.swift */; };
 		D10000000000000000000007 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* ThirdPartyNotices.txt */; };
+		D837B30691584362AC890087 /* AI-Spotlight/Screen/ScreenAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C914AEA42F47A9209266F278 /* AI-Spotlight/Screen/ScreenAttachment.swift */; };
 		E10000000000000000000001 /* ChatDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* ChatDomain.swift */; };
 		E10000000000000000000002 /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* ChatSessionStore.swift */; };
 		E10000000000000000000003 /* LocalModelManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* LocalModelManifest.swift */; };
 		E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* ChatPersistenceTests.swift */; };
 		E10000000000000000000005 /* AutoRouter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000005 /* AutoRouter.swift */; };
 		E10000000000000000000006 /* AutoRouterTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000006 /* AutoRouterTests.swift */; };
+		E113237281A050519B8D8C0C /* AI-Spotlight/Screen/ScreenOCRService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F19D9F55C151327EBB896CDD /* AI-Spotlight/Screen/ScreenOCRService.swift */; };
+		E616EB8F602796CEECD7DDD4 /* AI-Spotlight/Screen/ScreenControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = F225835FFF11A442B82A63B4 /* AI-Spotlight/Screen/ScreenControls.swift */; };
 		F10000000000000000000001 /* CloudDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000001 /* CloudDomain.swift */; };
 		F10000000000000000000002 /* KeychainCredentialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000002 /* KeychainCredentialStore.swift */; };
 		F10000000000000000000003 /* CloudNetworking.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000003 /* CloudNetworking.swift */; };
@@ -46,8 +103,8 @@
 		F10000000000000000000009 /* CodexAppServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F20000000000000000000009 /* CodexAppServer.swift */; };
 		F1000000000000000000000A /* CodexSubscriptionClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000000000000000000000A /* CodexSubscriptionClient.swift */; };
 		F1000000000000000000000B /* CodexSubscriptionTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2000000000000000000000B /* CodexSubscriptionTests.swift */; };
-		C10000000000000000000002 /* ChatContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = C10000000000000000000001 /* ChatContext.swift */; };
-		C20000000000000000000002 /* ChatContextTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C20000000000000000000001 /* ChatContextTests.swift */; };
+		F368AD14CC3718DC0F973BFC /* AI-Spotlight/Cloud/GeminiContentClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 31C7C96CC8B68E10665AB266 /* AI-Spotlight/Cloud/GeminiContentClient.swift */; };
+		FF70383D00EFDC94759EC47F /* AI-Spotlight/Files/LocalFileInference.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0134D277D0D4590D1E9D4D24 /* AI-Spotlight/Files/LocalFileInference.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -61,11 +118,36 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
-		C50000000000000000000003 /* CloudModelCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelCapabilities.swift; sourceTree = "<group>"; };
-		C50000000000000000000001 /* CloudModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelSelectionTests.swift; sourceTree = "<group>"; };
-		C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelInstallationStoreTests.swift; sourceTree = "<group>"; };
-		C40000000000000000000001 /* CloudStreamingTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStreamingTransportTests.swift; sourceTree = "<group>"; };
-		B30000000000000000000001 /* RequestLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestLifecycleTests.swift; sourceTree = "<group>"; };
+		CA1100000000000000000002 /* SlashCommandComposer */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SlashCommandComposer.swift"; sourceTree = SOURCE_ROOT; };
+		CA1100000000000000000001 /* SlashCommand */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SlashCommand.swift"; sourceTree = SOURCE_ROOT; };
+		DE1000000000000000000001 /* ChatMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdown.swift; sourceTree = "<group>"; };
+		E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceDocumentTests.swift"; sourceTree = SOURCE_ROOT; };
+		933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceDocument.swift"; sourceTree = SOURCE_ROOT; };
+		0134D277D0D4590D1E9D4D24 /* AI-Spotlight/Files/LocalFileInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/LocalFileInference.swift"; sourceTree = SOURCE_ROOT; };
+		0FCD3B0B99B28590527862FF /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceWritePolicyTests.swift"; sourceTree = SOURCE_ROOT; };
+		139FA002CA94953FE2BB73CF /* AI-Spotlight/Files/WorkspaceWritePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceWritePolicy.swift"; sourceTree = SOURCE_ROOT; };
+		1EE3DCA5464103C0AD1533B9 /* AI-Spotlight/Screen/ScreenConnectivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenConnectivity.swift"; sourceTree = SOURCE_ROOT; };
+		31C7C96CC8B68E10665AB266 /* AI-Spotlight/Cloud/GeminiContentClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Cloud/GeminiContentClient.swift"; sourceTree = SOURCE_ROOT; };
+		358F0E6213F24E6E5A6BF331 /* AI-SpotlightTests/FileModeUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileModeUITests.swift"; sourceTree = SOURCE_ROOT; };
+		3760C4828242374C1E75975C /* AI-SpotlightTests/ScreenOCRTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenOCRTests.swift"; sourceTree = SOURCE_ROOT; };
+		41B9B38819695DE62E80CBE1 /* AI-SpotlightTests/ScreenNativeSmokeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenNativeSmokeTests.swift"; sourceTree = SOURCE_ROOT; };
+		4CDFFE38743C4F2899C932DC /* AI-Spotlight/Screen/ScreenCaptureService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenCaptureService.swift"; sourceTree = SOURCE_ROOT; };
+		5B5EF3ECB645A8E5BE4CCF4D /* AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift"; sourceTree = SOURCE_ROOT; };
+		5D267E54BF81B4240CEC2339 /* AI-SpotlightTests/ScreenPipelineTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenPipelineTests.swift"; sourceTree = SOURCE_ROOT; };
+		60390EBB47C5984E535868B3 /* AI-SpotlightTests/ScreenCaptureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenCaptureTests.swift"; sourceTree = SOURCE_ROOT; };
+		65367875DCBEC279D08F684E /* AI-Spotlight/Files/FileModeControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/FileModeControls.swift"; sourceTree = SOURCE_ROOT; };
+		6737F803E809057721E621C7 /* AI-SpotlightTests/FileAgentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileAgentTests.swift"; sourceTree = SOURCE_ROOT; };
+		6FFFAEF314B962C515678BC9 /* AI-SpotlightTests/ScreenTestSupport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenTestSupport.swift"; sourceTree = SOURCE_ROOT; };
+		703B0466136101680BB0167F /* AI-Spotlight/Chat/MultimodalContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Chat/MultimodalContent.swift"; sourceTree = SOURCE_ROOT; };
+		719D8CBD719A760BFDB4DF71 /* AI-Spotlight/Screen/ScreenRoutingPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenRoutingPolicy.swift"; sourceTree = SOURCE_ROOT; };
+		7CED3473E2C0640A46466B8F /* AI-Spotlight/Files/WorkspaceAccess.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceAccess.swift"; sourceTree = SOURCE_ROOT; };
+		7FD7EC4D72EA2C56D79D6BAF /* AI-Spotlight/Files/CodexFileMode.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/CodexFileMode.swift"; sourceTree = SOURCE_ROOT; };
+		83494E8BB06B4D31BD549663 /* AI-SpotlightTests/LocalVisionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/LocalVisionTests.swift"; sourceTree = SOURCE_ROOT; };
+		8423E65D659544F0E0BC57F6 /* AI-SpotlightTests/AppBundleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/AppBundleTests.swift"; sourceTree = SOURCE_ROOT; };
+		94BB01ACD0F227248768A381 /* AI-Spotlight/Screen/ScreenPromptContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenPromptContext.swift"; sourceTree = SOURCE_ROOT; };
+		95BC0902BF24E66AE8E86868 /* AI-SpotlightTests/ScreenRoutingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenRoutingTests.swift"; sourceTree = SOURCE_ROOT; };
+		9D078BE01A99A60B0E8E696A /* AI-Spotlight/Screen/ScreenSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenSettings.swift"; sourceTree = SOURCE_ROOT; };
+		9DB984D58DB712EC44001FDD /* AI-Spotlight/Files/WorkspaceService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceService.swift"; sourceTree = SOURCE_ROOT; };
 		A20000000000000000000001 /* AI_SpotlightApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AI_SpotlightApp.swift; sourceTree = "<group>"; };
 		A20000000000000000000002 /* ApplicationDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ApplicationDelegate.swift; sourceTree = "<group>"; };
 		A20000000000000000000003 /* AppCommand.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommand.swift; sourceTree = "<group>"; };
@@ -73,22 +155,57 @@
 		A20000000000000000000005 /* AppShellView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppShellView.swift; sourceTree = "<group>"; };
 		A20000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A20000000000000000000007 /* AppCommandTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppCommandTests.swift; sourceTree = "<group>"; };
+		A20000000000000000000008 /* PrimaryAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimaryAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A20000000000000000000009 /* PrimaryAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; name = PrimaryAgentTests.xctest; path = "AI SpotlightTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 		A20000000000000000000010 /* GlassAppearanceSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlassAppearanceSettings.swift; sourceTree = "<group>"; };
 		A20000000000000000000011 /* GlobalHotKeyMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotKeyMonitor.swift; sourceTree = "<group>"; };
 		A20000000000000000000012 /* PanelShortcut.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelShortcut.swift; sourceTree = "<group>"; };
 		A20000000000000000000013 /* SpotlightPanelController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SpotlightPanelController.swift; sourceTree = "<group>"; };
+		AB0100000000000000000001 /* LocalHardwareProfile.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalHardwareProfile.swift; sourceTree = "<group>"; };
+		AB0100000000000000000002 /* LocalModelSelection.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelSelection.swift; sourceTree = "<group>"; };
+		AB0100000000000000000003 /* LocalModelBenchmark.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelBenchmark.swift; sourceTree = "<group>"; };
+		AB0100000000000000000004 /* LocalCatalogUpdates.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalCatalogUpdates.swift; sourceTree = "<group>"; };
+		AB0100000000000000000005 /* LocalModelAdvisor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelAdvisor.swift; sourceTree = "<group>"; };
+		AB0100000000000000000006 /* BundledLocalModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BundledLocalModels.swift; sourceTree = "<group>"; };
+		AB0100000000000000000007 /* LocalModelManagerView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManagerView.swift; sourceTree = "<group>"; };
+		AB0300000000000000000001 /* LocalModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelSelectionTests.swift; sourceTree = "<group>"; };
+		AF75EE2F32B58204588607B5 /* AI-SpotlightTests/ScreenViewTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenViewTests.swift"; sourceTree = SOURCE_ROOT; };
+		B30000000000000000000001 /* RequestLifecycleTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RequestLifecycleTests.swift; sourceTree = "<group>"; };
+		B34E3DA6304D813D00A724CF /* AI-Spotlight.xctestplan */ = {isa = PBXFileReference; lastKnownFileType = file; path = "AI-Spotlight.xctestplan"; sourceTree = "<group>"; };
+		B60000000000000000000001 /* BraveSearchClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BraveSearchClient.swift; sourceTree = "<group>"; };
+		B60000000000000000000002 /* WebSearchSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchSettings.swift; sourceTree = "<group>"; };
+		B60000000000000000000003 /* WebSearchContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchContext.swift; sourceTree = "<group>"; };
+		B60000000000000000000004 /* WebSearchControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchControls.swift; sourceTree = "<group>"; };
+		B60000000000000000000201 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		B60000000000000000000401 /* WebSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchTests.swift; sourceTree = "<group>"; };
+		C10000000000000000000001 /* ChatContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatContext.swift; sourceTree = "<group>"; };
+		C20000000000000000000001 /* ChatContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatContextTests.swift; sourceTree = "<group>"; };
+		C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelInstallationStoreTests.swift; sourceTree = "<group>"; };
+		C40000000000000000000001 /* CloudStreamingTransportTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudStreamingTransportTests.swift; sourceTree = "<group>"; };
+		C50000000000000000000001 /* CloudModelSelectionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelSelectionTests.swift; sourceTree = "<group>"; };
+		C50000000000000000000003 /* CloudModelCapabilities.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudModelCapabilities.swift; sourceTree = "<group>"; };
+		C542D9E2DAF3988DEF908F68 /* AI-SpotlightTests/ScreenProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/ScreenProviderTests.swift"; sourceTree = SOURCE_ROOT; };
+		C914AEA42F47A9209266F278 /* AI-Spotlight/Screen/ScreenAttachment.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenAttachment.swift"; sourceTree = SOURCE_ROOT; };
 		D20000000000000000000001 /* LocalModelEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelEngine.swift; sourceTree = "<group>"; };
 		D20000000000000000000002 /* LocalModelInstallationStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelInstallationStore.swift; sourceTree = "<group>"; };
 		D20000000000000000000003 /* LlamaCPPModelEngine.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LlamaCPPModelEngine.swift; sourceTree = "<group>"; };
 		D20000000000000000000004 /* LocalChatViewModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalChatViewModel.swift; sourceTree = "<group>"; };
 		D20000000000000000000005 /* LocalInferenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalInferenceTests.swift; sourceTree = "<group>"; };
 		D20000000000000000000006 /* ThirdPartyNotices.txt */ = {isa = PBXFileReference; lastKnownFileType = text; path = ThirdPartyNotices.txt; sourceTree = "<group>"; };
+		D52189CDD3B416D1EA547D5A /* AI-Spotlight/Files/LocalFileRuntimeSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/LocalFileRuntimeSetup.swift"; sourceTree = SOURCE_ROOT; };
+		DA71017E0A573695B2D29C84 /* AI-SpotlightTests/WorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceTests.swift"; sourceTree = SOURCE_ROOT; };
+		DC739E5346C6C117334001F2 /* AI-Spotlight/Screen/ScreenImagePreprocessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenImagePreprocessor.swift"; sourceTree = SOURCE_ROOT; };
 		E20000000000000000000001 /* ChatDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDomain.swift; sourceTree = "<group>"; };
 		E20000000000000000000002 /* ChatSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionStore.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* LocalModelManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManifest.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* ChatPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPersistenceTests.swift; sourceTree = "<group>"; };
 		E20000000000000000000005 /* AutoRouter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoRouter.swift; sourceTree = "<group>"; };
 		E20000000000000000000006 /* AutoRouterTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AutoRouterTests.swift; sourceTree = "<group>"; };
+		E27CB37860D9B990072ECD9D /* AI-Spotlight/LocalInference/LocalMultimodalClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/LocalInference/LocalMultimodalClient.swift"; sourceTree = SOURCE_ROOT; };
+		E3AE294B06E2598E6419AF1E /* AI-Spotlight/Screen/ScreenComposerCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenComposerCoordinator.swift"; sourceTree = SOURCE_ROOT; };
+		E6FC52FEA0B2ED0E36AEE5AD /* AI-SpotlightTests/FileModeRuntimeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/FileModeRuntimeTests.swift"; sourceTree = SOURCE_ROOT; };
+		F19D9F55C151327EBB896CDD /* AI-Spotlight/Screen/ScreenOCRService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenOCRService.swift"; sourceTree = SOURCE_ROOT; };
+		F1C6689B264C3ACCED690935 /* AI-Spotlight/Files/AgentFileTools.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/AgentFileTools.swift"; sourceTree = SOURCE_ROOT; };
 		F20000000000000000000001 /* CloudDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudDomain.swift; sourceTree = "<group>"; };
 		F20000000000000000000002 /* KeychainCredentialStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainCredentialStore.swift; sourceTree = "<group>"; };
 		F20000000000000000000003 /* CloudNetworking.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CloudNetworking.swift; sourceTree = "<group>"; };
@@ -100,10 +217,8 @@
 		F20000000000000000000009 /* CodexAppServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexAppServer.swift; sourceTree = "<group>"; };
 		F2000000000000000000000A /* CodexSubscriptionClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSubscriptionClient.swift; sourceTree = "<group>"; };
 		F2000000000000000000000B /* CodexSubscriptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSubscriptionTests.swift; sourceTree = "<group>"; };
-		A20000000000000000000008 /* PrimaryAgent.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = PrimaryAgent.app; sourceTree = BUILT_PRODUCTS_DIR; };
-		A20000000000000000000009 /* PrimaryAgentTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = PrimaryAgentTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
-		C10000000000000000000001 /* ChatContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatContext.swift; sourceTree = "<group>"; };
-		C20000000000000000000001 /* ChatContextTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatContextTests.swift; sourceTree = "<group>"; };
+		F225835FFF11A442B82A63B4 /* AI-Spotlight/Screen/ScreenControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenControls.swift"; sourceTree = SOURCE_ROOT; };
+		F854E7BC1B8BD8048823C508 /* AI-Spotlight/Files/FileModeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/FileModeCoordinator.swift"; sourceTree = SOURCE_ROOT; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -128,6 +243,49 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				CA1100000000000000000002,
+				CA1100000000000000000001,
+				E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */,
+				933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */,
+				B34E3DA6304D813D00A724CF /* AI-Spotlight.xctestplan */,
+				0FCD3B0B99B28590527862FF /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift */,
+				139FA002CA94953FE2BB73CF /* AI-Spotlight/Files/WorkspaceWritePolicy.swift */,
+				E6FC52FEA0B2ED0E36AEE5AD /* AI-SpotlightTests/FileModeRuntimeTests.swift */,
+				D52189CDD3B416D1EA547D5A /* AI-Spotlight/Files/LocalFileRuntimeSetup.swift */,
+				358F0E6213F24E6E5A6BF331 /* AI-SpotlightTests/FileModeUITests.swift */,
+				6737F803E809057721E621C7 /* AI-SpotlightTests/FileAgentTests.swift */,
+				65367875DCBEC279D08F684E /* AI-Spotlight/Files/FileModeControls.swift */,
+				F854E7BC1B8BD8048823C508 /* AI-Spotlight/Files/FileModeCoordinator.swift */,
+				7FD7EC4D72EA2C56D79D6BAF /* AI-Spotlight/Files/CodexFileMode.swift */,
+				0134D277D0D4590D1E9D4D24 /* AI-Spotlight/Files/LocalFileInference.swift */,
+				F1C6689B264C3ACCED690935 /* AI-Spotlight/Files/AgentFileTools.swift */,
+				DA71017E0A573695B2D29C84 /* AI-SpotlightTests/WorkspaceTests.swift */,
+				9DB984D58DB712EC44001FDD /* AI-Spotlight/Files/WorkspaceService.swift */,
+				7CED3473E2C0640A46466B8F /* AI-Spotlight/Files/WorkspaceAccess.swift */,
+				8423E65D659544F0E0BC57F6 /* AI-SpotlightTests/AppBundleTests.swift */,
+				41B9B38819695DE62E80CBE1 /* AI-SpotlightTests/ScreenNativeSmokeTests.swift */,
+				AF75EE2F32B58204588607B5 /* AI-SpotlightTests/ScreenViewTests.swift */,
+				5D267E54BF81B4240CEC2339 /* AI-SpotlightTests/ScreenPipelineTests.swift */,
+				1EE3DCA5464103C0AD1533B9 /* AI-Spotlight/Screen/ScreenConnectivity.swift */,
+				94BB01ACD0F227248768A381 /* AI-Spotlight/Screen/ScreenPromptContext.swift */,
+				83494E8BB06B4D31BD549663 /* AI-SpotlightTests/LocalVisionTests.swift */,
+				5B5EF3ECB645A8E5BE4CCF4D /* AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift */,
+				6FFFAEF314B962C515678BC9 /* AI-SpotlightTests/ScreenTestSupport.swift */,
+				C542D9E2DAF3988DEF908F68 /* AI-SpotlightTests/ScreenProviderTests.swift */,
+				E27CB37860D9B990072ECD9D /* AI-Spotlight/LocalInference/LocalMultimodalClient.swift */,
+				31C7C96CC8B68E10665AB266 /* AI-Spotlight/Cloud/GeminiContentClient.swift */,
+				703B0466136101680BB0167F /* AI-Spotlight/Chat/MultimodalContent.swift */,
+				95BC0902BF24E66AE8E86868 /* AI-SpotlightTests/ScreenRoutingTests.swift */,
+				9D078BE01A99A60B0E8E696A /* AI-Spotlight/Screen/ScreenSettings.swift */,
+				719D8CBD719A760BFDB4DF71 /* AI-Spotlight/Screen/ScreenRoutingPolicy.swift */,
+				3760C4828242374C1E75975C /* AI-SpotlightTests/ScreenOCRTests.swift */,
+				DC739E5346C6C117334001F2 /* AI-Spotlight/Screen/ScreenImagePreprocessor.swift */,
+				F19D9F55C151327EBB896CDD /* AI-Spotlight/Screen/ScreenOCRService.swift */,
+				60390EBB47C5984E535868B3 /* AI-SpotlightTests/ScreenCaptureTests.swift */,
+				F225835FFF11A442B82A63B4 /* AI-Spotlight/Screen/ScreenControls.swift */,
+				E3AE294B06E2598E6419AF1E /* AI-Spotlight/Screen/ScreenComposerCoordinator.swift */,
+				4CDFFE38743C4F2899C932DC /* AI-Spotlight/Screen/ScreenCaptureService.swift */,
+				C914AEA42F47A9209266F278 /* AI-Spotlight/Screen/ScreenAttachment.swift */,
 				A70000000000000000000002 /* AI-Spotlight */,
 				A70000000000000000000005 /* AI-SpotlightTests */,
 				A70000000000000000000006 /* Products */,
@@ -141,6 +299,7 @@
 				E70000000000000000000001 /* Chat */,
 				F70000000000000000000001 /* Cloud */,
 				D70000000000000000000001 /* LocalInference */,
+				B60000000000000000000301 /* Search */,
 				A70000000000000000000004 /* Resources */,
 			);
 			path = "AI-Spotlight";
@@ -167,6 +326,7 @@
 			children = (
 				A20000000000000000000006 /* Info.plist */,
 				D20000000000000000000006 /* ThirdPartyNotices.txt */,
+				B60000000000000000000201 /* Assets.xcassets */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -175,8 +335,10 @@
 			isa = PBXGroup;
 			children = (
 				B30000000000000000000001 /* RequestLifecycleTests.swift */,
+				B60000000000000000000401 /* WebSearchTests.swift */,
 				C20000000000000000000001 /* ChatContextTests.swift */,
 				A20000000000000000000007 /* AppCommandTests.swift */,
+				AB0300000000000000000001 /* LocalModelSelectionTests.swift */,
 				D20000000000000000000005 /* LocalInferenceTests.swift */,
 				C30000000000000000000001 /* LocalModelInstallationStoreTests.swift */,
 				C40000000000000000000001 /* CloudStreamingTransportTests.swift */,
@@ -198,6 +360,17 @@
 			name = Products;
 			sourceTree = "<group>";
 		};
+		B60000000000000000000301 /* Search */ = {
+			isa = PBXGroup;
+			children = (
+				B60000000000000000000001 /* BraveSearchClient.swift */,
+				B60000000000000000000002 /* WebSearchSettings.swift */,
+				B60000000000000000000003 /* WebSearchContext.swift */,
+				B60000000000000000000004 /* WebSearchControls.swift */,
+			);
+			path = Search;
+			sourceTree = "<group>";
+		};
 		D70000000000000000000001 /* LocalInference */ = {
 			isa = PBXGroup;
 			children = (
@@ -205,6 +378,13 @@
 				D20000000000000000000003 /* LlamaCPPModelEngine.swift */,
 				D20000000000000000000002 /* LocalModelInstallationStore.swift */,
 				D20000000000000000000001 /* LocalModelEngine.swift */,
+				AB0100000000000000000001 /* LocalHardwareProfile.swift */,
+				AB0100000000000000000002 /* LocalModelSelection.swift */,
+				AB0100000000000000000003 /* LocalModelBenchmark.swift */,
+				AB0100000000000000000004 /* LocalCatalogUpdates.swift */,
+				AB0100000000000000000005 /* LocalModelAdvisor.swift */,
+				AB0100000000000000000006 /* BundledLocalModels.swift */,
+				AB0100000000000000000007 /* LocalModelManagerView.swift */,
 				E20000000000000000000003 /* LocalModelManifest.swift */,
 			);
 			path = LocalInference;
@@ -214,6 +394,7 @@
 			isa = PBXGroup;
 			children = (
 				C10000000000000000000001 /* ChatContext.swift */,
+				DE1000000000000000000001 /* ChatMarkdown.swift */,
 				E20000000000000000000001 /* ChatDomain.swift */,
 				E20000000000000000000002 /* ChatSessionStore.swift */,
 				E20000000000000000000005 /* AutoRouter.swift */,
@@ -325,6 +506,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				D10000000000000000000007 /* ThirdPartyNotices.txt in Resources */,
+				B60000000000000000000202 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -335,7 +517,38 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CA1200000000000000000002,
+				CA1200000000000000000001,
+				5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */,
+				119F917FD36890D94019A810 /* AI-Spotlight/Files/WorkspaceWritePolicy.swift in Sources */,
+				7558BA92C2D5C3CE65628DD2 /* AI-Spotlight/Files/LocalFileRuntimeSetup.swift in Sources */,
+				A8D1A4BB12B6A723B10D5435 /* AI-Spotlight/Files/FileModeControls.swift in Sources */,
+				AD9DCA3F261F97353BA3A2F6 /* AI-Spotlight/Files/FileModeCoordinator.swift in Sources */,
+				692FE1D5B808E9F46279D3EB /* AI-Spotlight/Files/CodexFileMode.swift in Sources */,
+				FF70383D00EFDC94759EC47F /* AI-Spotlight/Files/LocalFileInference.swift in Sources */,
+				CB0228C45D6046A5112037B1 /* AI-Spotlight/Files/AgentFileTools.swift in Sources */,
+				C461A3249BD254564E9FA9E6 /* AI-Spotlight/Files/WorkspaceService.swift in Sources */,
+				573FCAC21400EDC7D918408C /* AI-Spotlight/Files/WorkspaceAccess.swift in Sources */,
+				B5173475932912D82BC87FC7 /* AI-Spotlight/Screen/ScreenConnectivity.swift in Sources */,
+				905F6E0F59B1620D167CED63 /* AI-Spotlight/Screen/ScreenPromptContext.swift in Sources */,
+				32E976745B12847D6DFF8EE0 /* AI-Spotlight/LocalInference/LlamaServerVisionEngine.swift in Sources */,
+				3380FAAA1FD88010F2C908EE /* AI-Spotlight/LocalInference/LocalMultimodalClient.swift in Sources */,
+				F368AD14CC3718DC0F973BFC /* AI-Spotlight/Cloud/GeminiContentClient.swift in Sources */,
+				85E2E0F86DCBFAAE24CCDACC /* AI-Spotlight/Chat/MultimodalContent.swift in Sources */,
+				4305A94A1AB1814FEA59FBFB /* AI-Spotlight/Screen/ScreenSettings.swift in Sources */,
+				83D50AC929DE904DAFAD9A60 /* AI-Spotlight/Screen/ScreenRoutingPolicy.swift in Sources */,
+				4A1B110A0BF0B8AED87B3572 /* AI-Spotlight/Screen/ScreenImagePreprocessor.swift in Sources */,
+				E113237281A050519B8D8C0C /* AI-Spotlight/Screen/ScreenOCRService.swift in Sources */,
+				E616EB8F602796CEECD7DDD4 /* AI-Spotlight/Screen/ScreenControls.swift in Sources */,
+				BADDBDB66366EC60115687D5 /* AI-Spotlight/Screen/ScreenComposerCoordinator.swift in Sources */,
+				9FD261360A6825094B8FB5CA /* AI-Spotlight/Screen/ScreenCaptureService.swift in Sources */,
+				D837B30691584362AC890087 /* AI-Spotlight/Screen/ScreenAttachment.swift in Sources */,
 				C10000000000000000000002 /* ChatContext.swift in Sources */,
+				DE1000000000000000000002 /* ChatMarkdown.swift in Sources */,
+				B60000000000000000000101 /* BraveSearchClient.swift in Sources */,
+				B60000000000000000000102 /* WebSearchSettings.swift in Sources */,
+				B60000000000000000000103 /* WebSearchContext.swift in Sources */,
+				B60000000000000000000104 /* WebSearchControls.swift in Sources */,
 				A10000000000000000000001 /* AI_SpotlightApp.swift in Sources */,
 				A10000000000000000000002 /* ApplicationDelegate.swift in Sources */,
 				A10000000000000000000003 /* AppCommand.swift in Sources */,
@@ -351,6 +564,13 @@
 				D10000000000000000000004 /* LocalChatViewModel.swift in Sources */,
 				E10000000000000000000001 /* ChatDomain.swift in Sources */,
 				E10000000000000000000002 /* ChatSessionStore.swift in Sources */,
+				AB0200000000000000000001 /* LocalHardwareProfile.swift in Sources */,
+				AB0200000000000000000002 /* LocalModelSelection.swift in Sources */,
+				AB0200000000000000000003 /* LocalModelBenchmark.swift in Sources */,
+				AB0200000000000000000004 /* LocalCatalogUpdates.swift in Sources */,
+				AB0200000000000000000005 /* LocalModelAdvisor.swift in Sources */,
+				AB0200000000000000000006 /* BundledLocalModels.swift in Sources */,
+				AB0200000000000000000007 /* LocalModelManagerView.swift in Sources */,
 				E10000000000000000000003 /* LocalModelManifest.swift in Sources */,
 				E10000000000000000000005 /* AutoRouter.swift in Sources */,
 				F10000000000000000000001 /* CloudDomain.swift in Sources */,
@@ -370,9 +590,27 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				14069C4454E33368512BA2E9 /* WorkspaceDocumentTests.swift in Sources */,
+				0009134391031E5AE19F8236 /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift in Sources */,
+				41785BB5B087C2B0E954509E /* AI-SpotlightTests/FileModeRuntimeTests.swift in Sources */,
+				32FDB12D7B19D9FC87A3B01D /* AI-SpotlightTests/FileModeUITests.swift in Sources */,
+				CA0F234239D0AE49BA5AB66D /* AI-SpotlightTests/FileAgentTests.swift in Sources */,
+				1D8E6439046419E40B3F2C9E /* AI-SpotlightTests/WorkspaceTests.swift in Sources */,
+				0C22F41F6C6A79FFFDD2AB4C /* AI-SpotlightTests/AppBundleTests.swift in Sources */,
+				749A74810619BC2371A900AB /* AI-SpotlightTests/ScreenNativeSmokeTests.swift in Sources */,
+				52FB913A027D7DEBFD96E69D /* AI-SpotlightTests/ScreenViewTests.swift in Sources */,
+				0AF3BC1AE08E378481D15AE6 /* AI-SpotlightTests/ScreenPipelineTests.swift in Sources */,
+				82A42145C9B572B1BAFD7D74 /* AI-SpotlightTests/LocalVisionTests.swift in Sources */,
+				7DA95EF27FA01D16D79D8564 /* AI-SpotlightTests/ScreenTestSupport.swift in Sources */,
+				2F715B4E2EEB2D2248A01C88 /* AI-SpotlightTests/ScreenProviderTests.swift in Sources */,
+				0A2F49485CA3846EE1AC4B0E /* AI-SpotlightTests/ScreenRoutingTests.swift in Sources */,
+				8D4A4990E8B9E4E923600F9E /* AI-SpotlightTests/ScreenOCRTests.swift in Sources */,
+				3ED4FD09347F3C0EA6A0C43D /* AI-SpotlightTests/ScreenCaptureTests.swift in Sources */,
 				B30000000000000000000002 /* RequestLifecycleTests.swift in Sources */,
+				B60000000000000000000402 /* WebSearchTests.swift in Sources */,
 				C20000000000000000000002 /* ChatContextTests.swift in Sources */,
 				A10000000000000000000006 /* AppCommandTests.swift in Sources */,
+				AB0300000000000000000002 /* LocalModelSelectionTests.swift in Sources */,
 				D10000000000000000000006 /* LocalInferenceTests.swift in Sources */,
 				C30000000000000000000002 /* LocalModelInstallationStoreTests.swift in Sources */,
 				C40000000000000000000002 /* CloudStreamingTransportTests.swift in Sources */,
@@ -439,7 +677,7 @@
 				MTL_ENABLE_DEBUG_INFO = NO;
 				SDKROOT = macosx;
 				SWIFT_COMPILATION_MODE = wholemodule;
-		};
+			};
 			name = Release;
 		};
 		AC0000000000000000000003 /* Debug */ = {
@@ -449,8 +687,13 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 5JXMXR2W9L;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.leow427.AISpotlight;
 				PRODUCT_NAME = PrimaryAgent;
@@ -466,8 +709,13 @@
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 5JXMXR2W9L;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
 				MARKETING_VERSION = 1.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.leow427.AISpotlight;
 				PRODUCT_NAME = PrimaryAgent;

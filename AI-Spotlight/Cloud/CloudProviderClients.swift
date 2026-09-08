@@ -9,6 +9,14 @@ struct CloudProviderRegistry: Sendable {
   let openAI: any ChatProvider
   let anthropic: any ChatProvider
   let chatGPT: any ChatProvider
+  let gemini: any ChatProvider
+
+  init(openAI: any ChatProvider, anthropic: any ChatProvider, chatGPT: any ChatProvider, gemini: (any ChatProvider)? = nil) {
+    self.openAI = openAI
+    self.anthropic = anthropic
+    self.chatGPT = chatGPT
+    self.gemini = gemini ?? GeminiContentClient(credentialStore: KeychainCredentialStore(), transport: URLSessionCloudTransport.shared)
+  }
 
   init(
     credentialStore: any CloudCredentialStore,
@@ -16,6 +24,7 @@ struct CloudProviderRegistry: Sendable {
     chatGPT: any ChatProvider = CodexSubscriptionClient.live
   ) {
     self.chatGPT = chatGPT
+    gemini = GeminiContentClient(credentialStore: credentialStore, transport: transport)
     openAI = OpenAIResponsesClient(
       credentialStore: credentialStore,
       transport: transport
@@ -31,6 +40,7 @@ struct CloudProviderRegistry: Sendable {
     case .chatGPT: chatGPT
     case .openAI: openAI
     case .anthropic: anthropic
+    case .gemini: gemini
     }
   }
 }
@@ -73,37 +83,18 @@ struct OpenAIResponsesClient: ChatProvider {
     }
 
     let prepared = try CloudContext.prepare(request)
-    struct InputMessage: Encodable {
-      let role: String
-      let content: String
-    }
-    struct Body: Encodable {
-      let model: String
-      let input: [InputMessage]
-      let stream: Bool
-      let store: Bool
-      let maxOutputTokens: Int
-
-      enum CodingKeys: String, CodingKey {
-        case model, input, stream, store
-        case maxOutputTokens = "max_output_tokens"
-      }
-    }
-
-    let body = Body(
-      model: request.route.modelID,
-      input: prepared.messages
-        .filter { !$0.content.isEmpty }
-        .map { InputMessage(role: $0.role.rawValue, content: $0.content) },
-      stream: true,
-      store: false,
-      maxOutputTokens: prepared.budget.outputTokens
-    )
+    var body: [String: Any] = [
+      "model": request.route.modelID,
+      "instructions": ChatResponseStyle.instructions,
+      "input": try MultimodalSerialization.messages(prepared.messages, image: request.image, format: .openAIResponses),
+      "stream": true, "store": false, "max_output_tokens": prepared.budget.outputTokens,
+    ]
+    if ThinkCommand.enabled(in: prepared.messages) { body["reasoning"] = ["effort": "high"] }
     var urlRequest = URLRequest(url: responsesURL)
     urlRequest.httpMethod = "POST"
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
     urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-    urlRequest.httpBody = try JSONEncoder().encode(body)
+    urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
     return urlRequest
   }
 
@@ -117,7 +108,10 @@ struct OpenAIResponsesClient: ChatProvider {
     var didComplete = false
 
     for try await networkEvent in transport.stream(for: request) {
-      try Task.checkCancellation()
+      // If cancellation races a buffered event, advance the cancelled iterator
+      // once more so AsyncThrowingStream terminates its underlying producer.
+      // Throwing here could leave a retained network stream running.
+      if Task.isCancelled { continue }
       switch networkEvent {
       case .response(let responseStatusCode):
         statusCode = responseStatusCode
@@ -133,6 +127,7 @@ struct OpenAIResponsesClient: ChatProvider {
       }
     }
 
+    try Task.checkCancellation()
     guard let statusCode else { throw CloudProviderError.invalidResponse }
     guard (200...299).contains(statusCode) else {
       throw cloudHTTPError(provider: .openAI, statusCode: statusCode, data: errorBody)
@@ -229,36 +224,23 @@ struct AnthropicMessagesClient: ChatProvider {
     }
 
     let prepared = try CloudContext.prepare(request)
-    struct InputMessage: Encodable {
-      let role: String
-      let content: String
+    var body: [String: Any] = [
+      "model": request.route.modelID, "max_tokens": prepared.budget.outputTokens,
+      "system": ChatResponseStyle.instructions,
+      "messages": try MultimodalSerialization.messages(prepared.messages, image: request.image, format: .anthropic),
+      "stream": true,
+    ]
+    if ThinkCommand.enabled(in: prepared.messages) {
+      let manual = ["claude-3", "claude-sonnet-4-202", "claude-opus-4-202", "claude-sonnet-4-5", "claude-haiku-4-5", "claude-opus-4-1", "claude-opus-4-5"].contains { request.route.modelID.hasPrefix($0) }
+      body["thinking"] = manual ? ["type": "enabled", "budget_tokens": 2_048] : ["type": "adaptive"]
+      if !manual { body["output_config"] = ["effort": "high"] }
     }
-    struct Body: Encodable {
-      let model: String
-      let maxTokens: Int
-      let messages: [InputMessage]
-      let stream: Bool
-
-      enum CodingKeys: String, CodingKey {
-        case model, messages, stream
-        case maxTokens = "max_tokens"
-      }
-    }
-
-    let body = Body(
-      model: request.route.modelID,
-      maxTokens: prepared.budget.outputTokens,
-      messages: prepared.messages
-        .filter { !$0.content.isEmpty }
-        .map { InputMessage(role: $0.role.rawValue, content: $0.content) },
-      stream: true
-    )
     var urlRequest = URLRequest(url: messagesURL)
     urlRequest.httpMethod = "POST"
     urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
     urlRequest.setValue(apiKey, forHTTPHeaderField: "x-api-key")
     urlRequest.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
-    urlRequest.httpBody = try JSONEncoder().encode(body)
+    urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
     return urlRequest
   }
 
@@ -272,7 +254,10 @@ struct AnthropicMessagesClient: ChatProvider {
     var didComplete = false
 
     for try await networkEvent in transport.stream(for: request) {
-      try Task.checkCancellation()
+      // If cancellation races a buffered event, advance the cancelled iterator
+      // once more so AsyncThrowingStream terminates its underlying producer.
+      // Throwing here could leave a retained network stream running.
+      if Task.isCancelled { continue }
       switch networkEvent {
       case .response(let responseStatusCode):
         statusCode = responseStatusCode
@@ -288,6 +273,7 @@ struct AnthropicMessagesClient: ChatProvider {
       }
     }
 
+    try Task.checkCancellation()
     guard let statusCode else { throw CloudProviderError.invalidResponse }
     guard (200...299).contains(statusCode) else {
       throw cloudHTTPError(provider: .anthropic, statusCode: statusCode, data: errorBody)

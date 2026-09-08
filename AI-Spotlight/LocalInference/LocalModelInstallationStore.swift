@@ -20,6 +20,8 @@ struct LocalModelInstallationStore: Sendable {
     let id: String
     let displayName: String
     let fileName: String
+    var catalogDescriptor: LocalModelDescriptor? = nil
+    var visionConfiguration: LocalVisionConfiguration? = nil
   }
 
   private struct Library: Codable {
@@ -50,11 +52,14 @@ struct LocalModelInstallationStore: Sendable {
     Self.libraryLock.lock()
     defer { Self.libraryLock.unlock() }
 
+    try Task.checkCancellation()
     let sourceURL = model.fileURL.standardizedFileURL
     guard sourceURL.pathExtension.lowercased() == "gguf",
           FileManager.default.isReadableFile(atPath: sourceURL.path) else {
       throw LocalInferenceError.invalidModelFile
     }
+
+    if model.supportsVision { try LocalVisionModelValidation.validate(model) }
 
     // Refuse to replace unreadable/corrupt metadata with an empty library.
     var library = try loadLibrary()
@@ -74,15 +79,47 @@ struct LocalModelInstallationStore: Sendable {
     )
     defer { try? fileOperations.removeItem(temporaryURL) }
 
+    var installedVision = model.visionConfiguration
+    let projectorDestination = modelsDirectory.appending(path: "mmproj-\(installationID).gguf")
+    let projectorTemporary = modelsDirectory.appending(path: ".installing-mmproj-\(installationID).gguf")
+    var committed = false
+    var movedModel = false
+    var movedProjector = false
+    defer {
+      try? fileOperations.removeItem(projectorTemporary)
+      if !committed {
+        if movedModel { try? fileOperations.removeItem(destinationURL) }
+        if movedProjector { try? fileOperations.removeItem(projectorDestination) }
+      }
+    }
     try fileOperations.copyItem(sourceURL, temporaryURL)
+    try Task.checkCancellation()
     try fileOperations.moveItem(temporaryURL, destinationURL)
+    movedModel = true
+    if let vision = installedVision {
+      try fileOperations.copyItem(vision.projectorURL, projectorTemporary)
+      try Task.checkCancellation()
+      try fileOperations.moveItem(projectorTemporary, projectorDestination)
+      movedProjector = true
+      installedVision = LocalVisionConfiguration(projectorURL: projectorDestination,
+        serverExecutableURL: vision.serverExecutableURL, contextWindow: vision.contextWindow,
+        managedRuntimeDirectory: vision.managedRuntimeDirectory, packageRevision: vision.packageRevision)
+    }
 
-    let record = Record(id: model.id, displayName: model.displayName, fileName: fileName)
+    let record = Record(id: model.id, displayName: model.displayName, fileName: fileName,
+                        catalogDescriptor: model.catalogDescriptor, visionConfiguration: installedVision)
     do {
       library.models.removeAll { $0.id == record.id }
       library.models.append(record)
-      library.selectedModelID = record.id
+      // Multimodal upgrades preserve the current selection. A new main package
+      // becomes selected only at the same atomic commit as its complete files.
+      if library.selectedModelID == nil || !model.supportsVision
+        || (model.catalogDescriptor?.supportsVision == true && replacedRecords.isEmpty) {
+        library.selectedModelID = record.id
+      }
+      try Task.checkCancellation()
       try saveLibrary(library)
+      committed = true
     } catch {
       try? fileOperations.removeItem(destinationURL)
       throw error
@@ -98,8 +135,19 @@ struct LocalModelInstallationStore: Sendable {
               $0.caseInsensitiveCompare(previousURL.resolvingSymlinksInPath().path) == .orderedSame
             }) else { continue }
       try? fileOperations.removeItem(previousURL)
+      if let runtime = previous.visionConfiguration?.managedRuntimeDirectory,
+         runtime.deletingLastPathComponent().standardizedFileURL == modelsDirectory.standardizedFileURL,
+         runtime.lastPathComponent.hasPrefix("vision-runtime-"),
+         !library.models.contains(where: { $0.visionConfiguration?.managedRuntimeDirectory == runtime }) {
+        try? fileOperations.removeItem(runtime)
+      }
+      if let projector = previous.visionConfiguration?.projectorURL,
+         projector.deletingLastPathComponent().standardizedFileURL == modelsDirectory.standardizedFileURL,
+         !library.models.contains(where: { $0.visionConfiguration?.projectorURL == projector }) {
+        try? fileOperations.removeItem(projector)
+      }
     }
-    return LocalModel(id: record.id, displayName: record.displayName, fileURL: destinationURL)
+    return LocalModel(id: record.id, displayName: record.displayName, fileURL: destinationURL, catalogDescriptor: record.catalogDescriptor, visionConfiguration: installedVision)
   }
 
   func installedModel() -> LocalModel? {
@@ -128,6 +176,85 @@ struct LocalModelInstallationStore: Sendable {
     }
     library.selectedModelID = id
     try saveLibrary(library)
+  }
+
+  func deleteModel(id: String) throws {
+    Self.libraryLock.lock()
+    defer { Self.libraryLock.unlock() }
+
+    var library = try loadLibrary()
+    guard let record = library.models.first(where: { $0.id == id }) else {
+      throw LocalInferenceError.unknownInstalledModel
+    }
+    let remainingRecords = library.models.filter { $0.id != id }
+    var retainedPaths = Set(remainingRecords.compactMap(modelFileURL(from:)).map {
+      $0.resolvingSymlinksInPath().path
+    })
+    for remaining in remainingRecords {
+      if let projector = remaining.visionConfiguration?.projectorURL {
+        retainedPaths.insert(projector.resolvingSymlinksInPath().path)
+      }
+      if let runtime = remaining.visionConfiguration?.managedRuntimeDirectory {
+        retainedPaths.insert(runtime.resolvingSymlinksInPath().path)
+      }
+    }
+
+    var resources: [URL] = []
+    func appendManagedResource(_ url: URL?) {
+      guard let url,
+            !retainedPaths.contains(url.resolvingSymlinksInPath().path),
+            !resources.contains(where: {
+              $0.standardizedFileURL == url.standardizedFileURL
+            }) else { return }
+      resources.append(url)
+    }
+    appendManagedResource(modelFileURL(from: record))
+    if let projector = record.visionConfiguration?.projectorURL,
+       projector.deletingLastPathComponent().standardizedFileURL == modelsDirectory.standardizedFileURL {
+      appendManagedResource(projector)
+    }
+    if let runtime = record.visionConfiguration?.managedRuntimeDirectory,
+       runtime.deletingLastPathComponent().standardizedFileURL == modelsDirectory.standardizedFileURL,
+       runtime.lastPathComponent.hasPrefix("vision-runtime-") {
+      appendManagedResource(runtime)
+    }
+
+    // Move managed resources aside first so a metadata failure can restore the
+    // complete installation. The atomic library write is the deletion commit.
+    let deletionID = UUID().uuidString
+    var stagedResources: [(source: URL, staged: URL)] = []
+    do {
+      for (index, source) in resources.enumerated()
+      where FileManager.default.fileExists(atPath: source.path) {
+        let staged = modelsDirectory.appending(path: ".deleting-\(deletionID)-\(index)")
+        try fileOperations.moveItem(source, staged)
+        stagedResources.append((source, staged))
+      }
+    } catch {
+      for resource in stagedResources.reversed() {
+        try? fileOperations.moveItem(resource.staged, resource.source)
+      }
+      throw error
+    }
+
+    library.models = remainingRecords
+    if library.selectedModelID == id {
+      library.selectedModelID = remainingRecords.compactMap(localModel(from:)).first?.id
+    }
+    do {
+      try saveLibrary(library)
+    } catch {
+      for resource in stagedResources.reversed() {
+        try? fileOperations.moveItem(resource.staged, resource.source)
+      }
+      throw error
+    }
+
+    // Cleanup after the commit is best effort. A failed cleanup can only leave
+    // an unreferenced hidden tombstone, never a selectable partial model.
+    for resource in stagedResources {
+      try? fileOperations.removeItem(resource.staged)
+    }
   }
 
   private func saveLibrary(_ library: Library) throws {
@@ -164,10 +291,16 @@ struct LocalModelInstallationStore: Sendable {
           FileManager.default.isReadableFile(atPath: fileURL.path) else {
       return nil
     }
+    if let vision = record.visionConfiguration {
+      guard vision.projectorURL.deletingLastPathComponent().standardizedFileURL == modelsDirectory.standardizedFileURL,
+            FileManager.default.isReadableFile(atPath: vision.projectorURL.path) else { return nil }
+    }
     return LocalModel(
       id: record.id,
       displayName: record.displayName,
-      fileURL: fileURL
+      fileURL: fileURL,
+      catalogDescriptor: record.catalogDescriptor,
+      visionConfiguration: record.visionConfiguration
     )
   }
 }

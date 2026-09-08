@@ -21,6 +21,8 @@ struct ChatRequest: Sendable, Equatable {
   let sessionID: UUID
   let messages: [ChatMessage]
   let route: Route
+  var image: PreparedScreenImage? = nil
+  var allowsCloudImages = false
 }
 
 enum ChatEvent: Sendable, Equatable {
@@ -32,6 +34,11 @@ protocol ChatProvider: Sendable {
   func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error>
 }
 
+struct MessageAttachment: Codable, Sendable, Equatable {
+  let name: String
+  let isDirectory: Bool
+}
+
 struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   enum Role: String, Codable, Sendable {
     case user
@@ -41,12 +48,22 @@ struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   let id: UUID
   let role: Role
   var content: String
+  var searchSources: [WebSearchSource]?
   let createdAt: Date
+  // Session-only UI data: never serialize screenshot pixels or send them as chat text.
+  var imagePreview: Data? = nil
+  var extendedThinking: Bool? = nil
+  var attachments: [MessageAttachment]? = nil
 
-  init(id: UUID = UUID(), role: Role, content: String, createdAt: Date = .now) {
+  private enum CodingKeys: String, CodingKey {
+    case id, role, content, searchSources, createdAt, attachments
+  }
+
+  init(id: UUID = UUID(), role: Role, content: String, createdAt: Date = .now, searchSources: [WebSearchSource]? = nil) {
     self.id = id
     self.role = role
     self.content = content
+    self.searchSources = searchSources
     self.createdAt = createdAt
   }
 }
@@ -57,6 +74,7 @@ struct ChatSession: Codable, Sendable, Equatable, Identifiable {
   var messages: [ChatMessage]
   let createdAt: Date
   var lastActivityAt: Date
+  var workspace: WorkspaceSelection? = nil
 
   init(
     id: UUID = UUID(),

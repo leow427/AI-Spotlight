@@ -14,11 +14,12 @@ final class MenuBarController: NSObject {
 
     let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
     if let button = item.button {
-      button.image = NSImage(
-        systemSymbolName: "sparkles",
-        accessibilityDescription: "AI Spotlight"
-      )
-      button.toolTip = "AI Spotlight"
+      let logo = NSImage(named: "SpotlightLogo")?.copy() as? NSImage
+      logo?.size = NSSize(width: 18, height: 18)
+      logo?.isTemplate = true
+      button.image = logo
+      button.setAccessibilityLabel("engima")
+      button.toolTip = "engima"
     }
 
     let menu = NSMenu()
