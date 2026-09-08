@@ -237,7 +237,7 @@ struct LocalFileAgent: Sendable {
     let selection = tools.workspace.selection
     let level = tools.workspace.accessLevel
     var history = [AgentInferenceMessage(role: "system", content:
-      AgentFileTools.instructions + "\n" + AgentFileTools.localInstructions + "\nAccess: \(level.rawValue)\n" + selection.context)]
+      ChatResponseStyle.instructions + "\n" + AgentFileTools.instructions + "\n" + AgentFileTools.localInstructions + "\nAccess: \(level.rawValue)\n" + selection.context)]
       + messages.map { AgentInferenceMessage(role: $0.role.rawValue, content: $0.content) }
     if ThinkCommand.enabled(in: messages) {
       history[0].extendedThinking = true

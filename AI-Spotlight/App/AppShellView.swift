@@ -154,15 +154,65 @@ struct ConversationScrollObserver: NSViewRepresentable {
   }
 }
 
-/// A quiet botanical accent, with enough depth to stay legible in light mode.
-private enum NatureGlass {
-  static let accent = Color(nsColor: NSColor(name: nil) { appearance in
-    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
-      ? NSColor(srgbRed: 0.66, green: 0.86, blue: 0.72, alpha: 1)
-      : NSColor(srgbRed: 0.22, green: 0.43, blue: 0.31, alpha: 1)
-  })
-  static let edge = LinearGradient(colors: [accent.opacity(0.5), .white.opacity(0.14), accent.opacity(0.18)],
+/// Tokens from Figma's Liquid Glass alternative (16:122).
+enum NatureGlass {
+  static let accent = Color("SpotlightAccent")
+  static let canvas = Color(red: 11/255, green: 18/255, blue: 19/255)
+  static let primary = Color(red: 242/255, green: 245/255, blue: 242/255)
+  static let secondary = Color(red: 173/255, green: 184/255, blue: 178/255)
+  static let edge = LinearGradient(colors: [.white.opacity(0.4), accent.opacity(0.12), .white.opacity(0.22)],
                                    startPoint: .topLeading, endPoint: .bottomTrailing)
+}
+
+struct ForestBackdrop: View {
+  var body: some View {
+    GeometryReader { geometry in
+      Image("ForestBackdrop")
+        .resizable()
+        .frame(width: geometry.size.width, height: geometry.size.height)
+    }
+    .background(NatureGlass.canvas)
+    .accessibilityHidden(true)
+    .allowsHitTesting(false)
+  }
+}
+
+/// One optical surface per container; controls inside it use simple fills.
+struct NatureGlassSurface: ViewModifier {
+  var radius: CGFloat = 24
+  var navigation = false
+  var enabled = true
+  var clarity = 0.22
+  @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+  func body(content: Content) -> some View {
+    content.background {
+      let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+      if reduceTransparency || !enabled {
+        shape.fill(NatureGlass.canvas)
+      } else {
+        shape.fill(Color(red: 35/255, green: 54/255, blue: 44/255).opacity(navigation ? 0.38 : 0.09))
+          .glassEffect(.regular.tint(NatureGlass.accent.opacity(navigation ? 0.06 : 0.025)), in: shape)
+          .opacity(1 - clarity)
+      }
+    }
+    .overlay {
+      RoundedRectangle(cornerRadius: radius, style: .continuous).strokeBorder(NatureGlass.edge, lineWidth: 0.75)
+        .allowsHitTesting(false)
+    }
+    .shadow(color: .black.opacity(0.22), radius: 24, y: 8)
+  }
+}
+
+extension View {
+  func natureSurface(radius: CGFloat = 24, navigation: Bool = false) -> some View {
+    modifier(NatureGlassSurface(radius: radius, navigation: navigation))
+  }
+  func naturePresentation() -> some View {
+    background { ForestBackdrop().ignoresSafeArea() }
+      .tint(NatureGlass.accent)
+      .preferredColorScheme(.dark)
+  }
 }
 
 private struct NatureButtonStyle: ButtonStyle {
@@ -172,6 +222,7 @@ private struct NatureButtonStyle: ButtonStyle {
 
   func makeBody(configuration: Configuration) -> some View {
     configuration.label
+      .opacity(isEnabled ? 1 : 0.45)
       .background(NatureGlass.accent.opacity(isEnabled && isHovered ? 0.09 : 0),
                   in: RoundedRectangle(cornerRadius: 9))
       .scaleEffect(!reduceMotion && configuration.isPressed ? 0.98 : 1)
@@ -203,6 +254,7 @@ struct AppShellView: View {
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
+  @State private var isSidebarVisible = false
   @State private var selectedMode = ChatMode.auto
   @State private var isComposerFocused = false
 
@@ -231,109 +283,64 @@ struct AppShellView: View {
       welcomeBackground
         .ignoresSafeArea()
 
-      NavigationSplitView {
-        ScrollView {
-          LazyVStack(alignment: .leading, spacing: 0) {
-            if localChat.sessions.isEmpty {
-              Text("No recent chats")
-                .font(.callout)
-                .foregroundStyle(.secondary)
-                .padding(12)
-            } else {
-              ForEach(localChat.sessions) { session in
-                Button {
-                  localChat.selectSession(id: session.id)
-                } label: {
-                  Label(session.title, systemImage: "message")
-                    .lineLimit(1)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(localChat.selectedSessionID == session.id ? NatureGlass.accent.opacity(0.12) : .clear,
-                                in: RoundedRectangle(cornerRadius: 9))
-                    .overlay(alignment: .leading) {
-                      if localChat.selectedSessionID == session.id {
-                        Capsule().fill(NatureGlass.accent).frame(width: 2, height: 16)
-                      }
-                    }
-                }
-                .buttonStyle(NatureButtonStyle())
-                .padding(.horizontal, 6)
-              }
-            }
-
-            Divider()
-              .padding(.top, 4)
-
-            Button {
-              isHelpPresented = true
-            } label: {
-              Label("Help", systemImage: "questionmark.circle")
-                .font(.callout.weight(.medium))
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(NatureButtonStyle())
-            .padding(.horizontal, 12)
-            .padding(.top, 12)
-
-            DeveloperToolsView(glassAppearance: glassAppearance, advisor: modelAdvisor, chat: localChat)
-              .padding(12)
+      GeometryReader { geometry in
+        HStack(spacing: 0) {
+          if isSidebarVisible {
+            sidebar(compact: geometry.size.width < 900)
+              .frame(width: min(288, max(200, geometry.size.width * 0.27)))
           }
-          .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .navigationSplitViewColumnWidth(min: 190, ideal: 220, max: 260)
-        .navigationTitle("Recent")
-      } detail: {
-        // The native split view measures its columns with an unconstrained
-        // proposal. Wrapped composer notices must not become the panel's
-        // minimum height and move its controls outside the visible window.
-        GeometryReader { _ in
-          VStack(spacing: 0) {
-            conversation
+          // Bound detail measurement so wrapped notices cannot push the
+          // composer outside a small panel.
+          GeometryReader { _ in
+            VStack(spacing: 0) {
+              if !isSidebarVisible { hiddenSidebarNavigation }
+              conversation
 
-            VStack(alignment: .trailing, spacing: 8) {
-              routeStatus
-              if let notice = localChat.contextNotice {
-                Text(notice)
+              VStack(alignment: .trailing, spacing: 8) {
+                routeStatus
+                if let notice = localChat.contextNotice {
+                  Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                if let decision = localChat.screenRouteDecision {
+                  Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
+                    .font(.caption).foregroundStyle(.secondary)
+                }
+                if isSearchEnabled {
+                  HStack(spacing: 6) {
+                    Text(searchSettings.hasAPIKey
+                      ? "Web Search · Queries sent to Brave may include screen details."
+                      : "Add a Brave Search API key to search the web.")
+                    if !searchSettings.hasAPIKey {
+                      Button("Settings", action: openSettings).buttonStyle(.plain)
+                    }
+                  }
                   .font(.caption)
                   .foregroundStyle(.secondary)
-                  .fixedSize(horizontal: false, vertical: true)
-              }
-              if let decision = localChat.screenRouteDecision {
-                Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
-                  .font(.caption).foregroundStyle(.secondary)
-              }
-              if isSearchEnabled {
-                HStack(spacing: 6) {
-                  Text(searchSettings.hasAPIKey
-                    ? "Web Search · Queries sent to Brave may include screen details."
-                    : "Add a Brave Search API key to search the web.")
-                  if !searchSettings.hasAPIKey {
-                    Button("Settings", action: openSettings).buttonStyle(.plain)
-                  }
                 }
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
+                if let attachment = screen.attachment, localChat.pendingUserMessage == nil {
+                  ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
+                                       isBusy: localChat.isBusy || screen.isBusy,
+                                       remove: screen.removeAttachment, retake: captureScreen)
+                }
+                if let error = screen.error {
+                  Text(error).font(.caption).foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                if files.selection != nil || files.error != nil || files.protectedWrite != nil {
+                  FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
+                    useCodex: { isFileCloudConsentPresented = true })
+                }
+                FileChangeSummaryView(files: files, isBusy: localChat.isBusy)
+                composer(compact: geometry.size.width < 900)
               }
-              compactModeControls
-              if let attachment = screen.attachment, localChat.pendingUserMessage == nil {
-                ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
-                                     isBusy: localChat.isBusy || screen.isBusy,
-                                     remove: screen.removeAttachment, retake: captureScreen)
-              }
-              if let error = screen.error {
-                Text(error).font(.caption).foregroundStyle(.orange)
-                  .fixedSize(horizontal: false, vertical: true)
-              }
-              if files.selection != nil || files.error != nil || files.protectedWrite != nil {
-                FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
-                  useCodex: { isFileCloudConsentPresented = true })
-              }
-              FileChangeSummaryView(files: files, isBusy: localChat.isBusy)
-              composer
+              .padding(.horizontal, 24)
+              .padding(.bottom, 32)
+              .padding(.top, 8)
             }
-            .padding(20)
           }
         }
       }
@@ -342,6 +349,8 @@ struct AppShellView: View {
         modePalette
       }
     }
+    .tint(NatureGlass.accent)
+    .preferredColorScheme(.dark)
     .frame(minWidth: 640, minHeight: 420)
     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     .overlay {
@@ -352,6 +361,9 @@ struct AppShellView: View {
 
   private var observedShell: some View {
     shellLayout
+    .onReceive(NotificationCenter.default.publisher(for: .sidebarToggleRequested)) { _ in
+      isSidebarVisible.toggle()
+    }
     .onReceive(NotificationCenter.default.publisher(for: .fileModeRequested)) { _ in
       activateFileMode(from: .keyboard)
     }
@@ -467,103 +479,187 @@ struct AppShellView: View {
     }
   }
 
-  @ViewBuilder
-  private var welcomeBackground: some View {
-    if glassAppearance.isEnabled {
-      Rectangle()
-        .fill(.ultraThinMaterial)
-        .opacity(1 - glassAppearance.clarity)
-    } else {
-      Rectangle()
-        .fill(.background)
+  private var welcomeBackground: some View { ForestBackdrop() }
+
+  private var hiddenSidebarNavigation: some View {
+    HStack(spacing: 12) {
+      Button { isSidebarVisible = true } label: { Image(systemName: "sidebar.left") }
+        .accessibilityLabel("Show chat history").help("Show chat history · double-tap Control")
+      Button { isHelpPresented = true } label: { Label("Help", systemImage: "questionmark.circle") }
+      Spacer()
+      Button(action: openSettings) { Image(systemName: "gearshape") }.accessibilityLabel("Settings")
+      Button { NotificationCenter.default.post(name: .newChatRequested, object: nil) } label: {
+        Image(systemName: "square.and.pencil")
+      }.accessibilityLabel("New chat")
     }
+    .font(.system(size: 13))
+    .buttonStyle(.borderless)
+    .padding(.horizontal, 20).padding(.top, 16).padding(.bottom, 4)
   }
 
-  private var composer: some View {
-    HStack(spacing: 10) {
-      HStack(spacing: 0) {
-        FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
+  private func sidebar(compact: Bool) -> some View {
+    ScrollView {
+      VStack(alignment: .leading, spacing: 24) {
+        HStack(spacing: compact ? 4 : 12) {
+          Image("SpotlightLogo").renderingMode(.template).resizable().scaledToFit()
+            .foregroundStyle(NatureGlass.accent).frame(width: compact ? 28 : 40, height: compact ? 28 : 40).accessibilityHidden(true)
+          Text("engima").font(.system(size: compact ? 15 : 19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+          Spacer(minLength: 0)
+          Button { isSidebarVisible = false } label: {
+            Image(systemName: "sidebar.left").font(.system(size: 14)).frame(width: 24, height: 32)
+          }.buttonStyle(NatureButtonStyle()).accessibilityLabel("Hide chat history")
+            .help("Hide chat history · double-tap Control")
+          Button {
+            NotificationCenter.default.post(name: .newChatRequested, object: nil)
+          } label: {
+            Image(systemName: "square.and.pencil").font(.system(size: 17))
+              .foregroundStyle(NatureGlass.accent).frame(width: 36, height: 36)
+              .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+              .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.19)) }
+          }.buttonStyle(NatureButtonStyle()).accessibilityLabel("New chat")
+        }
+        .padding(.horizontal, compact ? 0 : 8)
+
+        VStack(spacing: 4) {
+          if localChat.sessions.isEmpty {
+            sidebarRow(title: "New Chat", selected: true, compact: compact) {
+              NotificationCenter.default.post(name: .newChatRequested, object: nil)
+            }
+          }
+          ForEach(localChat.sessions.prefix(5)) { session in
+            sidebarRow(title: session.title, date: session.messages.isEmpty ? nil : session.lastActivityAt,
+                       selected: localChat.selectedSessionID == session.id, compact: compact) {
+              localChat.selectSession(id: session.id)
+            }
+          }
+        }
+
+        VStack(alignment: .leading, spacing: 0) {
+          Divider().overlay(NatureGlass.secondary.opacity(0.25)).padding(.horizontal, 16)
+          Button { isHelpPresented = true } label: {
+            Label("Help", systemImage: "questionmark.circle")
+              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
+          }.buttonStyle(NatureButtonStyle())
+          Button(action: openSettings) {
+            Label("Settings", systemImage: "gearshape")
+              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
+          }.buttonStyle(NatureButtonStyle())
+          DeveloperToolsView(glassAppearance: glassAppearance, advisor: modelAdvisor, chat: localChat)
+            .padding(.vertical, 16)
+        }
+        .font(.system(size: compact ? 13 : 14))
+        .padding(.horizontal, compact ? 12 : 24)
       }
+      .padding(.horizontal, 8)
+      .padding(.vertical, 20)
+    }
+    .scrollIndicators(.hidden)
+    .modifier(NatureGlassSurface(navigation: true, enabled: glassAppearance.isEnabled, clarity: glassAppearance.clarity))
+    .padding(12)
+  }
+
+  private func sidebarRow(title: String, date: Date? = nil, selected: Bool, compact: Bool, action: @escaping () -> Void) -> some View {
+    Button(action: action) {
+      HStack(spacing: compact ? 10 : 16) {
+        Image(systemName: "bubble.left").font(.system(size: 16)).frame(width: 20)
+          .foregroundStyle(selected ? NatureGlass.accent : NatureGlass.primary)
+        VStack(alignment: .leading, spacing: 3) {
+          Text(title).font(.system(size: compact ? 13 : 14, weight: selected ? .medium : .regular)).lineLimit(1)
+          if let date {
+            Text(date, format: .dateTime.month(.abbreviated).day()).font(.system(size: 11)).foregroundStyle(NatureGlass.secondary)
+          }
+        }
+        Spacer(minLength: 0)
+      }
+      .padding(.horizontal, compact ? 12 : 24).frame(height: compact ? 42 : (date == nil ? 46 : 52))
+      .background(selected ? NatureGlass.accent.opacity(0.14) : .clear, in: Capsule())
+      .overlay { if selected { Capsule().strokeBorder(NatureGlass.accent.opacity(0.2)) } }
+      .overlay(alignment: .leading) {
+        if selected { Capsule().fill(NatureGlass.accent).frame(width: 2, height: 40) }
+      }
+      .contentShape(Capsule())
+    }
+    .buttonStyle(NatureButtonStyle())
+    .accessibilityAddTraits(selected ? .isSelected : [])
+  }
+
+  private func composer(compact: Bool) -> some View {
+    let isResponding = localChat.activeRequest != nil
+    return HStack(spacing: compact ? 8 : 16) {
+      FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
+      Rectangle().fill(NatureGlass.secondary.opacity(0.35)).frame(width: 1, height: 40)
 
       SlashCommandComposer(
         text: Binding(get: { localChat.pendingUserMessage == nil ? screen.draft : "" },
                       set: { screen.draft = $0 }),
         isFocused: Binding(get: { isComposerFocused }, set: { isComposerFocused = $0 }),
         isEnabled: !(localChat.isBusy || screen.isBusy || files.isWorking || files.isPicking),
+        fontSize: compact ? 14 : 15,
         submit: submitDraft
       )
 
-      Menu {
-        ForEach(ChatMode.allCases) { mode in
-          Button {
-            selectedMode = mode
-          } label: {
-            Label(mode.displayName, systemImage: mode.systemImage)
-          }
+      Button { isModePalettePresented.toggle() } label: {
+        HStack(spacing: 8) {
+          if !compact { Image(systemName: selectedMode.systemImage) }
+          Text(selectedMode.displayName)
+          Image(systemName: "chevron.down").font(.system(size: 10))
         }
+        .font(.system(size: 14, weight: .medium))
+        .padding(.horizontal, compact ? 8 : 12).frame(height: compact ? 32 : 38)
+        .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
+        .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.1)) }
+      }.buttonStyle(NatureButtonStyle()).fixedSize().accessibilityLabel("Mode and model")
+
+      Button {
+        if isResponding { localChat.stopStreaming() } else { submitDraft() }
       } label: {
-        Label(selectedMode.displayName, systemImage: selectedMode.systemImage)
+        Image(systemName: isResponding ? "stop.fill" : "paperplane.fill")
+          .font(.system(size: 14, weight: .medium))
+          .foregroundStyle(NatureGlass.canvas)
+          .frame(width: compact ? 36 : 44, height: compact ? 36 : 44)
+          .background(NatureGlass.accent, in: Circle())
+          .overlay { Circle().strokeBorder(.white.opacity(0.48)) }
       }
-      .menuStyle(.borderlessButton)
-      .help("Mode changes apply to your next request.")
-      .fixedSize()
+      .buttonStyle(NatureButtonStyle())
+      .disabled(!isResponding && (!canSubmit || draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        || screen.isBusy || files.isWorking || files.isPicking))
+      .accessibilityLabel(isResponding ? "Stop response" : "Send message")
     }
-    .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: isSearchPresented)
-    .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.72), value: screen.isPresented)
-    .padding(.horizontal, 14)
-    .padding(.vertical, 12)
-    .background {
-      RoundedRectangle(cornerRadius: 18)
-        .fill(.regularMaterial)
-        .opacity(glassAppearance.isEnabled ? 1 - glassAppearance.clarity : 1)
-    }
-    .overlay {
-      RoundedRectangle(cornerRadius: 18)
-        .stroke(isComposerFocused ? NatureGlass.accent.opacity(0.55) : NatureGlass.accent.opacity(0.22),
-                lineWidth: isComposerFocused ? 1 : 0.5)
-    }
+    .padding(.leading, 12).padding(.trailing, compact ? 10 : 12).padding(.vertical, compact ? 10 : 12)
+    .modifier(NatureGlassSurface(radius: 44, enabled: glassAppearance.isEnabled, clarity: glassAppearance.clarity))
     .overlay {
       if localChat.activeRequest != nil { ThinkingComposerGlow().allowsHitTesting(false) }
     }
-    .shadow(color: NatureGlass.accent.opacity(isComposerFocused ? 0.07 : 0), radius: 10, y: 2)
+    .shadow(color: NatureGlass.accent.opacity(isComposerFocused ? 0.08 : 0), radius: 12)
     .animation(reduceMotion ? nil : .easeOut(duration: 0.2), value: isComposerFocused)
   }
 
   @ViewBuilder
   private var conversation: some View {
     if localChat.presentationMessages.isEmpty && localChat.activeRequest == nil {
-      Spacer()
-
-      VStack(spacing: 10) {
-        Image("SpotlightLogo")
-          .renderingMode(.template)
-          .resizable()
-          .scaledToFit()
-          .frame(width: 40, height: 40)
-          .accessibilityHidden(true)
-          .foregroundStyle(NatureGlass.accent)
-          .frame(width: 64, height: 64)
-          .background(NatureGlass.accent.opacity(0.06), in: Circle())
-          .overlay { Circle().stroke(NatureGlass.edge, lineWidth: 0.75) }
-          .padding(.bottom, 4)
-        Text("How can I help?")
-          .font(.system(size: 22, weight: .medium))
-        Text(welcomeSubtitle)
-          .font(.callout)
-          .foregroundStyle(.secondary)
-          .multilineTextAlignment(.center)
-
-        if selectedMode == .local && localChat.installedModel == nil {
-          Button("Choose GGUF Model") {
-            isModelImporterPresented = true
+      GeometryReader { geometry in
+        let compact = geometry.size.height < 370
+        VStack(spacing: compact ? 12 : 24) {
+          Spacer(minLength: 8)
+          if geometry.size.height >= 250 {
+            Image("SpotlightLogo")
+              .renderingMode(.template).resizable().scaledToFit()
+              .frame(width: compact ? 72 : 120, height: compact ? 72 : 120)
+              .foregroundStyle(NatureGlass.accent)
+              .shadow(color: NatureGlass.accent.opacity(0.22), radius: 16)
+              .accessibilityHidden(true)
           }
-          .buttonStyle(.borderedProminent)
-          .disabled(localChat.isBusy)
-          .padding(.top, 4)
+          Text("How can I help?")
+            .font(.system(size: compact ? 23 : 32, weight: .semibold)).tracking(-0.8)
+          compactModeControls
+          if selectedMode == .local && localChat.installedModel == nil {
+            Button("Choose GGUF Model") { isModelImporterPresented = true }
+              .buttonStyle(.borderedProminent).disabled(localChat.isBusy)
+          }
+          Spacer(minLength: 8)
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
       }
-
-      Spacer()
     } else {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 18) {
@@ -572,7 +668,7 @@ struct AppShellView: View {
               .id(message.id)
           }
           if localChat.isWaitingForResponse && localChat.presentationMessages.last?.role != .assistant {
-            LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false)
+            ThinkingStatusView().allowsHitTesting(false)
           }
         }
         .padding(24)
@@ -754,16 +850,23 @@ struct AppShellView: View {
   }
 
   private var compactModeControls: some View {
-    Picker("Mode", selection: $selectedMode) {
+    HStack(spacing: 0) {
       ForEach(ChatMode.allCases) { mode in
-        Text(mode.displayName).tag(mode)
+        Button { selectedMode = mode } label: {
+          Label(mode.displayName, systemImage: mode.systemImage)
+            .font(.system(size: 14, weight: .medium))
+            .frame(maxWidth: .infinity).frame(height: 38)
+            .foregroundStyle(selectedMode == mode ? NatureGlass.canvas : NatureGlass.primary)
+            .background(selectedMode == mode ? NatureGlass.accent : .clear, in: Capsule())
+        }
+        .buttonStyle(NatureButtonStyle())
+        .accessibilityAddTraits(selectedMode == mode ? .isSelected : [])
       }
     }
-    .pickerStyle(.segmented)
-    .help("Mode changes apply to your next request.")
-    .labelsHidden()
-    .controlSize(.small)
-    .frame(width: 190)
+    .padding(8).frame(maxWidth: 320)
+    .modifier(NatureGlassSurface(radius: 32, enabled: glassAppearance.isEnabled, clarity: glassAppearance.clarity))
+    .padding(.horizontal, 16)
+    .accessibilityLabel("Routing mode")
   }
 
   private var modePalette: some View {
@@ -821,12 +924,7 @@ struct AppShellView: View {
       }
       .padding(14)
       .frame(width: 300)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 18))
-      .overlay {
-        RoundedRectangle(cornerRadius: 18)
-          .stroke(NatureGlass.edge, lineWidth: 0.75)
-      }
-      .shadow(radius: 24, y: 10)
+      .natureSurface(radius: 24)
     }
   }
 
@@ -1078,7 +1176,7 @@ struct AppShellView: View {
 }
 
 enum ChatTypography {
-  static let body = Font.system(size: 15)
+  static let body = Font.system(size: 14)
   static let label = Font.system(size: 11, weight: .semibold)
 }
 
@@ -1117,14 +1215,10 @@ struct LocalMessageView: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
       } else {
         VStack(alignment: .leading, spacing: 8) {
-          HStack(spacing: 6) {
-            Circle().fill(NatureGlass.accent).frame(width: 5, height: 5).accessibilityHidden(true)
-            Text("AI Spotlight").font(ChatTypography.label).foregroundStyle(.secondary)
-          }
           if message.content.isEmpty {
-            if isThinking { LeafThinkingView().frame(width: 64, height: 64).allowsHitTesting(false) }
+            if isThinking { ThinkingStatusView().allowsHitTesting(false) }
           } else {
-            Text(renderedMarkdown).font(ChatTypography.body).lineSpacing(4).textSelection(.enabled)
+            ChatMarkdownView(content: message.content)
           }
           if let sources = message.searchSources, !sources.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
@@ -1140,10 +1234,6 @@ struct LocalMessageView: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-  }
-
-  private var renderedMarkdown: AttributedString {
-    (try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(message.content)
   }
 }
 
@@ -1165,7 +1255,7 @@ struct SentImagePreview: View {
 private extension ChatMode {
   var systemImage: String {
     switch self {
-    case .auto: "sparkles"
+    case .auto: "bolt"
     case .local: "laptopcomputer"
     case .cloud: "cloud"
     }
@@ -1184,7 +1274,7 @@ private struct KeyboardShortcutsHelpView: View {
         VStack(alignment: .leading, spacing: 16) {
           Text("Anywhere on your Mac")
             .font(.headline)
-          shortcut("Show or hide AI Spotlight", keys: "⌥ Space")
+          shortcut("Show or hide engima", keys: "⌥ Space")
           shortcut("Open Advanced Settings", keys: "⌥ S")
 
           Divider()
@@ -1196,6 +1286,7 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Open or close Mode & Model", keys: "⌘ K")
           shortcut("Stop the response", keys: "⌘ .")
           shortcut("Next recent chat", keys: "⌃ Tab")
+          shortcut("Show or hide chat history", keys: "⌃ twice")
           shortcut("Open Settings", keys: "⌘ ,")
           shortcut("Send from the message field", keys: "Return")
           shortcut("Complete a slash command", keys: "Tab / Return")
@@ -1239,7 +1330,7 @@ private struct KeyboardShortcutsHelpView: View {
     }
     .padding(24)
     .frame(width: 460, height: 400)
-    .background(.regularMaterial)
+    .naturePresentation()
     .onExitCommand { dismiss() }
   }
 
@@ -1318,22 +1409,65 @@ struct SettingsView: View {
   @State private var geminiAPIKey = ""
   @State private var formError: String?
 
-  init(settings: CloudSettingsModel = .shared) {
+  init(settings: CloudSettingsModel = .shared, initialDestination: SettingsDestination = .local) {
     self.settings = settings
+    _destination = State(initialValue: initialDestination)
+  }
+
+  @State private var destination: SettingsDestination
+  enum SettingsDestination: String, CaseIterable, Identifiable {
+    case local = "Local Models"
+    case cloud = "Cloud & Search"
+    var id: Self { self }
+    var symbol: String { self == .local ? "laptopcomputer" : "cloud" }
   }
 
   var body: some View {
-    TabView {
-      Form {
-        LocalModelManagerSection()
+    HStack(spacing: 0) {
+      VStack(alignment: .leading, spacing: 28) {
+        HStack(spacing: 12) {
+          Image("SpotlightLogo").renderingMode(.template).resizable().scaledToFit()
+            .frame(width: 36, height: 36).foregroundStyle(NatureGlass.accent)
+          Text("Settings").font(.system(size: 20, weight: .semibold))
+        }.padding(.horizontal, 12)
+        VStack(spacing: 8) {
+          ForEach(SettingsDestination.allCases) { item in
+            Button { destination = item } label: {
+              Label(item.rawValue, systemImage: item.symbol)
+                .font(.system(size: 14, weight: .medium))
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .background(destination == item ? NatureGlass.accent.opacity(0.14) : .clear, in: Capsule())
+                .overlay { if destination == item { Capsule().strokeBorder(NatureGlass.accent.opacity(0.2)) } }
+            }.buttonStyle(NatureButtonStyle())
+              .accessibilityAddTraits(destination == item ? .isSelected : [])
+          }
+        }
+        Spacer()
+        Text("engima").font(.caption).foregroundStyle(NatureGlass.secondary).padding(16)
       }
-        .formStyle(.grouped)
-        .tabItem { Label("Local Models", systemImage: "desktopcomputer") }
-      cloudForm
-        .tabItem { Label("Cloud & Search", systemImage: "cloud") }
+      .padding(12).frame(width: 208)
+      .natureSurface(navigation: true).padding(12)
+      VStack(alignment: .leading, spacing: 8) {
+        Text(destination.rawValue).font(.system(size: 24, weight: .semibold)).padding(.horizontal, 20).padding(.top, 24)
+        Text(destination == .local ? "Intelligence, right on your Mac." : "Connect your models and the web.")
+          .foregroundStyle(NatureGlass.secondary).padding(.horizontal, 20)
+        Group {
+          switch destination {
+          case .local:
+            Form { LocalModelManagerSection() }.formStyle(.grouped)
+          case .cloud:
+            cloudForm
+          }
+        }
+        .scrollContentBackground(.hidden)
+        .background(.white.opacity(0.025), in: RoundedRectangle(cornerRadius: 24))
+        .padding(.top, 12)
+      }
+      .padding(.trailing, 20).padding(.bottom, 20)
     }
-    .padding(.top, 8)
-    .frame(width: 560, height: 740)
+    .frame(width: 820, height: 680)
+    .naturePresentation()
   }
 
   private var cloudForm: some View {
@@ -1499,7 +1633,7 @@ struct SettingsView: View {
       }
     }
     .formStyle(.grouped)
-    .navigationTitle("AI Spotlight Settings")
+    .navigationTitle("engima Settings")
     .task {
       await settings.refreshChatGPTAccount()
       await settings.loadCachedModels()
@@ -1584,24 +1718,50 @@ struct SettingsView: View {
 }
 
 
-private struct LeafThinkingView: NSViewRepresentable {
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
+struct ThinkingStatusView: View {
+  var body: some View {
+    HStack(spacing: 2) {
+      ElasticJuggleView().frame(width: 80, height: 64).accessibilityHidden(true)
+      Text("Thinking")
+        .font(.system(size: 14, weight: .medium))
+        .foregroundStyle(.white.opacity(0.45))
+        .overlay {
+          GeometryReader { geometry in
+            TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+              let progress = timeline.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: 2) / 2
+              LinearGradient(colors: [.clear, .white, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 32)
+                .offset(x: -32 + (geometry.size.width + 64) * progress)
+            }
+          }
+          .mask(Text("Thinking").font(.system(size: 14, weight: .medium)))
+          .accessibilityHidden(true)
+        }
+    }
+    .fixedSize()
+    .accessibilityElement(children: .ignore)
+    .accessibilityLabel("Thinking")
+  }
+}
 
+private struct ElasticJuggleView: NSViewRepresentable {
   func makeNSView(context: Context) -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.setValue(false, forKey: "drawsBackground")
-    view.setAccessibilityLabel("AI Spotlight is thinking")
+    view.setAccessibilityLabel("engima is thinking")
     return view
   }
 
   func updateNSView(_ view: WKWebView, context: Context) {
-    guard view.identifier?.rawValue != String(reduceMotion) else { return }
-    view.identifier = NSUserInterfaceItemIdentifier(String(reduceMotion))
-    guard let asset = NSDataAsset(name: "LeafThinking"), let svg = String(data: asset.data, encoding: .utf8) else { return }
-    let reducedStyle = reduceMotion ? ".leaf-cycle,.leaf-sway,.stem-grow,.leaf-unfurl,.leaf-tilt { animation: none !important; opacity: 1; transform: none; }" : ""
-    view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(reducedStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
+    guard view.identifier == nil else { return }
+    guard let asset = NSDataAsset(name: "ElasticJuggle"), let svg = String(data: asset.data, encoding: .utf8) else { return }
+    view.identifier = NSUserInterfaceItemIdentifier("elastic-juggle")
+    // This indicator always animates; override the supplied SVG's still fallback.
+    let motionStyle = ".ej-motion { display: inline !important; } .ej-still { display: none !important; }"
+    view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(motionStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
   }
 }
 
@@ -1610,7 +1770,7 @@ private struct ThinkingComposerGlow: View {
   var body: some View {
     TimelineView(.animation(minimumInterval: 1.0 / 30, paused: reduceMotion)) { timeline in
       let angle = reduceMotion ? 0 : timeline.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 3) / 3 * 360
-      RoundedRectangle(cornerRadius: 18)
+      RoundedRectangle(cornerRadius: 44)
         .stroke(AngularGradient(colors: [.green.opacity(0.1), .green.opacity(0.2), .green, .mint, .green.opacity(0.1)],
                                 center: .center, angle: .degrees(angle)), lineWidth: 2)
         .shadow(color: .green.opacity(0.5), radius: 6)

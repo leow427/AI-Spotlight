@@ -4,6 +4,7 @@ import LocalAuthentication
 import Security
 import SwiftUI
 import XCTest
+import WebKit
 @testable import PrimaryAgent
 
 @MainActor
@@ -12,7 +13,7 @@ final class ScreenViewTests: XCTestCase {
     let text = "Explain /think using /"
     let view = NSHostingView(rootView: SlashCommandComposer(text: .constant(text),
       isFocused: .constant(true), isEnabled: true, submit: {})
-      .padding(16).frame(width: 480).environment(\.colorScheme, .dark))
+      .padding(.top, 240).padding(16).frame(width: 480).environment(\.colorScheme, .dark))
     let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 280),
       styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view
@@ -34,6 +35,116 @@ final class ScreenViewTests: XCTestCase {
     attachment.name = "Slash command suggestions"
     attachment.lifetime = .keepAlways
     add(attachment)
+  }
+
+  func testMarkdownResponseRendersInBothAppearances() throws {
+    let content = ####"""
+      \### A cleaner response
+
+      \* **Bold**, *italic*, `inline code`, and [a link](https://example.com).
+      \* Another bullet with a longer sentence that wraps naturally in the chat.
+
+      1. First step
+      2. Second step
+
+      > A useful quote with **emphasis**.
+
+      ```swift
+      let path = #"C:\Users\leo\notes.md"#
+      ```
+
+      | Model | Output |
+      | --- | --- |
+      | Local | Clean Markdown |
+      | ChatGPT | Clean Markdown |
+      """####
+    for scheme in [ColorScheme.light, .dark] {
+      let view = NSHostingView(rootView: LocalMessageView(message: ChatMessage(role: .assistant, content: content))
+        .padding(24).frame(width: 620).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme))
+      let size = view.fittingSize
+      XCTAssertGreaterThan(size.height, 300)
+      let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = view
+      defer { window.contentView = nil }
+      view.frame = NSRect(origin: .zero, size: size)
+      view.layoutSubtreeIfNeeded()
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Markdown-\(scheme == .dark ? "dark" : "light").png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Markdown response"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+  }
+
+  func testElasticThinkingRendersAnimation() async throws {
+    XCTAssertNotNil(NSDataAsset(name: "ElasticJuggle"))
+    let view = NSHostingView(rootView: ThinkingStatusView()
+      .padding(16).frame(width: 200, height: 96).background(NatureGlass.canvas))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 200, height: 96),
+      styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = view
+    defer { window.contentView = nil }
+    view.layoutSubtreeIfNeeded()
+    let web = try XCTUnwrap(descendants(view).compactMap { $0 as? WKWebView }.first)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    var ready = false
+    repeat {
+      ready = (try? await web.evaluateJavaScript("document.readyState === 'complete' && !!document.querySelector('.ej-still')")) as? Bool == true
+      if !ready { await Task.yield() }
+    } while !ready && ContinuousClock.now < deadline
+    XCTAssertTrue(ready, "The bundled SVG must finish loading")
+    let motionDisplay = try await web.evaluateJavaScript("getComputedStyle(document.querySelector('.ej-motion')).display") as? String
+    let stillDisplay = try await web.evaluateJavaScript("getComputedStyle(document.querySelector('.ej-still')).display") as? String
+    XCTAssertNotEqual(motionDisplay, "none")
+    XCTAssertEqual(stillDisplay, "none")
+    _ = try await web.evaluateJavaScript("document.querySelector('svg').pauseAnimations(); document.querySelector('svg').setCurrentTime(0); true")
+    let first = try await web.takeSnapshot(configuration: nil)
+    let bitmap = NSBitmapImageRep(cgImage: try XCTUnwrap(first.cgImage(forProposedRect: nil, context: nil, hints: nil)))
+    let visible = (0..<bitmap.pixelsWide).reduce(0) { count, x in
+      count + (0..<bitmap.pixelsHigh).filter { y in (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 0) > 0.2 }.count
+    }
+    XCTAssertGreaterThan(visible, 10, "Juggle artwork must render, not a blank web view")
+    _ = try await web.evaluateJavaScript("document.querySelector('svg').setCurrentTime(1); true")
+    let next = try await web.takeSnapshot(configuration: nil)
+    XCTAssertNotEqual(first.tiffRepresentation, next.tiffRepresentation, "The supplied juggle must change across its timeline")
+    let preview = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: preview)
+    let png = try XCTUnwrap(preview.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/engima-Thinking-Animated.png"))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Thinking · elastic juggle"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
+  func testLiquidGlassSettingsAndAssetsRender() throws {
+    for name in ["ForestBackdrop", "TemplateAttachment"] {
+      let image = try XCTUnwrap(NSImage(named: name))
+      XCTAssertNotNil(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    }
+    let credentials = ScreenTestCredentialStore()
+    let settings = CloudSettingsModel(credentialStore: credentials,
+      catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport()),
+      codexAvailable: { false })
+    for destination in SettingsView.SettingsDestination.allCases {
+      let view = NSHostingView(rootView: SettingsView(settings: settings, initialDestination: destination))
+      let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 680), styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = view
+      defer { window.contentView = nil }
+      view.layoutSubtreeIfNeeded()
+      XCTAssertEqual(view.fittingSize, NSSize(width: 820, height: 680))
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Glass-Settings-\(destination == .local ? "Local" : "Cloud").png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Liquid Glass settings · \(destination.rawValue)"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
   }
 
   func testConversationBubblesAndSentAttachmentRender() throws {
@@ -501,6 +612,88 @@ final class ScreenViewTests: XCTestCase {
     defer { controller.hide() }
     let window = try XCTUnwrap(view.window)
 
+    for size in [NSSize(width: 1200, height: 780), NSSize(width: 640, height: 420)] {
+      window.setContentSize(size)
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+      let field = try composerField(in: view)
+      XCTAssertTrue(view.bounds.contains(view.convert(field.bounds, from: field)))
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Glass-\(Int(size.width)).png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Liquid Glass welcome \(Int(size.width))"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+
+      let composerFrame = view.convert(field.bounds, from: field)
+      screen.draft = "Explain /think using /"
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+      XCTAssertTrue(window.makeFirstResponder(field))
+      await Task.yield()
+      field.setSelectedRange(NSRange(location: (field.string as NSString).length, length: 0))
+      field.completion?.refresh()
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+      XCTAssertEqual(field.completion?.commands, SlashCommand.allCases)
+      XCTAssertEqual(view.convert(field.bounds, from: field), composerFrame,
+                     "Suggestions must not resize or move the compact composer")
+      XCTAssertEqual(field.font?.pointSize, size.width < 900 ? 14 : 15)
+      let deadline = ContinuousClock.now.advanced(by: .seconds(2))
+      var menuText = ""
+      var menuPNG = Data()
+      repeat {
+        await Task.yield()
+        view.layoutSubtreeIfNeeded()
+        window.displayIfNeeded()
+        let menuBitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: menuBitmap)
+        menuText = try await ScreenOCRService().recognize(XCTUnwrap(menuBitmap.cgImage)).text.lowercased()
+        menuPNG = try XCTUnwrap(menuBitmap.representation(using: .png, properties: [:]))
+      } while !menuText.contains("search the web") && ContinuousClock.now < deadline
+      XCTAssertTrue(menuText.contains("search the web"), "Suggestions must be visibly rendered: \(menuText)")
+      try menuPNG.write(to: URL(fileURLWithPath: "/tmp/engima-Slash-Commands-\(Int(size.width)).png"))
+      let menuAttachment = XCTAttachment(data: menuPNG, uniformTypeIdentifier: "public.png")
+      menuAttachment.name = "engima slash commands \(Int(size.width))"
+      menuAttachment.lifetime = .keepAlways
+      add(menuAttachment)
+      field.completion?.dismiss()
+      screen.draft = ""
+    }
+    window.setContentSize(NSSize(width: 752, height: 462))
+
+    view.layoutSubtreeIfNeeded()
+    XCTAssertFalse(descendants(view).compactMap { $0 as? NSScrollView }.contains {
+      let frame = view.convert($0.bounds, from: $0)
+      return frame.minX < 30 && frame.width >= 176 && frame.width < 270
+    }, "History must be hidden when the app starts")
+    NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
+    try await assertPanelControls(view, phase: "history opened from hidden startup")
+
+    screen.draft = "Preserve this draft while toggling history"
+    NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
+    await Task.yield()
+    view.layoutSubtreeIfNeeded()
+    let hiddenBitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: hiddenBitmap)
+    let hiddenText = try await ScreenOCRService().recognize(XCTUnwrap(hiddenBitmap.cgImage)).text.lowercased()
+    XCTAssertTrue(hiddenText.contains("help"), "Help must remain visible without the sidebar")
+    XCTAssertEqual(screen.draft, "Preserve this draft while toggling history")
+    XCTAssertEqual(chat.selectedSessionID, session)
+    let hiddenPNG = try XCTUnwrap(hiddenBitmap.representation(using: .png, properties: [:]))
+    try hiddenPNG.write(to: URL(fileURLWithPath: "/tmp/engima-Hidden-Sidebar.png"))
+    let hiddenAttachment = XCTAttachment(data: hiddenPNG, uniformTypeIdentifier: "public.png")
+    hiddenAttachment.name = "Hidden history with accessible Help"
+    hiddenAttachment.lifetime = .keepAlways
+    add(hiddenAttachment)
+    NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
+    await Task.yield()
+    try await assertPanelControls(view, phase: "sidebar restored")
+    XCTAssertEqual(chat.selectedSessionID, session)
+    screen.draft = ""
+
     // The layout failure is also reachable on a first blocked request; it
     // depends on the detail's measurement, not a global submission counter.
     screen.draft = "Describe the colors in this diagram."
@@ -580,10 +773,6 @@ final class ScreenViewTests: XCTestCase {
     await Task.yield()
     view.layoutSubtreeIfNeeded()
     view.window?.displayIfNeeded()
-    let split = try XCTUnwrap(descendants(view).compactMap { $0 as? NSSplitView }.first)
-    let splitFrame = view.convert(split.bounds, from: split)
-    XCTAssertEqual(splitFrame.minY, 0, accuracy: 1, "Split offset during \(phase): \(splitFrame)")
-    XCTAssertEqual(splitFrame.height, view.bounds.height, accuracy: 1, "Split overflow during \(phase): \(splitFrame)")
     let field = try composerField(in: view)
     let fieldFrame = view.convert(field.bounds, from: field)
     XCTAssertTrue(view.bounds.contains(fieldFrame), "Composer outside panel during \(phase): \(fieldFrame)")
@@ -599,14 +788,16 @@ final class ScreenViewTests: XCTestCase {
     let text = try await ScreenOCRService().recognize(try XCTUnwrap(bitmap.cgImage)).text.lowercased()
     // Native glass renders on a separate surface from cacheDisplay. Verify
     // the actual sidebar, its scroll content, and its position in the panel.
-    let sidebar = try XCTUnwrap(split.arrangedSubviews.min { $0.frame.width < $1.frame.width })
-    XCTAssertFalse(split.isSubviewCollapsed(sidebar))
-    XCTAssertFalse(sidebar.isHiddenOrHasHiddenAncestor)
-    XCTAssertGreaterThan(sidebar.frame.width, 180)
-    XCTAssertLessThan(sidebar.frame.width, 270)
-    XCTAssertTrue(view.bounds.contains(view.convert(sidebar.bounds, from: sidebar)),
-      "History sidebar outside panel during \(phase)")
-    let history = try XCTUnwrap(descendants(sidebar).compactMap { $0 as? NSScrollView }.first)
+    let history = try XCTUnwrap(descendants(view).compactMap { $0 as? NSScrollView }.first {
+      view.convert($0.bounds, from: $0).minX < 30
+    })
+    let historyFrame = view.convert(history.bounds, from: history)
+    XCTAssertFalse(history.isHiddenOrHasHiddenAncestor)
+    XCTAssertGreaterThanOrEqual(historyFrame.width, 176)
+    XCTAssertLessThan(historyFrame.width, 270)
+    XCTAssertEqual(historyFrame.minY, 12, accuracy: 1, "Inset sidebar moved during \(phase)")
+    XCTAssertEqual(historyFrame.height, view.bounds.height - 24, accuracy: 1)
+    XCTAssertTrue(view.bounds.contains(historyFrame), "History outside panel during \(phase)")
     XCTAssertGreaterThan(try XCTUnwrap(history.documentView).frame.height, 0)
     XCTAssertTrue(text.contains("auto"), "Composer mode missing during \(phase): \(text)")
   }

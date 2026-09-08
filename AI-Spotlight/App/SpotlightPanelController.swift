@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct PanelSizeStore {
-  static let defaultSize = NSSize(width: 760, height: 520)
+  static let defaultSize = NSSize(width: 1200, height: 780)
   static let minimumSize = NSSize(width: 640, height: 420)
 
   private enum Key {
@@ -72,7 +72,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     super.init()
 
     panel.delegate = self
-    panel.title = "AI Spotlight"
+    panel.title = "engima"
     // Best-effort exclusion for capture clients that honor the legacy window flag.
     // ScreenCaptureKit may still include this window; keep it visible locally.
     panel.sharingType = .none
@@ -163,6 +163,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
   private func perform(_ shortcut: PanelShortcut) {
     switch shortcut {
+    case .toggleSidebar:
+      NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
     case .fileMode:
       NotificationCenter.default.post(name: .fileModeRequested, object: nil)
     case .newChat:
@@ -182,11 +184,28 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 }
 
 private final class SpotlightPanel: NSPanel {
+  private var controlDoubleTap = ControlDoubleTap()
   var onHide: (() -> Void)?
   var onShortcut: ((PanelShortcut) -> Void)?
 
   override var canBecomeKey: Bool { true }
   override var canBecomeMain: Bool { false }
+
+  override func sendEvent(_ event: NSEvent) {
+    if event.type == .flagsChanged {
+      if isKeyWindow && controlDoubleTap.flagsChanged(keyCode: event.keyCode, modifiers: event.modifierFlags, timestamp: event.timestamp) {
+        onShortcut?(.toggleSidebar)
+      }
+    } else if [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown].contains(event.type) {
+      controlDoubleTap.reset()
+    }
+    super.sendEvent(event)
+  }
+
+  override func resignKey() {
+    controlDoubleTap.reset()
+    super.resignKey()
+  }
 
   override func keyDown(with event: NSEvent) {
     guard event.keyCode != 53 else {
@@ -197,6 +216,7 @@ private final class SpotlightPanel: NSPanel {
   }
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
+    controlDoubleTap.reset()
     if event.keyCode == 53 {
       if let editor = firstResponder as? SlashCommandTextView, editor.completion?.dismiss() == true { return true }
       onHide?()

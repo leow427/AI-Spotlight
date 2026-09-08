@@ -5,20 +5,31 @@ struct SlashCommandComposer: View {
   @Binding var text: String
   @Binding var isFocused: Bool
   var isEnabled: Bool
+  var fontSize: CGFloat = 15
   var submit: () -> Void
   @StateObject private var completion = CommandCompletionModel()
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
+    ZStack(alignment: .topLeading) {
+      if text.isEmpty {
+        Text("Ask anything...").font(.system(size: fontSize)).foregroundStyle(.tertiary)
+          .allowsHitTesting(false).accessibilityHidden(true)
+      }
+      CommandTextEditor(text: $text, isFocused: $isFocused, isEnabled: isEnabled,
+                        completion: completion, fontSize: fontSize, submit: submit)
+        .frame(height: completion.height)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
+    .overlay(alignment: .bottomLeading) {
       if isFocused && isEnabled && !completion.commands.isEmpty {
         VStack(alignment: .leading, spacing: 2) {
           ForEach(Array(completion.commands.enumerated()), id: \.element) { index, command in
             Button { completion.accept(command) } label: {
               HStack(spacing: 10) {
                 Image(systemName: command.symbol).font(.system(size: 17))
-                  .frame(width: 24).foregroundStyle(.blue)
+                  .frame(width: 24).foregroundStyle(command.tint)
                 VStack(alignment: .leading, spacing: 2) {
-                  Text(command.token).font(.system(size: 13, weight: .semibold)).foregroundStyle(.blue)
+                  Text(command.token).font(.system(size: 13, weight: .semibold)).foregroundStyle(command.tint)
                   Text(command.description).font(.system(size: 11)).foregroundStyle(.secondary)
                 }
                 Spacer(minLength: 0)
@@ -26,7 +37,7 @@ struct SlashCommandComposer: View {
               }
               .padding(8)
               .contentShape(Rectangle())
-              .background(index == completion.selected ? Color.blue.opacity(0.12) : .clear,
+              .background(index == completion.selected ? command.tint.opacity(0.12) : .clear,
                           in: RoundedRectangle(cornerRadius: 8))
             }
             .buttonStyle(.plain)
@@ -39,18 +50,11 @@ struct SlashCommandComposer: View {
         .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Slash commands")
-      }
-      ZStack(alignment: .topLeading) {
-        if text.isEmpty {
-          Text("Ask anything").font(ChatTypography.body).foregroundStyle(.tertiary)
-            .allowsHitTesting(false).accessibilityHidden(true)
-        }
-        CommandTextEditor(text: $text, isFocused: $isFocused, isEnabled: isEnabled,
-                          completion: completion, submit: submit)
-          .frame(height: completion.height)
+        .frame(width: 320)
+        .fixedSize(horizontal: false, vertical: true)
+        .padding(.bottom, completion.height + 18)
       }
     }
-    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }
 
@@ -164,14 +168,14 @@ final class SlashCommandTextView: NSTextView {
     guard !hasMarkedText(), let storage = textStorage else { return }
     let selection = selectedRanges
     storage.beginEditing()
-    storage.addAttributes([.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: 15)],
+    storage.addAttributes([.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: font?.pointSize ?? 15)],
                           range: NSRange(location: 0, length: storage.length))
     for token in SlashCommand.tokens(in: string) {
       storage.addAttribute(.foregroundColor, value: NSColor.systemBlue, range: token.range)
     }
     storage.endEditing()
     selectedRanges = selection
-    typingAttributes = [.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: 15)]
+    typingAttributes = [.foregroundColor: NSColor.labelColor, .font: NSFont.systemFont(ofSize: font?.pointSize ?? 15)]
   }
 }
 
@@ -180,6 +184,7 @@ private struct CommandTextEditor: NSViewRepresentable {
   @Binding var isFocused: Bool
   var isEnabled: Bool
   var completion: CommandCompletionModel
+  var fontSize: CGFloat = 15
   var submit: () -> Void
 
   func makeCoordinator() -> Coordinator { Coordinator(self) }
@@ -199,8 +204,8 @@ private struct CommandTextEditor: NSViewRepresentable {
     editor.isVerticallyResizable = true
     editor.autoresizingMask = [.width]
     editor.textContainer?.widthTracksTextView = true
-    editor.font = .systemFont(ofSize: 15)
-    editor.setAccessibilityLabel("Ask anything")
+    editor.font = .systemFont(ofSize: fontSize)
+    editor.setAccessibilityLabel("Message")
     editor.setAccessibilityHelp("Type slash for commands. Use arrow keys to choose, Tab or Return to complete, Escape to dismiss, and Shift Return for a new line.")
     editor.delegate = context.coordinator
     editor.completion = completion
@@ -217,7 +222,9 @@ private struct CommandTextEditor: NSViewRepresentable {
     editor.focusChanged = { focused in
       DispatchQueue.main.async { context.coordinator.parent.isFocused = focused }
     }
-    if editor.string != text, !editor.hasMarkedText() {
+    let needsFontUpdate = editor.font?.pointSize != fontSize
+    if needsFontUpdate { editor.font = .systemFont(ofSize: fontSize) }
+    if (editor.string != text || needsFontUpdate), !editor.hasMarkedText() {
       editor.delegate = nil
       editor.string = text
       editor.highlightCommands()
@@ -251,6 +258,17 @@ private struct CommandTextEditor: NSViewRepresentable {
     }
     func textViewDidChangeSelection(_ notification: Notification) {
       parent.completion.refresh()
+    }
+  }
+}
+
+private extension SlashCommand {
+  var tint: Color {
+    switch self {
+    case .search: .blue
+    case .screen: .purple
+    case .snapshot: .orange
+    case .think: .pink
     }
   }
 }
