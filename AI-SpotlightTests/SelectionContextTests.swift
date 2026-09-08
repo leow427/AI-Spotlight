@@ -5,6 +5,39 @@ import XCTest
 
 @MainActor
 final class SelectionContextTests: XCTestCase {
+  func testReplacementReleasesPanelAndRestoresTheSameChatWindow() throws {
+    let field = NSTextField(string: "Keep this draft")
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(field.window)
+    let frame = window.frame
+    NotificationCenter.default.post(name: .selectionReplacementBegan, object: nil)
+    XCTAssertFalse(window.isVisible)
+    XCTAssertFalse(window.isKeyWindow)
+    NotificationCenter.default.post(name: .selectionReplacementEnded, object: nil)
+    XCTAssertTrue(window.isVisible)
+    XCTAssertTrue(field.window === window)
+    XCTAssertEqual(window.frame, frame)
+    XCTAssertEqual(field.stringValue, "Keep this draft")
+  }
+
+  func testReplacementAcknowledgementRequiresExactExpectedEdit() {
+    let range = CFRange(location: 4, length: 5)
+    XCTAssertTrue(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "Say goodbye now",
+      range: range, originalSelection: "hello", replacement: "goodbye"))
+    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "Say hello now",
+      range: range, originalSelection: "hello", replacement: "goodbye"))
+    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "goodbye",
+      range: range, originalSelection: "hello", replacement: "goodbye"))
+    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: nil, currentValue: "goodbye",
+      range: range, originalSelection: "hello", replacement: "goodbye"))
+    XCTAssertFalse(SelectionReplacementPolicy.confirms(originalValue: "Say hello now", currentValue: "Say goodbye now",
+      range: CFRange(location: 400, length: 5), originalSelection: "hello", replacement: "goodbye"))
+    XCTAssertTrue(SelectionReplacementPolicy.confirms(originalValue: "Hi 👋!", currentValue: "Hi 🌍!",
+      range: CFRange(location: 3, length: 2), originalSelection: "👋", replacement: "🌍"))
+  }
+
   func testAccessibilityRequestOpensSettingsEvenWhenSystemPromptDoesNotGrantAccess() {
     var operations: [String] = []
     let access = SelectionAccessibilityAccess(checkTrust: { false }, prompt: { operations.append("prompt") },

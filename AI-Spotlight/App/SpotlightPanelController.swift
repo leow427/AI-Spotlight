@@ -93,12 +93,26 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     NotificationCenter.default.addObserver(self, selector: #selector(beginScreenCapture), name: .screenCaptureBegan, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(endScreenCapture), name: .screenCaptureEnded, object: nil)
 
+    NotificationCenter.default.addObserver(self, selector: #selector(beginSelectionReplacement), name: .selectionReplacementBegan, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(endSelectionReplacement), name: .selectionReplacementEnded, object: nil)
     panel.onHide = { [weak self] in
       self?.hide()
     }
     panel.onShortcut = { [weak self] shortcut in
       self?.perform(shortcut)
     }
+  }
+
+  @objc private func beginSelectionReplacement() {
+    // A nonactivating panel can own keyboard focus while the source is already
+    // frontmost. Activating that app alone does not release the panel's focus.
+    panel.orderOut(nil)
+  }
+
+  @objc private func endSelectionReplacement() {
+    panel.orderFrontRegardless()
+    panel.makeKey()
+    NotificationCenter.default.post(name: .panelPresented, object: nil)
   }
 
   private var selectionInvocation: Task<Void, Never>?

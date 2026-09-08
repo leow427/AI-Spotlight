@@ -67,8 +67,13 @@ Replace Selection opens an editable preview of the exact replacement text and
 requires an explicit second click. It is offered only with a verifiable editable
 AX target, original window and nonempty range. It expires after five minutes.
 The original field, window, range, text, editability and secure status must still
-match after activation. Enigma never reselects a stale range. It uses AXSelectedText
-when writable and otherwise uses a guarded paste. An ambiguous write is never
+match after activation. The review sheet finishes dismissing and the nonactivating
+panel leaves the window server before returning focus to the source; activating
+an already-frontmost source alone does not release panel keyboard focus. Enigma
+never reselects a stale range. It uses AXSelectedText when writable in native
+editors and a guarded paste for web content, where a setter can acknowledge a
+write without editing the document. Both paths check the resulting text before
+reporting success. The same panel returns to display success or failure. An ambiguous write is never
 retried automatically. Read-only browser selections remain usable as context but
 cannot be replaced. A target without enough AX identity is capture-only.
 
@@ -78,10 +83,21 @@ Automated regression tests cover solo-tap recognition and rejection, screen-edge
 placement (including negative display coordinates), all-item clipboard restoration
 and competing writes, expiry/range safety, budgeted request context, temporary-chat
 archive isolation, follow-ups and removal, local/cloud/search integration, and a
-native render of the context card. The build, full test suite, and analyzer are
+native render of the context card. Replacement regressions also cover releasing
+the panel and restoring the same window/draft, unchanged or incorrect write
+results, out-of-bounds ranges, and UTF-16 text replacement. The build, full test suite, and analyzer are
 required before publication.
 
-Cross-app permission and editing behavior still needs interactive verification
+Interactive verification on September 8, 2026: with the signed Xcode build, the
+user invoked Selection Context and confirmed replacement in the disposable Safari
+contenteditable fixture. Computer-use inspection independently read the changed
+source value (`hello`) and Enigma’s `Selection replaced.` result. Physical global
+shortcut invocation was performed by the user because background computer-use
+keystrokes do not reproduce that macOS focus transition. This does not establish
+Google Docs compatibility: canvas fields without a verifiable nonempty AX range
+remain capture-only.
+
+Other cross-app permission and editing behavior still needs interactive verification
 with the **stably signed Xcode app**. Do not launch the unsigned verification app
 for that purpose. App-hosted unit tests do not establish that every version of
 Chrome, Safari/Google Docs, Notes, Word, VS Code, Xcode or Slack exposes the same

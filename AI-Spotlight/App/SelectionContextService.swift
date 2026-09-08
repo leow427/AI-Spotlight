@@ -113,25 +113,36 @@ final class SelectionContextService: ObservableObject {
   /// Never reselect text. Revalidate the still-selected range, field, window and text.
   func replace(with text: String, contextID: UUID) async -> Bool {
     guard !isWorking, let target, target.contextID == contextID,
-          !text.isEmpty, text.utf8.count <= 256_000 else { return false }
+          !text.isEmpty, text.utf8.count <= 256_000 else {
+      notice = "Replacement is unavailable. Select the text again and invoke Enigma."
+      return false
+    }
     isWorking = true
     defer { isWorking = false }
     let interaction = SelectionInteractionGuard()
     defer { interaction.stop() }
     guard SelectionReplacementPolicy.isFresh(capturedAt: target.capturedAt, now: .now), !target.app.isTerminated,
           AXIsProcessTrusted(), isSafe(target.element) else { return refuseReplacement() }
+    NotificationCenter.default.post(name: .selectionReplacementBegan, object: nil)
+    defer { NotificationCenter.default.post(name: .selectionReplacementEnded, object: nil) }
     target.app.activate(options: [])
     for _ in 0..<15 {
       if sameFocus(app: target.app, element: target.element) { break }
       try? await Task.sleep(for: .milliseconds(20))
     }
     guard await validate(target), !interaction.interrupted else { return refuseReplacement() }
+    let originalValue = attribute(target.element, kAXValueAttribute) as? String
     var settable = DarwinBoolean(false)
-    if AXUIElementIsAttributeSettable(target.element, kAXSelectedTextAttribute as CFString, &settable) == .success,
+    // Web accessibility setters may acknowledge a write without dispatching an
+    // editor input event. Use the browser's normal paste path for web content.
+    if !isWebContent(target.element), AXUIElementIsAttributeSettable(target.element, kAXSelectedTextAttribute as CFString, &settable) == .success,
        settable.boolValue {
       // A failed write can be ambiguous; never follow it with a second mutation.
       guard AXUIElementSetAttributeValue(target.element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
         return refuseReplacement()
+      }
+      guard await confirmReplacement(target, replacement: text, originalValue: originalValue) else {
+        return unconfirmedReplacement()
       }
     } else {
       let board = NSPasteboard.general
@@ -142,26 +153,36 @@ final class SelectionContextService: ObservableObject {
       defer { snapshot.restore(board, ifUnchanged: count) }
       guard matchesTarget(target), isSafe(target.element) else { return refuseReplacement() }
       postCommand(key: 9, pid: target.app.processIdentifier)
-      // Hold the temporary clipboard until the receiver consumes the paste.
-      // Abort on focus changes; never retry a paste whose outcome is ambiguous.
-      var acknowledged = false
-      for _ in 0..<30 {
-        try? await Task.sleep(for: .milliseconds(20))
-        guard sameFocus(app: target.app, element: target.element) else { break }
-        if let range = selectedRange(target.element), range.location != target.range.location || range.length != target.range.length {
-          acknowledged = true; break
-        }
-        if let current = selectedText(target.element), current != target.text { acknowledged = true; break }
-      }
-      if !acknowledged {
-        self.target = nil
-        notice = "The app did not confirm replacement. Check the source before trying again."
-        return false
+      // Keep the clipboard until the receiver exposes the expected text.
+      guard await confirmReplacement(target, replacement: text, originalValue: originalValue) else {
+        return unconfirmedReplacement()
       }
     }
     self.target = nil
     notice = "Selection replaced."
     return true
+  }
+
+  private func confirmReplacement(_ target: Target, replacement: String, originalValue: String?) async -> Bool {
+    for _ in 0..<30 {
+      try? await Task.sleep(for: .milliseconds(20))
+      guard sameFocus(app: target.app, element: target.element), isSafe(target.element) else { return false }
+      let currentValue = attribute(target.element, kAXValueAttribute) as? String
+      if SelectionReplacementPolicy.confirms(originalValue: originalValue, currentValue: currentValue,
+        range: target.range, originalSelection: target.text, replacement: replacement) { return true }
+      let replacedRange = CFRange(location: target.range.location, length: (replacement as NSString).length)
+      if textForRange(target.element, range: replacedRange) == replacement,
+         selectedRange(target.element).map({ $0.location == replacedRange.location + replacedRange.length && $0.length == 0 }) == true {
+        return true
+      }
+    }
+    return false
+  }
+
+  private func unconfirmedReplacement() -> Bool {
+    target = nil
+    notice = "The app did not confirm replacement. Check the source before trying again."
+    return false
   }
 
   private func refuseReplacement() -> Bool {
@@ -222,6 +243,16 @@ final class SelectionContextService: ObservableObject {
     guard NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier,
           let focused = self.element(AXUIElementCreateApplication(app.processIdentifier), kAXFocusedUIElementAttribute) else { return false }
     return CFEqual(focused, element)
+  }
+
+  private func isWebContent(_ element: AXUIElement) -> Bool {
+    var current: AXUIElement? = element
+    for _ in 0..<32 {
+      guard let node = current else { break }
+      if attribute(node, kAXRoleAttribute) as? String == "AXWebArea" { return true }
+      current = self.element(node, kAXParentAttribute)
+    }
+    return false
   }
 
   private func isEditable(_ element: AXUIElement) -> Bool {
@@ -303,6 +334,15 @@ enum SelectionPanelPlacement {
 
 /// A replacement capability expires quickly and never accepts an insertion point.
 enum SelectionReplacementPolicy {
+  static func confirms(originalValue: String?, currentValue: String?, range: CFRange,
+                       originalSelection: String, replacement: String) -> Bool {
+    guard let originalValue, let currentValue, range.location >= 0, range.length > 0 else { return false }
+    let original = originalValue as NSString
+    guard range.location <= original.length, range.length <= original.length - range.location,
+          original.substring(with: NSRange(location: range.location, length: range.length)) == originalSelection else { return false }
+    return currentValue == original.replacingCharacters(in: NSRange(location: range.location, length: range.length), with: replacement)
+  }
+
   static func isFresh(capturedAt: Date, now: Date) -> Bool {
     let age = now.timeIntervalSince(capturedAt)
     return age >= 0 && age < 300

@@ -238,6 +238,7 @@ struct AppShellView: View {
   @ObservedObject private var selectionContext = SelectionContextService.shared
   @State private var replacementMessage: ChatMessage?
   @State private var replacementText = ""
+  @State private var pendingReplacement: (contextID: UUID, text: String)?
   @State private var expandedActivities: Set<UUID> = []
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
@@ -481,7 +482,11 @@ struct AppShellView: View {
         localChat.stopStreaming()
       }
     }
-    .sheet(item: $replacementMessage) { _ in
+    .sheet(item: $replacementMessage, onDismiss: {
+      guard let request = pendingReplacement else { return }
+      pendingReplacement = nil
+      Task { _ = await selectionContext.replace(with: request.text, contextID: request.contextID) }
+    }) { _ in
       VStack(alignment: .leading, spacing: 16) {
         Text("Replace Selection").font(.headline)
         Text("Review or edit the text that will replace the original selection.").font(.caption)
@@ -491,9 +496,8 @@ struct AppShellView: View {
           Spacer()
           Button("Replace Selection") {
             guard let contextID = localChat.attachedContexts.first?.id else { return }
+            pendingReplacement = (contextID, replacementText)
             replacementMessage = nil
-            let text = replacementText
-            Task { _ = await selectionContext.replace(with: text, contextID: contextID) }
           }.buttonStyle(.borderedProminent)
         }
       }.padding(24).frame(width: 520, height: 360).naturePresentation()
