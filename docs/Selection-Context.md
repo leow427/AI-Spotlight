@@ -64,16 +64,31 @@ mouse, scroll and focus changes abort capture/replacement. Synthetic events are
 addressed to the source process and marked to distinguish them from user input.
 
 Replace Selection opens an editable preview of the exact replacement text and
-requires an explicit second click. It is offered only with a verifiable editable
-AX target, original window and nonempty range. It expires after five minutes.
-The original field, window, range, text, editability and secure status must still
-match after activation. The review sheet finishes dismissing and the nonactivating
+requires an explicit second click. It requires a verifiable editable AX field and
+original window. Native editors use the original nonempty range. Web editors such
+as Google Docs and Gmail may instead use a copy-backed selection anchor when the
+field has no usable range: capture must produce nonempty copied text, and the
+outer web document must have a stable HTTP(S) or file URL. Hidden textarea values
+are ignored when the browser reports an empty range. The outer document is tracked
+rather than an editor's `about:blank` iframe. Capabilities expire after five minutes.
+The original field, window, document identity/URL, text, editability and secure
+status must still match after activation. Range-backed targets also require the
+original range. Copy-backed targets copy again immediately before replacement and
+must match the original selection exactly. Identity is checked both before and
+after the asynchronous copy. A scoped event-metadata monitor invalidates the
+capability on external source-app typing, clicking or scrolling, including moving
+to another occurrence of identical text. It reads no text and stops at invalidation,
+discard, replacement, or expiry. The review sheet finishes dismissing and the nonactivating
 panel leaves the window server before returning focus to the source; activating
 an already-frontmost source alone does not release panel keyboard focus. Enigma
 never reselects a stale range. It uses AXSelectedText when writable in native
 editors and a guarded paste for web content, where a setter can acknowledge a
-write without editing the document. Both paths check the resulting text before
-reporting success. The same panel returns to display success or failure. An ambiguous write is never
+write without editing the document. When a range is exposed, both paths check the resulting text before
+reporting success. Canvas editors may hide all resulting text; after one guarded
+paste Enigma reports "Replacement sent" and asks the user to confirm the document,
+without claiming a verified edit or retrying. Temporary replacement clipboard
+contents are marked transient/auto-generated for clipboard managers that honor
+these types. The same panel returns to display success or failure. An ambiguous write is never
 retried automatically. Read-only browser selections remain usable as context but
 cannot be replaced. A target without enough AX identity is capture-only.
 
@@ -93,9 +108,13 @@ user invoked Selection Context and confirmed replacement in the disposable Safar
 contenteditable fixture. Computer-use inspection independently read the changed
 source value (`hello`) and Enigma’s `Selection replaced.` result. Physical global
 shortcut invocation was performed by the user because background computer-use
-keystrokes do not reproduce that macOS focus transition. This does not establish
-Google Docs compatibility: canvas fields without a verifiable nonempty AX range
-remain capture-only.
+keystrokes do not reproduce that macOS focus transition. A subsequent patch adds the copy-backed fallback for canvas editors. Automated
+fixtures cover copied selection without an AX range, document eligibility, identity
+changes during copy, mismatching/empty/failed copies, and exact native NSTextView
+replacement with surrounding text and Unicode preserved. Live Google Docs/Gmail
+verification remains pending: the user requested no further Safari interaction,
+and Chrome was unavailable to computer use. These fixtures do not establish
+cross-app event delivery or Google Docs/Gmail compatibility by themselves.
 
 Other cross-app permission and editing behavior still needs interactive verification
 with the **stably signed Xcode app**. Do not launch the unsigned verification app

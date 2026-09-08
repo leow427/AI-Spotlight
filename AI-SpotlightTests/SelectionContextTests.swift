@@ -5,6 +5,90 @@ import XCTest
 
 @MainActor
 final class SelectionContextTests: XCTestCase {
+  func testCopiedBrowserSelectionNeverReusesHiddenPlaceholderRange() {
+    let placeholder = CFRange(location: 0, length: 1)
+    XCTAssertNil(SelectionReplacementPolicy.rangeForReplacement(placeholder, usedCopy: true, hasWebDocument: true))
+    XCTAssertNil(SelectionReplacementPolicy.rangeForReplacement(CFRange(location: 0, length: 0), usedCopy: true, hasWebDocument: true))
+    XCTAssertEqual(SelectionReplacementPolicy.rangeForReplacement(placeholder, usedCopy: false, hasWebDocument: true)?.length, 1)
+    XCTAssertEqual(SelectionReplacementPolicy.rangeForReplacement(placeholder, usedCopy: true, hasWebDocument: false)?.length, 1)
+  }
+
+  func testCanvasAnchorRequiresCopiedSelectionAndIdentifiedEditableDocument() {
+    for url in ["https://docs.google.com/document/d/test/edit", "https://mail.google.com/mail/u/0/#drafts/test", "file:///tmp/test.html"] {
+      XCTAssertTrue(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "selected words",
+        hasDocument: true, documentURL: url, editable: true))
+    }
+    for url: String? in [nil, "", "about:blank", "javascript:void(0)"] {
+      XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "selected words",
+        hasDocument: true, documentURL: url, editable: true))
+    }
+    for copied: String? in [nil, "", " \n\u{00a0}"] {
+      XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: copied,
+        hasDocument: true, documentURL: "https://docs.google.com/document/d/test/edit", editable: true))
+    }
+    XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "words",
+      hasDocument: false, documentURL: "https://example.com", editable: true))
+    XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: false, copiedText: "words",
+      hasDocument: true, documentURL: "https://example.com", editable: false))
+    XCTAssertFalse(SelectionReplacementPolicy.allowsCopyAnchor(hasRange: true, copiedText: "words",
+      hasDocument: true, documentURL: "https://example.com", editable: true))
+  }
+
+  func testCanvasReverificationAcceptsExactCopyWithoutAnAccessibilityRange() async {
+    var copies = 0
+    let result = await SelectionCopyVerification.matches(expected: "A document passage 👋", isTargetValid: { true }, copy: {
+      copies += 1
+      return "A document passage 👋"
+    })
+    XCTAssertTrue(result)
+    XCTAssertEqual(copies, 1)
+  }
+
+  func testCanvasReverificationRefusesCopyWhenSourceAlreadyChanged() async {
+    let result = await SelectionCopyVerification.matches(expected: "same words", isTargetValid: { false }, copy: {
+      XCTFail("Do not copy from an invalidated document, window, or field")
+      return "same words"
+    })
+    XCTAssertFalse(result)
+  }
+
+  func testCanvasReverificationRejectsIdenticalTextAfterNavigationOrReselection() async {
+    var sourceIsUnchanged = true
+    var pasted = false
+    let verified = await SelectionCopyVerification.matches(expected: "same words", isTargetValid: { sourceIsUnchanged }, copy: {
+      // Navigation, or a click selecting another occurrence, during async copy.
+      sourceIsUnchanged = false
+      return "same words"
+    })
+    if verified { pasted = true }
+    XCTAssertFalse(pasted)
+  }
+
+  func testCanvasReverificationRejectsEmptyChangedOrFailedCopy() async {
+    for value: String? in [nil, "", "different", "original "] {
+      let verified = await SelectionCopyVerification.matches(expected: "original", isTargetValid: { true }, copy: { value })
+      XCTAssertFalse(verified)
+    }
+  }
+
+  func testVerifiedSelectionReplacesOnlyHighlightedTextInNativeEditorFixture() async {
+    let editor = NSTextView()
+    editor.string = "Before: hello 👋. After."
+    let selection = (editor.string as NSString).range(of: "hello 👋")
+    editor.setSelectedRange(selection)
+    let expected = (editor.string as NSString).substring(with: selection)
+    let verified = await SelectionCopyVerification.matches(expected: expected, isTargetValid: {
+      editor.selectedRange() == selection
+    }, copy: {
+      (editor.string as NSString).substring(with: editor.selectedRange())
+    })
+    XCTAssertTrue(verified)
+    if verified { editor.insertText("goodbye 🌍", replacementRange: editor.selectedRange()) }
+    XCTAssertEqual(editor.string, "Before: goodbye 🌍. After.")
+    XCTAssertTrue(SelectionReplacementPolicy.confirms(originalValue: "Before: hello 👋. After.", currentValue: editor.string,
+      range: CFRange(location: selection.location, length: selection.length), originalSelection: expected, replacement: "goodbye 🌍"))
+  }
+
   func testReplacementReleasesPanelAndRestoresTheSameChatWindow() throws {
     let field = NSTextField(string: "Keep this draft")
     let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)

@@ -42,19 +42,30 @@ final class SelectionContextService: ObservableObject {
   @Published var notice: String?
   private var target: Target?
   private var capturedBounds: NSRect?
+  private var continuity: SelectionSourceContinuity?
 
   private struct Target {
     let contextID: UUID
     let app: NSRunningApplication
     let element: AXUIElement
     let window: AXUIElement
-    let range: CFRange
+    let range: CFRange?
+    let document: AXUIElement?
+    let documentURL: String?
     let text: String
     let capturedAt: Date
   }
 
-  var canReplace: Bool { target != nil && !isWorking }
-  func discardTarget() { target = nil; capturedBounds = nil; notice = nil }
+  var canReplace: Bool { target != nil && continuity?.isIntact == true && !isWorking }
+  func discardTarget() {
+    continuity?.stop(); continuity = nil
+    target = nil; capturedBounds = nil; notice = nil
+  }
+
+  private func revokeTarget() {
+    continuity?.stop(); continuity = nil
+    target = nil
+  }
 
   func capture() async -> ConversationContext? {
     guard !isWorking else { return nil }
@@ -74,12 +85,15 @@ final class SelectionContextService: ObservableObject {
     guard !IsSecureEventInputEnabled(), let element = element(application, kAXFocusedUIElementAttribute),
           isSafe(element) else { return nil }
     let range = selectedRange(element)
+    let document = webDocument(element)
+    var copiedSelection = false
     var text = selectedText(element)
     // Some editors expose a text range but not AXSelectedText.
     if text == nil, let range { text = textForRange(element, range: range) }
-    if text == nil || text?.isEmpty == true {
+    if text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true || (document != nil && (range?.length ?? 0) == 0) {
       guard SelectionCapturePolicy.allowsCopy(range: range, bundleID: app.bundleIdentifier) else { return nil }
       text = await copySelection(app: app, element: element)
+      copiedSelection = text?.isEmpty == false
     }
     guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
           !interaction.interrupted, sameFocus(app: app, element: element), isSafe(element) else { return nil }
@@ -89,10 +103,22 @@ final class SelectionContextService: ObservableObject {
     }
     if let range, range.length > 0 { capturedBounds = bounds(element: element, range: range) }
     let context = ConversationContext(sourceName: app.localizedName ?? "Application", text: text)
-    if let range, range.length > 0, isEditable(element), let window = self.element(element, kAXWindowAttribute) {
+    let documentURL = document.flatMap { urlAttribute($0) }
+    let verifiedRange = SelectionReplacementPolicy.rangeForReplacement(range, usedCopy: copiedSelection, hasWebDocument: document != nil)
+    let usesCopyAnchor = SelectionReplacementPolicy.allowsCopyAnchor(hasRange: verifiedRange != nil,
+      copiedText: copiedSelection ? text : nil, hasDocument: document != nil, documentURL: documentURL,
+      editable: isEditable(element))
+    // Canvas editors expose a hidden editable input with no document range.
+    // A copy-backed anchor requires an identified web document and field, and
+    // remains valid only while the source receives no user interaction.
+    if isEditable(element), let window = self.element(element, kAXWindowAttribute),
+       verifiedRange != nil || usesCopyAnchor {
       target = Target(contextID: context.id, app: app, element: element, window: window,
-                      range: range, text: text, capturedAt: .now)
+                      range: verifiedRange, document: document, documentURL: documentURL,
+                      text: text, capturedAt: .now)
+      continuity = SelectionSourceContinuity(sourcePID: app.processIdentifier)
     }
+
     return context
   }
 
@@ -121,7 +147,7 @@ final class SelectionContextService: ObservableObject {
     defer { isWorking = false }
     let interaction = SelectionInteractionGuard()
     defer { interaction.stop() }
-    guard SelectionReplacementPolicy.isFresh(capturedAt: target.capturedAt, now: .now), !target.app.isTerminated,
+    guard continuity?.isIntact == true, SelectionReplacementPolicy.isFresh(capturedAt: target.capturedAt, now: .now), !target.app.isTerminated,
           AXIsProcessTrusted(), isSafe(target.element) else { return refuseReplacement() }
     NotificationCenter.default.post(name: .selectionReplacementBegan, object: nil)
     defer { NotificationCenter.default.post(name: .selectionReplacementEnded, object: nil) }
@@ -135,7 +161,7 @@ final class SelectionContextService: ObservableObject {
     var settable = DarwinBoolean(false)
     // Web accessibility setters may acknowledge a write without dispatching an
     // editor input event. Use the browser's normal paste path for web content.
-    if !isWebContent(target.element), AXUIElementIsAttributeSettable(target.element, kAXSelectedTextAttribute as CFString, &settable) == .success,
+    if target.range != nil, target.document == nil, AXUIElementIsAttributeSettable(target.element, kAXSelectedTextAttribute as CFString, &settable) == .success,
        settable.boolValue {
       // A failed write can be ambiguous; never follow it with a second mutation.
       guard AXUIElementSetAttributeValue(target.element, kAXSelectedTextAttribute as CFString, text as CFString) == .success else {
@@ -149,28 +175,43 @@ final class SelectionContextService: ObservableObject {
       guard let snapshot = SelectionPasteboardSnapshot(board), await validate(target), !interaction.interrupted else { return refuseReplacement() }
       board.clearContents()
       board.setString(text, forType: .string)
+      board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.TransientType"))
+      board.setData(Data(), forType: NSPasteboard.PasteboardType("org.nspasteboard.AutoGeneratedType"))
       let count = board.changeCount
       defer { snapshot.restore(board, ifUnchanged: count) }
-      guard matchesTarget(target), isSafe(target.element) else { return refuseReplacement() }
+      guard matchesTarget(target), isSafe(target.element), !interaction.interrupted else { return refuseReplacement() }
       postCommand(key: 9, pid: target.app.processIdentifier)
+      // Canvas editors do not expose the resulting document text. Keep the
+      // clipboard available for the bounded paste window and report dispatch
+      // honestly; never retry an unobservable mutation.
+      if target.range == nil {
+        for _ in 0..<30 {
+          try? await Task.sleep(for: .milliseconds(20))
+          if interaction.interrupted || !sameFocus(app: target.app, element: target.element) { break }
+        }
+        revokeTarget()
+        notice = "Replacement sent to \(target.app.localizedName ?? "the source app"). Check the document to confirm."
+        return true
+      }
       // Keep the clipboard until the receiver exposes the expected text.
       guard await confirmReplacement(target, replacement: text, originalValue: originalValue) else {
         return unconfirmedReplacement()
       }
     }
-    self.target = nil
+    revokeTarget()
     notice = "Selection replaced."
     return true
   }
 
   private func confirmReplacement(_ target: Target, replacement: String, originalValue: String?) async -> Bool {
+    guard let range = target.range else { return false }
     for _ in 0..<30 {
       try? await Task.sleep(for: .milliseconds(20))
       guard sameFocus(app: target.app, element: target.element), isSafe(target.element) else { return false }
       let currentValue = attribute(target.element, kAXValueAttribute) as? String
       if SelectionReplacementPolicy.confirms(originalValue: originalValue, currentValue: currentValue,
-        range: target.range, originalSelection: target.text, replacement: replacement) { return true }
-      let replacedRange = CFRange(location: target.range.location, length: (replacement as NSString).length)
+        range: range, originalSelection: target.text, replacement: replacement) { return true }
+      let replacedRange = CFRange(location: range.location, length: (replacement as NSString).length)
       if textForRange(target.element, range: replacedRange) == replacement,
          selectedRange(target.element).map({ $0.location == replacedRange.location + replacedRange.length && $0.length == 0 }) == true {
         return true
@@ -180,29 +221,46 @@ final class SelectionContextService: ObservableObject {
   }
 
   private func unconfirmedReplacement() -> Bool {
-    target = nil
+    revokeTarget()
     notice = "The app did not confirm replacement. Check the source before trying again."
     return false
   }
 
   private func refuseReplacement() -> Bool {
-    target = nil
+    revokeTarget()
     notice = "The original selection can no longer be verified. Select the text again and invoke Enigma."
     return false
   }
 
   private func validate(_ target: Target) async -> Bool {
     guard matchesTarget(target), isSafe(target.element), isEditable(target.element) else { return false }
-    let text = selectedText(target.element) ?? textForRange(target.element, range: target.range)
-    let actual = if let text { text } else { await copySelection(app: target.app, element: target.element) }
+    let actual: String?
+    if let range = target.range {
+      let exposed = selectedText(target.element) ?? textForRange(target.element, range: range)
+      actual = if let exposed, !exposed.isEmpty { exposed }
+        else { await copySelection(app: target.app, element: target.element) }
+    } else {
+      // Do not trust the canvas editor's hidden textarea value/range. Copy the
+      // still-highlighted document text immediately before every paste.
+      return await SelectionCopyVerification.matches(expected: target.text,
+        isTargetValid: { self.matchesTarget(target) && self.isSafe(target.element) && self.isEditable(target.element) },
+        copy: { await self.copySelection(app: target.app, element: target.element) })
+    }
     return actual == target.text && matchesTarget(target) && isSafe(target.element) && isEditable(target.element)
   }
 
   private func matchesTarget(_ target: Target) -> Bool {
-    guard sameFocus(app: target.app, element: target.element),
-          let window = element(target.element, kAXWindowAttribute), CFEqual(window, target.window),
-          let range = selectedRange(target.element) else { return false }
-    return SelectionReplacementPolicy.matches(original: target.range, current: range)
+    guard continuity?.isIntact == true, sameFocus(app: target.app, element: target.element),
+          let window = element(target.element, kAXWindowAttribute), CFEqual(window, target.window) else { return false }
+    if let document = target.document {
+      guard let currentDocument = webDocument(target.element), CFEqual(document, currentDocument),
+            urlAttribute(currentDocument) == target.documentURL else { return false }
+    }
+    if let original = target.range {
+      guard let current = selectedRange(target.element) else { return false }
+      return SelectionReplacementPolicy.matches(original: original, current: current)
+    }
+    return target.document != nil && target.documentURL != nil
   }
 
   private func copySelection(app: NSRunningApplication, element: AXUIElement) async -> String? {
@@ -245,14 +303,22 @@ final class SelectionContextService: ObservableObject {
     return CFEqual(focused, element)
   }
 
-  private func isWebContent(_ element: AXUIElement) -> Bool {
+  private func webDocument(_ element: AXUIElement) -> AXUIElement? {
     var current: AXUIElement? = element
+    var document: AXUIElement?
     for _ in 0..<32 {
       guard let node = current else { break }
-      if attribute(node, kAXRoleAttribute) as? String == "AXWebArea" { return true }
+      if attribute(node, kAXRoleAttribute) as? String == "AXWebArea" { document = node }
       current = self.element(node, kAXParentAttribute)
     }
-    return false
+    // Keep the outer document identity, not an editor's about:blank iframe.
+    return document
+  }
+
+  private func urlAttribute(_ element: AXUIElement) -> String? {
+    if let url = attribute(element, kAXURLAttribute) as? URL { return url.absoluteString }
+    if let url = attribute(element, kAXURLAttribute) as? String, !url.isEmpty { return url }
+    return nil
   }
 
   private func isEditable(_ element: AXUIElement) -> Bool {
@@ -334,6 +400,22 @@ enum SelectionPanelPlacement {
 
 /// A replacement capability expires quickly and never accepts an insertion point.
 enum SelectionReplacementPolicy {
+  static func rangeForReplacement(_ range: CFRange?, usedCopy: Bool, hasWebDocument: Bool) -> CFRange? {
+    // A copied browser selection can come from a canvas while its hidden input
+    // exposes a nonempty placeholder range. That range is not a document anchor.
+    guard let range, range.length > 0, !(usedCopy && hasWebDocument) else { return nil }
+    return range
+  }
+
+  static func allowsCopyAnchor(hasRange: Bool, copiedText: String?, hasDocument: Bool,
+                               documentURL: String?, editable: Bool) -> Bool {
+    guard !hasRange, editable, hasDocument, let copiedText,
+          !copiedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+          let documentURL, let url = URL(string: documentURL),
+          ["http", "https", "file"].contains(url.scheme?.lowercased() ?? "") else { return false }
+    return true
+  }
+
   static func confirms(originalValue: String?, currentValue: String?, range: CFRange,
                        originalSelection: String, replacement: String) -> Bool {
     guard let originalValue, let currentValue, range.location >= 0, range.length > 0 else { return false }
@@ -350,6 +432,17 @@ enum SelectionReplacementPolicy {
   static func matches(original: CFRange, current: CFRange) -> Bool {
     original.location >= 0 && original.length > 0
       && original.location == current.location && original.length == current.length
+  }
+}
+
+/// Revalidate around the asynchronous copy: matching text alone never grants a
+/// write into a changed field, document, or occurrence of the same words.
+@MainActor
+enum SelectionCopyVerification {
+  static func matches(expected: String, isTargetValid: () -> Bool, copy: () async -> String?) async -> Bool {
+    guard !expected.isEmpty, isTargetValid() else { return false }
+    guard let copied = await copy(), copied == expected else { return false }
+    return isTargetValid()
   }
 }
 
@@ -379,6 +472,38 @@ private final class SelectionInteractionGuard {
 
   private func receive(_ event: NSEvent) {
     if event.cgEvent?.getIntegerValueField(.eventSourceUserData) != Self.eventMarker { interrupted = true }
+  }
+}
+
+/// Retains only an invalidation bit while a replacement capability exists.
+/// Enigma's own typing is local; external interaction in the source invalidates
+/// the capability even if a different occurrence of identical text is selected.
+@MainActor
+private final class SelectionSourceContinuity {
+  private(set) var isIntact = true
+  private var monitor: Any?
+  private var expiry: Task<Void, Never>?
+
+  init(sourcePID: pid_t) {
+    let mask: NSEvent.EventTypeMask = [.keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+    monitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+      guard event.cgEvent?.getIntegerValueField(.eventSourceUserData) != SelectionInteractionGuard.eventMarker,
+            NSWorkspace.shared.frontmostApplication?.processIdentifier == sourcePID else { return }
+      self?.isIntact = false
+      self?.stop()
+    }
+    expiry = Task { [weak self] in
+      try? await Task.sleep(for: .seconds(300))
+      guard !Task.isCancelled else { return }
+      self?.isIntact = false
+      self?.stop()
+    }
+  }
+
+  func stop() {
+    if let monitor { NSEvent.removeMonitor(monitor) }
+    monitor = nil
+    expiry?.cancel(); expiry = nil
   }
 }
 
