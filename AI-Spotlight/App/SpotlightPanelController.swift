@@ -101,6 +101,30 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     }
   }
 
+  private var selectionInvocation: Task<Void, Never>?
+
+  func summonSelectionContext() {
+    guard !isCapturingScreen, selectionInvocation == nil else { return }
+    let cursor = NSEvent.mouseLocation
+    let visible = (NSScreen.screens.first { NSMouseInRect(cursor, $0.frame, false) } ?? NSScreen.main)?.visibleFrame
+    selectionInvocation = Task { [weak self] in
+      let service = SelectionContextService.shared
+      let context = await service.capture()
+      guard let self else { return }
+      defer { self.selectionInvocation = nil }
+      guard !self.isCapturingScreen else { service.discardTarget(); return }
+      // The hosted view is already installed, and handles reset before focus changes.
+      NotificationCenter.default.post(name: .selectionContextRequested, object: context)
+      if let visible {
+        self.panel.setFrame(SelectionPanelPlacement.frame(size: NSSize(width: 720, height: 540),
+          cursor: cursor, selection: service.selectionBounds(), visible: visible), display: true)
+      }
+      self.panel.orderFrontRegardless()
+      self.panel.makeKey()
+      NotificationCenter.default.post(name: .panelPresented, object: nil)
+    }
+  }
+
   func show() {
     guard !isCapturingScreen else { return }
     centerOnActiveDisplay()

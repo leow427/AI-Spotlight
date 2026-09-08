@@ -52,7 +52,7 @@ enum ChatContextError: LocalizedError, Equatable {
     case .missingCurrentPrompt:
       "Enter a message before sending."
     case .oversizedPrompt(let inputLimit):
-      "This message alone exceeds the selected model's input budget (\(inputLimit) tokens after reserving reply space). Shorten it or choose a model with a larger context. Your draft has been kept."
+      "This message and its attached context exceed the selected model's input budget (\(inputLimit) tokens after reserving reply space). Shorten it or choose a model with a larger context. Your draft has been kept."
     case .invalidText:
       "This message contains a null character that the local model cannot read. Remove it and try again. Your draft has been kept."
     }
@@ -105,6 +105,7 @@ enum ChatContextPreparer {
     budget: ContextBudget,
     countTokens: ([ChatMessage]) throws -> Int
   ) throws -> PreparedConversation {
+    let messages = messages.map(ConversationContextPrompt.expand)
     guard var current = messages.last, current.role == .user,
           !current.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
       throw ChatContextError.missingCurrentPrompt

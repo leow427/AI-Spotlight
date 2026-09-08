@@ -1,6 +1,7 @@
 import AppKit
 import Combine
 import SwiftUI
+@preconcurrency import ApplicationServices
 import UniformTypeIdentifiers
 import WebKit
 
@@ -233,6 +234,9 @@ private struct NatureButtonStyle: ButtonStyle {
 }
 
 struct AppShellView: View {
+  @ObservedObject private var selectionContext = SelectionContextService.shared
+  @State private var replacementMessage: ChatMessage?
+  @State private var replacementText = ""
   @State private var expandedActivities: Set<UUID> = []
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
@@ -312,8 +316,8 @@ struct AppShellView: View {
                 if isSearchEnabled || (searchSettings.canSearchAutomatically && files.selection == nil) {
                   HStack(spacing: 6) {
                     Text(searchSettings.hasAPIKey
-                      ? (isSearchEnabled ? "Web Search · Queries sent to Brave may include screen details."
-                        : "Auto search · Current topics may use Brave, including relevant screen details.")
+                      ? (isSearchEnabled ? "Web Search · Queries sent to Brave may include attached context."
+                        : "Auto search · Current topics may use Brave, including relevant attached context.")
                       : "Add a Brave Search API key to search the web.")
                     if !searchSettings.hasAPIKey {
                       Button("Settings", action: openSettings).buttonStyle(.plain)
@@ -323,6 +327,17 @@ struct AppShellView: View {
                   .foregroundStyle(.secondary)
                 }
 
+                if localChat.isTemporaryChat {
+                  Text("Temporary chat · Not saved to history").font(.caption2).foregroundStyle(.secondary)
+                }
+                ForEach(localChat.attachedContexts) { context in
+                  SelectionContextCard(context: context, isBusy: localChat.isBusy || selectionContext.isWorking) {
+                    localChat.removeContext(id: context.id)
+                  }
+                }
+                if let notice = selectionContext.notice, localChat.isTemporaryChat {
+                  Text(notice).font(.caption).foregroundStyle(.secondary)
+                }
                 if let attachment = screen.attachment, localChat.pendingUserMessage == nil {
                   ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
                                        isBusy: localChat.isBusy || screen.isBusy,
@@ -368,6 +383,16 @@ struct AppShellView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .fileModeRequested)) { _ in
       activateFileMode(from: .keyboard)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .selectionContextRequested)) { notification in
+      screen.clearDraft()
+      isSearchEnabled = false
+      isSearchPresented = false
+      isModePalettePresented = false
+      isHelpPresented = false
+      replacementMessage = nil
+      localChat.startTemporaryChat(context: notification.object as? ConversationContext)
+      isComposerFocused = true
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       screen.clearDraft()
@@ -441,6 +466,23 @@ struct AppShellView: View {
       if !allowed, localChat.screenRouteDecision?.sendsImage == true, localChat.activeRequest?.route.mode == .cloud {
         localChat.stopStreaming()
       }
+    }
+    .sheet(item: $replacementMessage) { _ in
+      VStack(alignment: .leading, spacing: 16) {
+        Text("Replace Selection").font(.headline)
+        Text("Review or edit the text that will replace the original selection.").font(.caption)
+        TextEditor(text: $replacementText).font(.body).scrollContentBackground(.hidden)
+        HStack {
+          Button("Cancel") { replacementMessage = nil }
+          Spacer()
+          Button("Replace Selection") {
+            guard let contextID = localChat.attachedContexts.first?.id else { return }
+            replacementMessage = nil
+            let text = replacementText
+            Task { _ = await selectionContext.replace(with: text, contextID: contextID) }
+          }.buttonStyle(.borderedProminent)
+        }
+      }.padding(24).frame(width: 520, height: 360).naturePresentation()
     }
     .sheet(isPresented: $isHelpPresented) {
       KeyboardShortcutsHelpView()
@@ -669,6 +711,11 @@ struct AppShellView: View {
             LocalMessageView(message: message, isThinking: localChat.isWaitingForResponse && message.id == localChat.presentationMessages.last?.id,
                              expandedActivity: activityExpansion(message.activity?.id ?? message.id))
               .id(message.id)
+            if message.role == .assistant, !message.content.isEmpty, !localChat.isBusy,
+               !localChat.attachedContexts.isEmpty, selectionContext.canReplace {
+              Button("Replace Selection") { replacementText = message.content; replacementMessage = message }
+                .buttonStyle(.bordered).controlSize(.small)
+            }
           }
           if let activity = localChat.activity, localChat.presentationMessages.last?.role != .assistant {
             AssistantActivityView(activity: activity, expanded: activityExpansion(activity.id))
@@ -1264,6 +1311,9 @@ private extension ChatMode {
 }
 
 private struct KeyboardShortcutsHelpView: View {
+  @AppStorage(SelectionShortcutMonitor.modifierKey) private var selectionModifier = SelectionModifier.option.rawValue
+  @AppStorage(SelectionShortcutMonitor.enabledKey) private var doubleOptionEnabled = true
+  @AppStorage(SelectionShortcutMonitor.intervalKey) private var doubleOptionInterval = 0.35
   @Environment(\.dismiss) private var dismiss
 
   var body: some View {
@@ -1275,6 +1325,23 @@ private struct KeyboardShortcutsHelpView: View {
         VStack(alignment: .leading, spacing: 16) {
           Text("Anywhere on your Mac")
             .font(.headline)
+          shortcut("New temporary chat with selection", keys: "\((SelectionModifier(rawValue: selectionModifier) ?? .option).symbol) twice")
+          shortcut("Selection Context backup", keys: "⇧ ⌥ Space")
+          Toggle("Enable double-tap shortcut", isOn: $doubleOptionEnabled)
+          Picker("Selection shortcut key", selection: $selectionModifier) {
+            ForEach(SelectionModifier.allCases) { modifier in Text(modifier.title).tag(modifier.rawValue) }
+          }
+          Picker("Double-tap interval", selection: $doubleOptionInterval) {
+            Text("Fast").tag(0.25)
+            Text("Normal").tag(0.35)
+            Text("Relaxed").tag(0.5)
+          }
+          Text("Highlight text in another app, then tap the chosen key twice by itself (Option by default). Context stays in a temporary chat and follows your selected model and Web Search settings. Replace Selection is available only while the original target can be verified. Password fields are excluded.")
+            .font(.caption).foregroundStyle(.secondary)
+          Button("Enable Accessibility…") {
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+          }
           shortcut("Show or hide engima", keys: "⌥ Space")
           shortcut("Open Advanced Settings", keys: "⌥ S")
 
@@ -1779,5 +1846,26 @@ private struct ThinkingComposerGlow: View {
         .shadow(color: .green.opacity(0.5), radius: 6)
     }
     .accessibilityHidden(true)
+  }
+}
+
+struct SelectionContextCard: View {
+  let context: ConversationContext
+  var isBusy = false
+  let remove: () -> Void
+
+  var body: some View {
+    HStack(alignment: .top, spacing: 10) {
+      Image(systemName: "text.quote").foregroundStyle(NatureGlass.accent)
+      VStack(alignment: .leading, spacing: 4) {
+        Text(context.title).font(.caption.weight(.medium))
+        Text(context.preview).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+      }
+      Spacer(minLength: 0)
+      Button(action: remove) { Image(systemName: "xmark") }
+        .buttonStyle(.plain).help("Remove selected text").accessibilityLabel("Remove selected text")
+        .disabled(isBusy)
+    }
+    .padding(10).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
   }
 }

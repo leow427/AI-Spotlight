@@ -9,6 +9,7 @@ enum AppCommand: String, CaseIterable {
 }
 
 extension Notification.Name {
+  static let selectionContextRequested = Notification.Name("enigma.selectionContextRequested")
   static let sidebarToggleRequested = Notification.Name("aiSpotlight.sidebarToggleRequested")
   static let fileModeRequested = Notification.Name("aiSpotlight.fileModeRequested")
   static let settingsRequested = Notification.Name("aiSpotlight.settingsRequested")

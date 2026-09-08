@@ -56,6 +56,7 @@ struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   var imagePreview: Data? = nil
   var extendedThinking: Bool? = nil
   var attachments: [MessageAttachment]? = nil
+  var contexts: [ConversationContext]? = nil
 
   private enum CodingKeys: String, CodingKey {
     case id, role, content, searchSources, createdAt, attachments

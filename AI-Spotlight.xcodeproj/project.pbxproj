@@ -7,6 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CC5400000000000000000001 = {isa = PBXBuildFile; fileRef = CC5300000000000000000001; };
+		CC5200000000000000000002 = {isa = PBXBuildFile; fileRef = CC5100000000000000000002; };
+		CC5200000000000000000001 = {isa = PBXBuildFile; fileRef = CC5100000000000000000001; };
+		CC5200000000000000000000 = {isa = PBXBuildFile; fileRef = CC5100000000000000000000; };
 		CA1200000000000000000002 /* SlashCommandComposer in Sources */ = {isa = PBXBuildFile; fileRef = CA1100000000000000000002; };
 		CA1200000000000000000001 /* SlashCommand in Sources */ = {isa = PBXBuildFile; fileRef = CA1100000000000000000001; };
 		DE1000000000000000000002 /* ChatMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000001; };
@@ -121,6 +125,10 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		CC5300000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/SelectionContextTests.swift"; sourceTree = SOURCE_ROOT; };
+		CC5100000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SelectionContextService.swift"; sourceTree = SOURCE_ROOT; };
+		CC5100000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SelectionShortcut.swift"; sourceTree = SOURCE_ROOT; };
+		CC5100000000000000000000 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Chat/ConversationContext.swift"; sourceTree = SOURCE_ROOT; };
 		CA1100000000000000000002 /* SlashCommandComposer */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SlashCommandComposer.swift"; sourceTree = SOURCE_ROOT; };
 		CA1100000000000000000001 /* SlashCommand */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SlashCommand.swift"; sourceTree = SOURCE_ROOT; };
 		DE1000000000000000000001 /* ChatMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdown.swift; sourceTree = "<group>"; };
@@ -249,6 +257,10 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				CC5300000000000000000001,
+				CC5100000000000000000002,
+				CC5100000000000000000001,
+				CC5100000000000000000000,
 				CA1100000000000000000002,
 				CA1100000000000000000001,
 				E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */,
@@ -526,6 +538,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC5200000000000000000002,
+				CC5200000000000000000001,
+				CC5200000000000000000000,
 				CA1200000000000000000002,
 				CA1200000000000000000001,
 				5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */,
@@ -602,6 +617,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CC5400000000000000000001,
 				14069C4454E33368512BA2E9 /* WorkspaceDocumentTests.swift in Sources */,
 				0009134391031E5AE19F8236 /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift in Sources */,
 				41785BB5B087C2B0E954509E /* AI-SpotlightTests/FileModeRuntimeTests.swift in Sources */,

@@ -47,7 +47,50 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var benchmarkNotice: String?
   private let modelAdvisor: LocalModelAdvisor?
 
+  @Published private(set) var attachedContexts: [ConversationContext] = []
+  private var temporarySessionID: UUID?
+  var isTemporaryChat: Bool { selectedSessionID != nil && selectedSessionID == temporarySessionID }
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
+
+  private var requestMessages: [ChatMessage] { messages.map { message in
+    var copy = message
+    // The current attachment is authoritative. Removing it also removes it from future requests.
+    copy.contexts = nil
+    return copy
+  } }
+
+  private func contextualMessage(_ prompt: String) -> ChatMessage {
+    var message = ThinkCommand.message(prompt)
+    message.contexts = attachedContexts.isEmpty ? nil : attachedContexts
+    return message
+  }
+
+  func removeContext(id: UUID) {
+    attachedContexts.removeAll { $0.id == id }
+    SelectionContextService.shared.discardTarget()
+  }
+
+  func startTemporaryChat(context: ConversationContext?) {
+    stopStreaming()
+    discardTemporaryChat()
+    files.restoreSelection(nil)
+    contextNotice = nil
+    autoRouteDecision = nil
+    screenRouteDecision = nil
+    let session = ChatSession(title: "Temporary chat")
+    temporarySessionID = session.id
+    sessions.append(session)
+    selectedSessionID = session.id
+    files.conversationID = session.id
+    attachedContexts = context.map { [$0] } ?? []
+    if case .failed = state { state = .idle }
+  }
+
+  private func discardTemporaryChat() {
+    if let temporarySessionID { sessions.removeAll { $0.id == temporarySessionID } }
+    temporarySessionID = nil
+    attachedContexts = []
+  }
 
   // Presentation is immediate; persistence still waits for successful preparation.
   @Published private(set) var pendingUserMessage: ChatMessage?
@@ -299,9 +342,9 @@ final class LocalChatViewModel: ObservableObject {
     let route = Route(mode: local ? .local : .cloud,
       providerID: local ? "llama.cpp" : CloudProviderID.chatGPT.rawValue,
       modelID: local ? model!.id : cloudModelID, usesNetwork: !local)
-    var userMessage = ThinkCommand.message(prompt)
+    var userMessage = contextualMessage(prompt)
     userMessage.attachments = files.selection?.attachments.map { MessageAttachment(name: $0.name, isDirectory: $0.isDirectory) }
-    let history = messages + [userMessage]
+    let history = requestMessages + [userMessage]
     let active = beginGeneration(route: route, modelDisplayName: local ? model!.displayName : cloudModelID)
     let sessionID = ensureSelectedSession()
     let responseID = UUID()
@@ -321,11 +364,11 @@ final class LocalChatViewModel: ObservableObject {
           // The inference-only bridge releases its model before the tool-capable runtime loads it.
           await engine.unload()
           let owner = self
-          try await LocalFileAgent(inference: fileInference).run(messages: history, model: model, tools: fileTools) { text in
+          try await LocalFileAgent(inference: fileInference).run(messages: history.map(ConversationContextPrompt.expand), model: model, tools: fileTools) { text in
             await owner?.appendFileText(text, messageID: responseID, sessionID: sessionID, requestID: active.id)
           }
         } else {
-          let request = ChatRequest(sessionID: sessionID, messages: history, route: route)
+          let request = ChatRequest(sessionID: sessionID, messages: history.map(ConversationContextPrompt.expand), route: route)
           for try await event in fileCodex.stream(request, fileTools: fileTools) {
             try Task.checkCancellation()
             if case .activity(let update) = event { self?.receiveActivity(update, requestID: active.id) }
@@ -354,7 +397,7 @@ final class LocalChatViewModel: ObservableObject {
 
   func shouldSearch(_ prompt: String, explicitlyEnabled: Bool) -> Bool {
     explicitlyEnabled || (searchSettings?.canSearchAutomatically == true
-      && WebSearchPolicy.needsFreshInformation(prompt))
+      && WebSearchPolicy.needsFreshInformation(ConversationContextPrompt.expand(contextualMessage(prompt)).content))
   }
 
   func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
@@ -369,8 +412,8 @@ final class LocalChatViewModel: ObservableObject {
     screenRouteDecision = nil
     idleUnloadTask?.cancel()
     let responseID = UUID()
-    let userMessage = ThinkCommand.message(trimmedPrompt)
-    let request = LocalModelRequest(messages: messages + [userMessage])
+    let userMessage = contextualMessage(trimmedPrompt)
+    let request = LocalModelRequest(messages: requestMessages + [userMessage])
     let active = beginGeneration(
       route: Route(mode: .local, providerID: "local", modelID: installedModel?.id ?? "", usesNetwork: searchEnabled),
       modelDisplayName: installedModel?.displayName ?? "Local model"
@@ -461,7 +504,7 @@ final class LocalChatViewModel: ObservableObject {
       state = .failed(ScreenRequestError.textOnlyModel.localizedDescription)
       return
     }
-    let userMessage = ThinkCommand.message(prompt)
+    let userMessage = contextualMessage(prompt)
     let preferOCR = attachment.map {
       ScreenRoutingPolicy.hasConfidentTextForLookup(prompt: prompt,
         ocr: ScreenOCRResult(text: $0.ocrText, confidence: $0.ocrConfidence))
@@ -469,7 +512,7 @@ final class LocalChatViewModel: ObservableObject {
     let requestText = attachment.map { ScreenPromptContext.text(userPrompt: userMessage.content, ocr: $0.ocrText, preferOCR: preferOCR) } ?? userMessage.content
     var current = userMessage
     current.content = requestText
-    let history = messages + [current]
+    let history = requestMessages + [current]
     let pixels = decision.sendsImage ? attachment?.originalImage.cgImage(forProposedRect: nil, context: nil, hints: nil) : nil
     if decision.sendsImage && pixels == nil { state = .failed(ScreenCaptureError.invalidImage.localizedDescription); return }
     idleUnloadTask?.cancel()
@@ -678,12 +721,12 @@ final class LocalChatViewModel: ObservableObject {
       modelID: trimmedModelID,
       usesNetwork: true
     )
-    let userMessage = ThinkCommand.message(trimmedPrompt)
+    let userMessage = contextualMessage(trimmedPrompt)
     let prepared: PreparedConversation
     contextNotice = nil
     do {
       prepared = try CloudContext.prepare(ChatRequest(
-        sessionID: selectedSessionID ?? UUID(), messages: messages + [userMessage], route: route
+        sessionID: selectedSessionID ?? UUID(), messages: requestMessages + [userMessage], route: route
       ))
     } catch {
       state = .failed(error.localizedDescription)
@@ -737,7 +780,7 @@ final class LocalChatViewModel: ObservableObject {
   private func submitCloudWithSearch(
     _ userMessage: ChatMessage, route: Route, onAccepted: @escaping @MainActor () -> Void
   ) {
-    let history = messages + [userMessage]
+    let history = requestMessages + [userMessage]
     let active = beginGeneration(route: route, modelDisplayName: route.modelID)
     state = .searching
     pendingUserMessage = userMessage
@@ -798,7 +841,8 @@ final class LocalChatViewModel: ObservableObject {
     let searchEnabled = shouldSearch(prompt, explicitlyEnabled: searchEnabled)
     let decision = (searchEnabled || AutoRouter.shouldRun(for: .auto, cloud: cloud))
       ? AutoRouter.decide(AutoRouter.Request(
-        selectedMode: .auto, webSearchEnabled: searchEnabled, prompt: prompt, contextMessages: messages,
+        selectedMode: .auto, webSearchEnabled: searchEnabled,
+        prompt: ConversationContextPrompt.expand(contextualMessage(prompt)).content, contextMessages: requestMessages,
         localModel: installedModel, cloud: cloud
       ))
       : AutoRouter.localFallback(localModel: installedModel)
@@ -838,6 +882,8 @@ final class LocalChatViewModel: ObservableObject {
 
   func newChat() {
     stopStreaming()
+    discardTemporaryChat()
+    SelectionContextService.shared.discardTarget()
     files.restoreSelection(nil)
     contextNotice = nil
     autoRouteDecision = nil
@@ -852,6 +898,7 @@ final class LocalChatViewModel: ObservableObject {
 
   func selectSession(id: UUID) {
     guard sessions.contains(where: { $0.id == id }), !isBusy else { return }
+    if id != temporarySessionID { discardTemporaryChat(); SelectionContextService.shared.discardTarget() }
     selectedSessionID = id
     files.restoreSelection(selectedSession?.workspace)
     files.conversationID = selectedSessionID
@@ -862,7 +909,9 @@ final class LocalChatViewModel: ObservableObject {
     guard !isBusy, !sessions.isEmpty else { return }
     contextNotice = nil
     let selectedIndex = selectedSessionID.flatMap { id in sessions.firstIndex(where: { $0.id == id }) }
-    selectedSessionID = sessions[selectedIndex.map { ($0 + 1) % sessions.count } ?? 0].id
+    let nextID = sessions[selectedIndex.map { ($0 + 1) % sessions.count } ?? 0].id
+    if nextID != temporarySessionID { discardTemporaryChat(); SelectionContextService.shared.discardTarget() }
+    selectedSessionID = nextID
     files.restoreSelection(selectedSession?.workspace)
     files.conversationID = selectedSessionID
   }
@@ -922,14 +971,15 @@ final class LocalChatViewModel: ObservableObject {
 
   private func sortAndPersistSessions() {
     sessions.sort { $0.lastActivityAt > $1.lastActivityAt }
-    if sessions.count > ChatSessionStore.maximumRetainedSessions {
-      sessions.removeLast(sessions.count - ChatSessionStore.maximumRetainedSessions)
-    }
+    let retained = Set(sessions.filter { $0.id != temporarySessionID }
+      .prefix(ChatSessionStore.maximumRetainedSessions).map(\.id))
+    sessions.removeAll { $0.id != temporarySessionID && !retained.contains($0.id) }
     persistSessions()
   }
 
   private func persistSessions() {
-    do { try sessionStore.save(sessions) }
+    guard !isTemporaryChat else { return }
+    do { try sessionStore.save(sessions.filter { $0.id != temporarySessionID }) }
     catch { state = .failed("Unable to save chats: \(error.localizedDescription)") }
   }
 
@@ -951,7 +1001,39 @@ final class LocalChatViewModel: ObservableObject {
 
   private func search(_ query: String, maximumTokens: Int, requestID: UUID) async throws -> [WebSearchResult] {
     receiveActivity(.phase(.searching), requestID: requestID)
-    let results = try await webSearch.search(query, maximumTokens: maximumTokens) { [weak self] event in
+    var contextualQuery = query
+    if !attachedContexts.isEmpty, let active = activeRequest, active.id == requestID {
+      state = .refiningSearch
+      receiveActivity(.phase(.refiningSearch), requestID: requestID)
+      var message = ChatMessage(role: .user, content:
+        "Create one concise web search query that helps answer the user's question about the attached context. "
+        + "Return only the query, without quotes or commentary. Question: " + query)
+      message.contexts = attachedContexts
+      let prepared: PreparedConversation
+      let stream: AsyncThrowingStream<String, Error>
+      if active.route.mode == .local {
+        guard let model = await engine.installedModel() else { throw LocalInferenceError.noModelInstalled }
+        if model.supportsVision {
+          prepared = try await visionEngine.prepare(messages: [message], image: nil, model: model)
+          stream = visionEngine.stream(messages: prepared.messages, image: nil, model: model, temperature: 0)
+        } else {
+          prepared = try await engine.prepare(LocalModelRequest(messages: [message]))
+          stream = engine.stream(LocalModelRequest(messages: prepared.messages, maximumTokenCount: 128, temperature: 0))
+        }
+      } else {
+        guard let providerID = CloudProviderID(rawValue: active.route.providerID) else { throw CloudProviderError.invalidResponse }
+        prepared = try CloudContext.prepare(ChatRequest(sessionID: selectedSessionID ?? UUID(), messages: [message], route: active.route))
+        stream = cloudProviders.provider(for: providerID).textStream(ChatRequest(
+          sessionID: selectedSessionID ?? UUID(), messages: prepared.messages, route: active.route))
+      }
+      contextualQuery = try ScreenSearchContext.query(from:
+        await ScreenSearchContext.collect(stream, maximumBytes: 1_024))
+      try Task.checkCancellation()
+      guard activeRequest?.id == requestID else { throw CancellationError() }
+      state = .searching
+      receiveActivity(.phase(.searching), requestID: requestID)
+    }
+    let results = try await webSearch.search(contextualQuery, maximumTokens: maximumTokens) { [weak self] event in
       // Retrieval candidates are not citation sources until context fitting selects them.
       if case .sourcesDiscovered = event {
         await self?.receiveActivity(.phase(.readingSources), requestID: requestID)

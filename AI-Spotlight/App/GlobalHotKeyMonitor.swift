@@ -4,20 +4,23 @@ import Foundation
 enum GlobalHotKey: CaseIterable {
   case togglePanel
   case openSettings
+  case selectionContext
 
   var keyCode: UInt32 {
     switch self {
     case .togglePanel: UInt32(kVK_Space)
     case .openSettings: UInt32(kVK_ANSI_S)
+    case .selectionContext: UInt32(kVK_Space)
     }
   }
 
-  var modifiers: UInt32 { UInt32(optionKey) }
+  var modifiers: UInt32 { self == .selectionContext ? UInt32(optionKey | shiftKey) : UInt32(optionKey) }
 
   fileprivate var identifier: UInt32 {
     switch self {
     case .togglePanel: 1
     case .openSettings: 2
+    case .selectionContext: 3
     }
   }
 
@@ -25,6 +28,7 @@ enum GlobalHotKey: CaseIterable {
     switch self {
     case .togglePanel: "Option-Space"
     case .openSettings: "Option-S"
+    case .selectionContext: "Shift-Option-Space"
     }
   }
 }
