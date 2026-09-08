@@ -52,8 +52,7 @@ enum ScreenCommand {
   }
 }
 
-/// Consume the leading tool command sequence atomically at submission. Commands
-/// embedded in the actual question remain ordinary text.
+/// Resolve recognized commands anywhere in the draft, once, at submission.
 struct ComposerCommands: Equatable {
   let prompt: String
   let screen: Bool
@@ -62,32 +61,12 @@ struct ComposerCommands: Equatable {
   let think: Bool
 
   init(_ draft: String) {
-    var remainder = draft
-    var screen = false
-    var search = false
-    var snapshot = false
-    var think = false
-    while true {
-      if let next = ScreenCommand.remainder(in: remainder) {
-        screen = true
-        remainder = next
-      } else if let next = ThinkCommand.remainder(in: remainder, command: "/snapshot") {
-        screen = true
-        snapshot = true
-        remainder = next
-      } else if let next = ThinkCommand.remainder(in: remainder) {
-        think = true
-        remainder = next
-      } else if let next = SearchCommand.remainder(in: remainder) {
-        search = true
-        remainder = next
-      } else { break }
-    }
-    self.prompt = remainder
-    self.screen = screen
-    self.search = search
-    self.snapshot = snapshot
-    self.think = think
+    let commands = Set(SlashCommand.tokens(in: draft).map(\.command))
+    prompt = SlashCommand.removing(Set(SlashCommand.allCases), from: draft)
+    screen = commands.contains(.screen) || commands.contains(.snapshot)
+    search = commands.contains(.search)
+    snapshot = commands.contains(.snapshot)
+    think = commands.contains(.think)
   }
 
   var submissionPrompt: String { (think ? "/think " : "") + prompt }
@@ -106,9 +85,9 @@ enum ThinkCommand {
   }
 
   static func message(_ prompt: String) -> ChatMessage {
-    let remainder = remainder(in: prompt)
-    var message = ChatMessage(role: .user, content: remainder ?? prompt)
-    message.extendedThinking = remainder == nil ? nil : true
+    let enabled = SlashCommand.tokens(in: prompt).contains { $0.command == .think }
+    var message = ChatMessage(role: .user, content: enabled ? SlashCommand.removing([.think], from: prompt) : prompt)
+    message.extendedThinking = enabled ? true : nil
     return message
   }
 

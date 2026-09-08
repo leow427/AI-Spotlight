@@ -8,6 +8,34 @@ import XCTest
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testSlashCommandSuggestionsRenderWithHighlightedDraft() async throws {
+    let text = "Explain /think using /"
+    let view = NSHostingView(rootView: SlashCommandComposer(text: .constant(text),
+      isFocused: .constant(true), isEnabled: true, submit: {})
+      .padding(16).frame(width: 480).environment(\.colorScheme, .dark))
+    let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 280),
+      styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = view
+    window.orderFront(nil)
+    defer { window.orderOut(nil) }
+    view.layoutSubtreeIfNeeded()
+    let editor = try composerField(in: view)
+    editor.setSelectedRange(NSRange(location: (text as NSString).length, length: 0))
+    editor.completion?.refresh()
+    await Task.yield()
+    view.layoutSubtreeIfNeeded()
+    XCTAssertEqual(editor.string, text)
+    XCTAssertEqual(editor.completion?.commands, SlashCommand.allCases)
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Slash-Commands.png"))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Slash command suggestions"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
   func testConversationBubblesAndSentAttachmentRender() throws {
     var outgoing = ChatMessage(role: .user, content: "Could you review the notes I attached and suggest a clearer introduction?")
     outgoing.attachments = [MessageAttachment(name: "Project notes.txt", isDirectory: false)]
@@ -359,7 +387,7 @@ final class ScreenViewTests: XCTestCase {
       _ = await screen.capture()
       screen.draft = (searchEnabled ? "/search " : "") + prompt
       try await renderPanel(view, state: "attached")
-      XCTAssertEqual(screen.draft, prompt)
+      XCTAssertEqual(screen.draft, (searchEnabled ? "/search " : "") + prompt)
       try submitComposer(in: view)
     }
     await fulfillment(of: [started], timeout: 5)
@@ -375,6 +403,7 @@ final class ScreenViewTests: XCTestCase {
       let png = try Data(contentsOf: URL(fileURLWithPath: "/tmp/AI-Spotlight-Panel-reply.png"))
       try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Screen-Search.png"))
       let scroll = try XCTUnwrap(descendants(view).compactMap { $0 as? NSScrollView }
+        .filter { !($0.documentView is SlashCommandTextView) }
         .max { view.convert($0.bounds, from: $0).midX < view.convert($1.bounds, from: $1).midX })
       let suffix = String(repeating: " More detail.", count: 80)
       let bottom = XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in
@@ -514,7 +543,7 @@ final class ScreenViewTests: XCTestCase {
       XCTAssertFalse(chat.isBusy)
       XCTAssertTrue(controller.isVisible)
       XCTAssertTrue(window.isKeyWindow)
-      XCTAssertNotNil(try composerField(in: view).currentEditor(), "The completed request must return keyboard focus to the composer")
+      XCTAssertTrue(window.firstResponder === (try composerField(in: view)), "The completed request must return keyboard focus to the composer")
       XCTAssertFalse(window.ignoresMouseEvents)
     }
     XCTAssertEqual(store.load().first?.messages.filter { $0.role == .user }.map(\.content),
@@ -539,9 +568,8 @@ final class ScreenViewTests: XCTestCase {
     editor.doCommand(by: #selector(NSResponder.insertNewline(_:)))
   }
 
-  private func composerField(in view: NSView) throws -> NSTextField {
-    try XCTUnwrap(descendants(view).compactMap { $0 as? NSTextField }
-      .first { $0.placeholderString == "Ask anything" })
+  private func composerField(in view: NSView) throws -> SlashCommandTextView {
+    try XCTUnwrap(descendants(view).compactMap { $0 as? SlashCommandTextView }.first)
   }
 
   private func descendants(_ view: NSView) -> [NSView] {
@@ -560,7 +588,7 @@ final class ScreenViewTests: XCTestCase {
     let fieldFrame = view.convert(field.bounds, from: field)
     XCTAssertTrue(view.bounds.contains(fieldFrame), "Composer outside panel during \(phase): \(fieldFrame)")
     XCTAssertFalse(field.isHiddenOrHasHiddenAncestor)
-    XCTAssertTrue(field.isEnabled)
+    XCTAssertTrue(field.isEditable)
     let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
     view.cacheDisplay(in: view.bounds, to: bitmap)
     let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
@@ -614,7 +642,7 @@ final class ScreenViewTests: XCTestCase {
       // OCR can merge the placeholder with adjacent tool icons. Inspect the
       // native field and its visible bounds to verify the actual composer instead.
       let field = try composerField(in: view)
-      XCTAssertEqual(field.stringValue, "")
+      XCTAssertEqual(field.string, "")
       XCTAssertFalse(field.isHiddenOrHasHiddenAncestor)
       XCTAssertTrue(view.bounds.contains(view.convert(field.bounds, from: field)))
     }

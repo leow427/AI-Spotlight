@@ -4,17 +4,17 @@ import XCTest
 
 @MainActor
 final class ScreenCaptureTests: XCTestCase {
-  func testSnapshotAndThinkingCommandsComposeWithoutEatingLiteralText() {
+  func testSnapshotAndThinkingCommandsComposeAnywhere() {
     let commands = ComposerCommands("/think /snapshot /search explain /screen literally")
     XCTAssertTrue(commands.screen)
     XCTAssertTrue(commands.snapshot)
     XCTAssertTrue(commands.think)
     XCTAssertTrue(commands.search)
-    XCTAssertEqual(commands.prompt, "explain /screen literally")
-    XCTAssertEqual(commands.captureDraft, "/snapshot /think explain /screen literally")
+    XCTAssertEqual(commands.prompt, "explain  literally")
+    XCTAssertEqual(commands.captureDraft, "/snapshot /think explain  literally")
     XCTAssertFalse(ComposerCommands("/snapshotting hi").screen)
     XCTAssertFalse(ComposerCommands("/thinker hi").think)
-    XCTAssertFalse(ComposerCommands("explain /think").think)
+    XCTAssertTrue(ComposerCommands("explain /think").think)
   }
 
   func testDesktopAndSnapshotUseDifferentCapturePathsAndRetakeMatches() async throws {
@@ -306,5 +306,116 @@ private final class CaptureModeProbe: ScreenCapturing {
     let image = NSImage(size: NSSize(width: 20, height: 20))
     image.lockFocus(); NSColor.white.setFill(); NSRect(x: 0, y: 0, width: 20, height: 20).fill(); image.unlockFocus()
     return image
+  }
+}
+
+@MainActor
+final class SlashCommandTests: XCTestCase {
+  func testCommandsAtEveryPositionAndCase() {
+    for command in SlashCommand.allCases {
+      for draft in [command.token + " hello", "hello " + command.token + " world", "hello " + command.token.uppercased()] {
+        XCTAssertEqual(SlashCommand.tokens(in: draft).map(\.command), [command])
+        XCTAssertFalse(ComposerCommands(draft).prompt.lowercased().contains(command.token))
+      }
+      XCTAssertNotNil(NSImage(systemSymbolName: command.symbol, accessibilityDescription: nil))
+    }
+    XCTAssertTrue(ThinkCommand.message("solve this /think").extendedThinking == true)
+    XCTAssertEqual(ThinkCommand.message("solve this /think").content, "solve this")
+    XCTAssertTrue(ComposerCommands("hello /snapshot, please /search!").snapshot)
+  }
+
+  func testLiteralsAndUnknownCommandsRemainUntouched() {
+    for text in ["https://example.com/search", "/tmp/screen", "`/think`", "\"/screen /search\"", "\\/think", "/thinker", "/unknown", "hello/think"] {
+      XCTAssertTrue(SlashCommand.tokens(in: text).isEmpty, text)
+      XCTAssertEqual(ComposerCommands(text).prompt, text)
+    }
+  }
+
+  func testCompletionUsesCaretAndReplacesWholeToken() throws {
+    let text = "🙂 explain /sn here"
+    let range = (text as NSString).range(of: "/sn")
+    let completion = try XCTUnwrap(SlashCommand.completion(in: text,
+      selection: NSRange(location: NSMaxRange(range), length: 0)))
+    XCTAssertEqual(completion.range, range)
+    XCTAssertEqual(completion.commands, [.snapshot])
+    XCTAssertEqual(SlashCommand.completion(in: "/S", selection: NSRange(location: 2, length: 0))?.commands,
+                   [.search, .screen, .snapshot])
+    XCTAssertEqual(SlashCommand.completion(in: "/", selection: NSRange(location: 1, length: 0))?.commands, SlashCommand.allCases)
+    XCTAssertNil(SlashCommand.completion(in: "/unknown", selection: NSRange(location: 8, length: 0)))
+    XCTAssertNil(SlashCommand.completion(in: text, selection: NSRange(location: range.location, length: 2)))
+    XCTAssertNil(SlashCommand.completion(in: "`/sn`", selection: NSRange(location: 4, length: 0)))
+    XCTAssertEqual(SlashCommand.completion(in: "/snapshot", selection: NSRange(location: 3, length: 0))?.range,
+                   NSRange(location: 0, length: 9))
+  }
+
+  func testKeyboardCompletionDismissalAndNewlines() throws {
+    let editor = SlashCommandTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+    let model = CommandCompletionModel()
+    model.editor = editor
+    editor.completion = model
+    editor.string = "/s"
+    editor.setSelectedRange(NSRange(location: 2, length: 0))
+    model.refresh()
+    var submissions = 0
+    editor.submit = { submissions += 1 }
+    func key(_ code: UInt16, _ modifiers: NSEvent.ModifierFlags = []) throws {
+      let event = try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+        modifierFlags: modifiers, timestamp: 0, windowNumber: 0, context: nil,
+        characters: code == 36 ? "\r" : "", charactersIgnoringModifiers: "", isARepeat: false, keyCode: code))
+      editor.keyDown(with: event)
+    }
+    try key(125)
+    XCTAssertEqual(model.selected, 1)
+    try key(48)
+    XCTAssertEqual(editor.string, "/screen ")
+    XCTAssertEqual(submissions, 0)
+    try key(36, .shift)
+    XCTAssertEqual(editor.string, "/screen \n")
+    XCTAssertEqual(submissions, 0)
+    try key(36)
+    XCTAssertEqual(submissions, 1)
+    editor.string = "/th"
+    editor.setSelectedRange(NSRange(location: 3, length: 0))
+    model.refresh()
+    try key(53)
+    XCTAssertTrue(model.commands.isEmpty)
+    XCTAssertEqual(editor.string, "/th")
+  }
+
+  func testCaptureCommandAtEndAndCancellationPreservesExactDraft() async {
+    let capture = CaptureStub()
+    let coordinator = ScreenComposerCoordinator(captureService: capture)
+    coordinator.draft = "explain this /snapshot"
+    let prompt = await coordinator.capture(submittedCommand: true)
+    XCTAssertEqual(prompt, "explain this")
+    coordinator.draft = "keep /snapshot this /think"
+    capture.image = nil
+    _ = await coordinator.capture(submittedCommand: true)
+    XCTAssertEqual(coordinator.draft, "keep /snapshot this /think")
+  }
+
+  func testHighlightingAndCompletionPreserveDraftSelectionAndUndo() throws {
+    let editor = SlashCommandTextView(frame: NSRect(x: 0, y: 0, width: 400, height: 40))
+    let model = CommandCompletionModel()
+    model.editor = editor
+    editor.completion = model
+    editor.allowsUndo = true
+    let window = NSWindow(contentRect: editor.frame, styleMask: [.borderless], backing: .buffered, defer: false)
+    window.contentView = editor
+    editor.string = "🙂 /think explain /sn please"
+    let range = (editor.string as NSString).range(of: "/sn")
+    editor.setSelectedRange(NSRange(location: NSMaxRange(range), length: 0))
+    let selection = editor.selectedRange()
+    editor.highlightCommands()
+    XCTAssertEqual(editor.selectedRange(), selection)
+    let think = (editor.string as NSString).range(of: "/think")
+    XCTAssertEqual(editor.textStorage?.attribute(.foregroundColor, at: think.location, effectiveRange: nil) as? NSColor, .systemBlue)
+    XCTAssertEqual(editor.textStorage?.attribute(.foregroundColor, at: 0, effectiveRange: nil) as? NSColor, .labelColor)
+    model.refresh()
+    model.accept(.snapshot)
+    XCTAssertEqual(editor.string, "🙂 /think explain /snapshot please")
+    XCTAssertTrue(model.commands.isEmpty)
+    editor.undoManager?.undo()
+    XCTAssertEqual(editor.string, "🙂 /think explain /sn please")
   }
 }

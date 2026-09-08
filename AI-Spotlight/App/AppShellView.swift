@@ -204,7 +204,7 @@ struct AppShellView: View {
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
   @State private var selectedMode = ChatMode.auto
-  @FocusState private var isComposerFocused: Bool
+  @State private var isComposerFocused = false
 
   init(
     glassAppearance: GlassAppearanceSettings,
@@ -446,11 +446,9 @@ struct AppShellView: View {
       await modelAdvisor.start(installedModels: localChat.installedModels)
     }
     .onChange(of: draft) { _, value in
-      let commands = ComposerCommands(value)
-      guard commands.search, value == draft else { return }
+      guard ComposerCommands(value).search else { return }
       isSearchPresented = true
       isSearchEnabled = true
-      draft = commands.screen ? commands.captureDraft : commands.submissionPrompt
     }
     .onChange(of: isSearchPresented) { _, _ in
       isComposerFocused = true
@@ -487,15 +485,13 @@ struct AppShellView: View {
         FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
       }
 
-      TextField("Ask anything", text: Binding(
-        get: { localChat.pendingUserMessage == nil ? screen.draft : "" },
-        set: { screen.draft = $0 }), axis: .vertical)
-        .font(ChatTypography.body)
-        .textFieldStyle(.plain)
-        .lineLimit(1...5)
-        .focused($isComposerFocused)
-        .disabled(localChat.isBusy || screen.isBusy || files.isWorking || files.isPicking)
-        .onSubmit(submitDraft)
+      SlashCommandComposer(
+        text: Binding(get: { localChat.pendingUserMessage == nil ? screen.draft : "" },
+                      set: { screen.draft = $0 }),
+        isFocused: Binding(get: { isComposerFocused }, set: { isComposerFocused = $0 }),
+        isEnabled: !(localChat.isBusy || screen.isBusy || files.isWorking || files.isPicking),
+        submit: submitDraft
+      )
 
       Menu {
         ForEach(ChatMode.allCases) { mode in
@@ -967,8 +963,9 @@ struct AppShellView: View {
 
   private func submitDraft() {
     guard !localChat.isBusy, !screen.isBusy, !files.isWorking, !files.isPicking else { return }
+    let commands = ComposerCommands(draft)
     if files.selection != nil {
-      if screen.isEnabled || isSearchEnabled {
+      if screen.isEnabled || isSearchEnabled || commands.screen || commands.search {
         files.error = "Turn off Screen and Web Search to work with your attached files."
         return
       }
@@ -979,13 +976,11 @@ struct AppShellView: View {
     }
     // Capture can finish and submit again before SwiftUI delivers onChange.
     // Resolve all requested tools now; no view-update timing controls routing.
-    let commands = ComposerCommands(draft)
     if commands.search {
       isSearchPresented = true
       isSearchEnabled = true
     }
     if commands.screen {
-      draft = commands.captureDraft
       Task {
         let automaticPrompt = await screen.capture(submittedCommand: true)
         isComposerFocused = true
@@ -993,15 +988,15 @@ struct AppShellView: View {
       }
       return
     }
-    if commands.search { draft = commands.submissionPrompt }
     if screen.isEnabled, let attachment = screen.attachment {
       submitScreenAttachment(attachment)
       return
     }
-    guard canSubmit else { return }
-    let prompt = draft
+    guard canSubmit, !commands.prompt.isEmpty else { return }
+    let originalDraft = draft
+    let prompt = commands.submissionPrompt
     let accepted: @MainActor () -> Void = {
-      if draft == prompt { draft = "" }
+      if draft == originalDraft { draft = "" }
     }
     switch selectedMode {
     case .local:
@@ -1020,15 +1015,18 @@ struct AppShellView: View {
   }
 
   private func submitScreenAttachment(_ attachment: ScreenAttachment) {
-    guard !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    let originalDraft = draft
+    let commands = ComposerCommands(draft)
+    guard !commands.prompt.isEmpty else { return }
+    let prompt = commands.submissionPrompt
     let cloudText = cloudSettings.isConfigured
       ? CloudModel(id: cloudSettings.preferredModelID, displayName: cloudSettings.preferredModelID,
                    provider: cloudSettings.preferredProvider).screenModel : nil
     let automatic = selectedMode == .auto ? AutoRouter.decide(AutoRouter.Request(
-      selectedMode: .auto, webSearchEnabled: isSearchEnabled, prompt: draft,
+      selectedMode: .auto, webSearchEnabled: isSearchEnabled, prompt: prompt,
       contextMessages: localChat.messages, localModel: localChat.installedModel,
       additionalInputTokens: attachment.ocrText.utf8.count + 512
-        + (ScreenRoutingPolicy.requiresVision(prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText,
+        + (ScreenRoutingPolicy.requiresVision(prompt: prompt, ocr: ScreenOCRResult(text: attachment.ocrText,
           confidence: attachment.ocrConfidence)) ? 4096 : 0),
       cloud: connectivity.isOffline ? nil : autoCloudConfiguration)) : nil
     if let limitation = automatic?.limitation {
@@ -1036,7 +1034,7 @@ struct AppShellView: View {
       return
     }
     let request = ScreenRoutingPolicy.Request(
-      prompt: draft, ocr: ScreenOCRResult(text: attachment.ocrText, confidence: attachment.ocrConfidence),
+      prompt: prompt, ocr: ScreenOCRResult(text: attachment.ocrText, confidence: attachment.ocrConfidence),
       mode: selectedMode, localText: localChat.installedModel?.screenModel, cloudText: cloudText,
       autoRoute: automatic?.route,
       allowCloudScreenshots: screenSettings.allowCloudScreenshots,
@@ -1051,11 +1049,10 @@ struct AppShellView: View {
     case .blocked(let reason):
       screen.error = reason
     case .text, .vision:
-      let prompt = draft
       localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
         searchEnabled: isSearchEnabled,
         cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
-          if draft == prompt { draft = "" }
+          if draft == originalDraft { draft = "" }
           if screen.attachment?.id == attachment.id { screen.removeAttachment() }
           isComposerFocused = true
         }
@@ -1201,13 +1198,17 @@ private struct KeyboardShortcutsHelpView: View {
           shortcut("Next recent chat", keys: "⌃ Tab")
           shortcut("Open Settings", keys: "⌘ ,")
           shortcut("Send from the message field", keys: "Return")
+          shortcut("Complete a slash command", keys: "Tab / Return")
+          shortcut("Choose a command suggestion", keys: "↑ / ↓")
+          shortcut("Dismiss command suggestions", keys: "Esc")
+          shortcut("Insert a new line", keys: "⇧ Return")
           shortcut("Hide inactive tools", keys: "⇧ ⌘ H")
           shortcut("Enable Web Search", keys: "/search")
           shortcut("Capture the full desktop", keys: "/screen")
           shortcut("Capture a screen region", keys: "/snapshot")
           shortcut("Think harder for this answer", keys: "/think")
           shortcut("Attach files or a folder", keys: "⇧ ⌥ F")
-          Text("/screen captures all displays; /snapshot selects a region. Add a question to capture and send, or use the command alone to attach. /think applies to one answer.")
+          Text("/screen captures all displays; /snapshot selects a region. Add a question to capture and send, or use the command alone to attach. /think applies to one answer. Commands can appear anywhere in your message and remain blue in the input. Put literal command examples in quotes or backticks.")
             .font(.caption).foregroundStyle(.secondary)
 
           Divider()

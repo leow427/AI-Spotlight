@@ -23,7 +23,7 @@ final class ScreenPipelineTests: XCTestCase {
     }
   }
 
-  func testComposerCommandsConsumeEitherOrderOnceAndKeepLiteralQuestionText() {
+  func testComposerCommandsConsumeEitherOrderOnceAndKeepQuotedText() {
     for draft in ["/screen /search question", " /SEARCH\n/SCREEN question", "/screen /search /screen /search question"] {
       let commands = ComposerCommands(draft)
       XCTAssertTrue(commands.screen)
@@ -31,7 +31,7 @@ final class ScreenPipelineTests: XCTestCase {
       XCTAssertEqual(commands.prompt, "question")
       XCTAssertEqual(commands.captureDraft, "/screen question")
     }
-    for draft in ["Explain /screen and /search", "\"/screen /search\"", "/screenshot question", "/searching question"] {
+    for draft in ["\"/screen /search\"", "/screenshot question", "/searching question"] {
       let commands = ComposerCommands(draft)
       XCTAssertFalse(commands.screen)
       XCTAssertFalse(commands.search)
@@ -39,7 +39,7 @@ final class ScreenPipelineTests: XCTestCase {
     }
     XCTAssertEqual(ComposerCommands("/screen /search").prompt, "")
     XCTAssertEqual(ComposerCommands("/screen /search").captureDraft, "/screen")
-    XCTAssertEqual(ComposerCommands("/search question /screen").prompt, "question /screen")
+    XCTAssertEqual(ComposerCommands("/search question /screen").prompt, "question")
   }
 
   func testOutgoingMessageIsVisibleImmediatelyAndLeafEndsAtFirstText() async throws {

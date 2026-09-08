@@ -198,6 +198,7 @@ private final class SpotlightPanel: NSPanel {
 
   override func performKeyEquivalent(with event: NSEvent) -> Bool {
     if event.keyCode == 53 {
+      if let editor = firstResponder as? SlashCommandTextView, editor.completion?.dismiss() == true { return true }
       onHide?()
       return true
     }

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		CA1200000000000000000002 /* SlashCommandComposer in Sources */ = {isa = PBXBuildFile; fileRef = CA1100000000000000000002; };
+		CA1200000000000000000001 /* SlashCommand in Sources */ = {isa = PBXBuildFile; fileRef = CA1100000000000000000001; };
 		14069C4454E33368512BA2E9 /* WorkspaceDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */; };
 		5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */; };
 		0009134391031E5AE19F8236 /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCD3B0B99B28590527862FF /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift */; };
@@ -115,6 +117,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		CA1100000000000000000002 /* SlashCommandComposer */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SlashCommandComposer.swift"; sourceTree = SOURCE_ROOT; };
+		CA1100000000000000000001 /* SlashCommand */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SlashCommand.swift"; sourceTree = SOURCE_ROOT; };
 		E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceDocumentTests.swift"; sourceTree = SOURCE_ROOT; };
 		933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceDocument.swift"; sourceTree = SOURCE_ROOT; };
 		0134D277D0D4590D1E9D4D24 /* AI-Spotlight/Files/LocalFileInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/LocalFileInference.swift"; sourceTree = SOURCE_ROOT; };
@@ -237,6 +241,8 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				CA1100000000000000000002,
+				CA1100000000000000000001,
 				E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */,
 				933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */,
 				B34E3DA6304D813D00A724CF /* AI-Spotlight.xctestplan */,
@@ -508,6 +514,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				CA1200000000000000000002,
+				CA1200000000000000000001,
 				5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */,
 				119F917FD36890D94019A810 /* AI-Spotlight/Files/WorkspaceWritePolicy.swift in Sources */,
 				7558BA92C2D5C3CE65628DD2 /* AI-Spotlight/Files/LocalFileRuntimeSetup.swift in Sources */,
