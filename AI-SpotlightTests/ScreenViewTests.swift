@@ -8,6 +8,33 @@ import XCTest
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testLiquidGlassSettingsAndAssetsRender() throws {
+    for name in ["ForestBackdrop", "TemplateAttachment"] {
+      let image = try XCTUnwrap(NSImage(named: name))
+      XCTAssertNotNil(image.cgImage(forProposedRect: nil, context: nil, hints: nil))
+    }
+    let credentials = ScreenTestCredentialStore()
+    let settings = CloudSettingsModel(credentialStore: credentials,
+      catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport()),
+      codexAvailable: { false })
+    for destination in SettingsView.SettingsDestination.allCases {
+      let view = NSHostingView(rootView: SettingsView(settings: settings, initialDestination: destination))
+      let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 900, height: 740), styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = view
+      defer { window.contentView = nil }
+      view.layoutSubtreeIfNeeded()
+      XCTAssertEqual(view.fittingSize, NSSize(width: 900, height: 740))
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Glass-Settings-\(destination == .local ? "Local" : "Cloud").png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Liquid Glass settings · \(destination.rawValue)"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+  }
+
   func testConversationBubblesAndSentAttachmentRender() throws {
     var outgoing = ChatMessage(role: .user, content: "Could you review the notes I attached and suggest a clearer introduction?")
     outgoing.attachments = [MessageAttachment(name: "Project notes.txt", isDirectory: false)]
@@ -472,6 +499,23 @@ final class ScreenViewTests: XCTestCase {
     defer { controller.hide() }
     let window = try XCTUnwrap(view.window)
 
+    for size in [NSSize(width: 1200, height: 780), NSSize(width: 640, height: 420)] {
+      window.setContentSize(size)
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+      let field = try composerField(in: view)
+      XCTAssertTrue(view.bounds.contains(view.convert(field.bounds, from: field)))
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Glass-\(Int(size.width)).png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Liquid Glass welcome \(Int(size.width))"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+    window.setContentSize(NSSize(width: 752, height: 462))
+
     // The layout failure is also reachable on a first blocked request; it
     // depends on the detail's measurement, not a global submission counter.
     screen.draft = "Describe the colors in this diagram."
@@ -541,7 +585,7 @@ final class ScreenViewTests: XCTestCase {
 
   private func composerField(in view: NSView) throws -> NSTextField {
     try XCTUnwrap(descendants(view).compactMap { $0 as? NSTextField }
-      .first { $0.placeholderString == "Ask anything" })
+      .first { $0.placeholderString == "Ask anything..." })
   }
 
   private func descendants(_ view: NSView) -> [NSView] {
@@ -552,10 +596,6 @@ final class ScreenViewTests: XCTestCase {
     await Task.yield()
     view.layoutSubtreeIfNeeded()
     view.window?.displayIfNeeded()
-    let split = try XCTUnwrap(descendants(view).compactMap { $0 as? NSSplitView }.first)
-    let splitFrame = view.convert(split.bounds, from: split)
-    XCTAssertEqual(splitFrame.minY, 0, accuracy: 1, "Split offset during \(phase): \(splitFrame)")
-    XCTAssertEqual(splitFrame.height, view.bounds.height, accuracy: 1, "Split overflow during \(phase): \(splitFrame)")
     let field = try composerField(in: view)
     let fieldFrame = view.convert(field.bounds, from: field)
     XCTAssertTrue(view.bounds.contains(fieldFrame), "Composer outside panel during \(phase): \(fieldFrame)")
@@ -571,14 +611,16 @@ final class ScreenViewTests: XCTestCase {
     let text = try await ScreenOCRService().recognize(try XCTUnwrap(bitmap.cgImage)).text.lowercased()
     // Native glass renders on a separate surface from cacheDisplay. Verify
     // the actual sidebar, its scroll content, and its position in the panel.
-    let sidebar = try XCTUnwrap(split.arrangedSubviews.min { $0.frame.width < $1.frame.width })
-    XCTAssertFalse(split.isSubviewCollapsed(sidebar))
-    XCTAssertFalse(sidebar.isHiddenOrHasHiddenAncestor)
-    XCTAssertGreaterThan(sidebar.frame.width, 180)
-    XCTAssertLessThan(sidebar.frame.width, 270)
-    XCTAssertTrue(view.bounds.contains(view.convert(sidebar.bounds, from: sidebar)),
-      "History sidebar outside panel during \(phase)")
-    let history = try XCTUnwrap(descendants(sidebar).compactMap { $0 as? NSScrollView }.first)
+    let history = try XCTUnwrap(descendants(view).compactMap { $0 as? NSScrollView }.first {
+      view.convert($0.bounds, from: $0).minX < 30
+    })
+    let historyFrame = view.convert(history.bounds, from: history)
+    XCTAssertFalse(history.isHiddenOrHasHiddenAncestor)
+    XCTAssertGreaterThan(historyFrame.width, 180)
+    XCTAssertLessThan(historyFrame.width, 270)
+    XCTAssertEqual(historyFrame.minY, 12, accuracy: 1, "Inset sidebar moved during \(phase)")
+    XCTAssertEqual(historyFrame.height, view.bounds.height - 24, accuracy: 1)
+    XCTAssertTrue(view.bounds.contains(historyFrame), "History outside panel during \(phase)")
     XCTAssertGreaterThan(try XCTUnwrap(history.documentView).frame.height, 0)
     XCTAssertTrue(text.contains("auto"), "Composer mode missing during \(phase): \(text)")
   }

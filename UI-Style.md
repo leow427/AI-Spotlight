@@ -32,3 +32,13 @@ The primary visual direction is a minimalistic liquid glass interface. This is t
 ## Minimized State
 
 When minimized, the interface should show only the chat box. It should appear as a small rectangular element with no sidebar or additional controls visible beyond what is necessary for the compact chat experience.
+
+## Liquid Glass Figma Revamp
+
+The precise visual reference is now the Liquid Glass alternative in
+[AI-Spotlight — Nature UI & Agent Handoff](https://www.figma.com/design/0EhvFOJ9c1p6G71ZF77y5U/AI-Spotlight?node-id=16-122).
+Use its continuous forest backdrop, inset frosted sidebar, #C4E99C sage accent,
+large welcome mark, and capsule controls throughout chat and settings. The
+reference is dark; retain the AI Spotlight product name and existing logo and
+animations. See `docs/Liquid-Glass-UI.md` for the native implementation and
+responsive behavior.

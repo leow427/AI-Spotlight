@@ -6,9 +6,9 @@ struct FileModeToolButton: View {
   let activate: () -> Void
   var body: some View {
     Button(action: activate) {
-      Image("FileMode").renderingMode(.template).resizable().scaledToFit()
-        .foregroundStyle(files.selection != nil || files.isPicking ? Color.green : .white).frame(width: 22, height: 22).padding(4)
-        .background(files.selection != nil || files.isPicking ? Color.green.opacity(0.12) : Color.black.opacity(0.12), in: RoundedRectangle(cornerRadius: 7))
+      Image("TemplateAttachment").renderingMode(.template).resizable().scaledToFit()
+        .foregroundStyle(files.selection != nil || files.isPicking ? NatureGlass.accent : NatureGlass.primary).frame(width: 24, height: 24).frame(width: 44, height: 44)
+        .background(files.selection != nil || files.isPicking ? NatureGlass.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 7))
     }
     .buttonStyle(.plain).disabled(isBusy || files.isPicking || files.isWorking)
     .accessibilityLabel("File Mode").accessibilityValue(files.selection == nil ? "Off" : "On")
@@ -118,7 +118,7 @@ struct FileChangesReview: View {
         Spacer()
         Button("Undo Changes", action: undo)
       }
-    }.padding(24).frame(width: 660, height: 480)
+    }.padding(24).frame(width: 660, height: 480).naturePresentation()
   }
   private func preview(_ title: String, path: String, data: Data?) -> some View {
     VStack(alignment: .leading, spacing: 4) {

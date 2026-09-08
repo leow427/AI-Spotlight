@@ -13,7 +13,7 @@ struct WebSearchControls: View {
     HStack(spacing: 0) {
       Menu {
         if let attachFiles {
-          Button(action: attachFiles) { ToolMenuLabel(title: "Files", imageName: "FileMode") }
+          Button(action: attachFiles) { ToolMenuLabel(title: "Files", imageName: "TemplateAttachment") }
             .disabled(isBusy)
         }
         if let captureScreen {

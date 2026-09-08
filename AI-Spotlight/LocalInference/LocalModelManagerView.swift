@@ -26,7 +26,7 @@ struct LocalModelChoiceCard: View {
       }
       .padding(14)
       .frame(maxWidth: .infinity, alignment: .leading)
-      .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 14))
+      .natureSurface(radius: 16)
       .overlay {
         RoundedRectangle(cornerRadius: 14)
           .stroke(isSelected ? Color.accentColor.opacity(0.7) : .secondary.opacity(0.2), lineWidth: 1)
@@ -100,7 +100,7 @@ struct LocalModelOnboardingView: View {
     }
     .padding(24)
     .frame(width: 560, height: 650)
-    .background(.regularMaterial)
+    .naturePresentation()
     .interactiveDismissDisabled(chat.isBusy)
   }
 }

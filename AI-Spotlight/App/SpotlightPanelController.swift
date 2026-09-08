@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 struct PanelSizeStore {
-  static let defaultSize = NSSize(width: 760, height: 520)
+  static let defaultSize = NSSize(width: 1200, height: 780)
   static let minimumSize = NSSize(width: 640, height: 420)
 
   private enum Key {
