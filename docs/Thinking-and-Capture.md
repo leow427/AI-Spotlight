@@ -67,9 +67,8 @@ outgoing bubbles, Avenir Next typography, and per-message attachments.
 
 The current waiting indicator uses the supplied `elastic-juggle.svg`, bundled unchanged as `ElasticJuggle`. It replaces the leaf in both empty assistant messages and the standalone pre-response waiting row. A compact “Thinking” label beside it receives a white highlight sweeping left to right every two seconds. The SVG keeps its original six-second juggling cycle.
 
-Reduce Motion selects the SVG's built-in still group and removes the text shimmer. The web view is reused without reloading on ordinary chat updates. Assistive technology receives one “Thinking” status. The composer border animation is unchanged.
+The juggling animation and text shimmer always run; there is no reduced-motion variant for this indicator. The web view is reused without reloading on ordinary chat updates. Assistive technology receives one “Thinking” status. The composer border animation is unchanged.
 
-Rendering tests verify nonblank SVG pixels, different frames at two animation times, and the still/animated group visibility. The images below are static test snapshots of the moving indicator and its reduced-motion fallback.
+Rendering tests verify nonblank SVG pixels, different frames at two animation times, and that the animated group remains visible. The image below is a static test snapshot of the moving indicator.
 
 ![Elastic juggle with Thinking](images/thinking-elastic.png)
-![Reduce Motion](images/thinking-elastic-still.png)

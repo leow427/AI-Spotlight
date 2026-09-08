@@ -1722,34 +1722,24 @@ struct SettingsView: View {
 
 
 struct ThinkingStatusView: View {
-  @Environment(\.accessibilityReduceMotion) private var reduceMotion
-
-  var body: some View { ThinkingIndicatorContent(reduceMotion: reduceMotion) }
-}
-
-struct ThinkingIndicatorContent: View {
-  let reduceMotion: Bool
-
   var body: some View {
     HStack(spacing: 2) {
-      ElasticJuggleView(reduceMotion: reduceMotion).frame(width: 80, height: 64).accessibilityHidden(true)
+      ElasticJuggleView().frame(width: 80, height: 64).accessibilityHidden(true)
       Text("Thinking")
         .font(.system(size: 14, weight: .medium))
         .foregroundStyle(.white.opacity(0.45))
         .overlay {
-          if !reduceMotion {
-            GeometryReader { geometry in
-              TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
-                let progress = timeline.date.timeIntervalSinceReferenceDate
-                  .truncatingRemainder(dividingBy: 2) / 2
-                LinearGradient(colors: [.clear, .white, .clear], startPoint: .leading, endPoint: .trailing)
-                  .frame(width: 32)
-                  .offset(x: -32 + (geometry.size.width + 64) * progress)
-              }
+          GeometryReader { geometry in
+            TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
+              let progress = timeline.date.timeIntervalSinceReferenceDate
+                .truncatingRemainder(dividingBy: 2) / 2
+              LinearGradient(colors: [.clear, .white, .clear], startPoint: .leading, endPoint: .trailing)
+                .frame(width: 32)
+                .offset(x: -32 + (geometry.size.width + 64) * progress)
             }
-            .mask(Text("Thinking").font(.system(size: 14, weight: .medium)))
-            .accessibilityHidden(true)
           }
+          .mask(Text("Thinking").font(.system(size: 14, weight: .medium)))
+          .accessibilityHidden(true)
         }
     }
     .fixedSize()
@@ -1759,8 +1749,6 @@ struct ThinkingIndicatorContent: View {
 }
 
 private struct ElasticJuggleView: NSViewRepresentable {
-  let reduceMotion: Bool
-
   func makeNSView(context: Context) -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
@@ -1771,11 +1759,12 @@ private struct ElasticJuggleView: NSViewRepresentable {
   }
 
   func updateNSView(_ view: WKWebView, context: Context) {
-    guard view.identifier?.rawValue != String(reduceMotion) else { return }
-    view.identifier = NSUserInterfaceItemIdentifier(String(reduceMotion))
+    guard view.identifier == nil else { return }
     guard let asset = NSDataAsset(name: "ElasticJuggle"), let svg = String(data: asset.data, encoding: .utf8) else { return }
-    let reducedStyle = reduceMotion ? ".ej-motion { display: none !important; } .ej-still { display: inline !important; }" : ""
-    view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(reducedStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
+    view.identifier = NSUserInterfaceItemIdentifier("elastic-juggle")
+    // This indicator always animates; override the supplied SVG's still fallback.
+    let motionStyle = ".ej-motion { display: inline !important; } .ej-still { display: none !important; }"
+    view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(motionStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
   }
 }
 
