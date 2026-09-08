@@ -26,6 +26,7 @@ struct ChatRequest: Sendable, Equatable {
 }
 
 enum ChatEvent: Sendable, Equatable {
+  case activity(AssistantActivityEvent)
   case token(String)
   case completed
 }
@@ -51,6 +52,7 @@ struct ChatMessage: Codable, Sendable, Equatable, Identifiable {
   var searchSources: [WebSearchSource]?
   let createdAt: Date
   // Session-only UI data: never serialize screenshot pixels or send them as chat text.
+  var activity: AssistantActivity? = nil
   var imagePreview: Data? = nil
   var extendedThinking: Bool? = nil
   var attachments: [MessageAttachment]? = nil

@@ -233,6 +233,7 @@ private struct NatureButtonStyle: ButtonStyle {
 }
 
 struct AppShellView: View {
+  @State private var expandedActivities: Set<UUID> = []
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
   @StateObject private var localChat: LocalChatViewModel
@@ -664,15 +665,16 @@ struct AppShellView: View {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 18) {
           ForEach(localChat.presentationMessages) { message in
-            LocalMessageView(message: message, isThinking: localChat.isWaitingForResponse && message.id == localChat.presentationMessages.last?.id)
+            LocalMessageView(message: message, isThinking: localChat.isWaitingForResponse && message.id == localChat.presentationMessages.last?.id,
+                             expandedActivity: activityExpansion(message.activity?.id ?? message.id))
               .id(message.id)
           }
-          if localChat.isWaitingForResponse && localChat.presentationMessages.last?.role != .assistant {
-            ThinkingStatusView().allowsHitTesting(false)
+          if let activity = localChat.activity, localChat.presentationMessages.last?.role != .assistant {
+            AssistantActivityView(activity: activity, expanded: activityExpansion(activity.id))
           }
         }
         .padding(24)
-        .background(ConversationScrollObserver(contentRevision: (localChat.presentationMessages.last?.content ?? "") + String(localChat.presentationMessages.count)).allowsHitTesting(false))
+        .background(ConversationScrollObserver(contentRevision: (localChat.presentationMessages.last?.content ?? "") + String(localChat.presentationMessages.count) + (localChat.activity?.status ?? "") + String(expandedActivities.count)).allowsHitTesting(false))
       }
       .defaultScrollAnchor(.bottom, for: .initialOffset)
       .defaultScrollAnchor(.top, for: .alignment)
@@ -699,14 +701,13 @@ struct AppShellView: View {
     }
   }
 
-  private var requestPhase: String {
-    switch localChat.state {
-    case .refiningSearch: "Preparing search query"
-    case .searching: "Searching with Brave"
-    case .streaming: "Streaming"
-    default: "Preparing"
-    }
+  private func activityExpansion(_ id: UUID) -> Binding<Bool> {
+    Binding(get: { expandedActivities.contains(id) }, set: { expanded in
+      if expanded { expandedActivities.insert(id) } else { expandedActivities.remove(id) }
+    })
   }
+
+  private var requestPhase: String { localChat.activity?.status ?? "Preparing…" }
 
   @ViewBuilder
   private var inactiveRouteStatus: some View {
@@ -1183,6 +1184,7 @@ enum ChatTypography {
 struct LocalMessageView: View {
   let message: ChatMessage
   var isThinking = false
+  var expandedActivity: Binding<Bool>? = nil
 
   var body: some View {
     Group {
@@ -1215,21 +1217,15 @@ struct LocalMessageView: View {
         .frame(maxWidth: .infinity, alignment: .trailing)
       } else {
         VStack(alignment: .leading, spacing: 8) {
-          if message.content.isEmpty {
-            if isThinking { ThinkingStatusView().allowsHitTesting(false) }
-          } else {
-            ChatMarkdownView(content: message.content)
+          if let activity = message.activity {
+            AssistantActivityView(activity: activity, expanded: expandedActivity)
+          } else if let sources = message.searchSources, !sources.isEmpty {
+            AssistantActivityView(activity: .savedSources(sources, messageID: message.id), expanded: expandedActivity)
+          } else if message.content.isEmpty && isThinking {
+            ThinkingStatusView().allowsHitTesting(false)
           }
-          if let sources = message.searchSources, !sources.isEmpty {
-            VStack(alignment: .leading, spacing: 5) {
-              Text("Sources · Brave Search").font(ChatTypography.label).foregroundStyle(.secondary)
-              ForEach(sources) { source in
-                Link(destination: source.url) {
-                  Label(source.title.isEmpty ? (source.url.host ?? source.url.absoluteString) : source.title,
-                        systemImage: "arrow.up.right").lineLimit(1)
-                }.help(source.url.absoluteString)
-              }
-            }.font(.caption).padding(.top, 6)
+          if !message.content.isEmpty {
+            ChatMarkdownView(content: message.content)
           }
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
@@ -1719,12 +1715,14 @@ struct SettingsView: View {
 
 
 struct ThinkingStatusView: View {
+  var text = "Thinking"
+
   var body: some View {
     HStack(spacing: 2) {
       ElasticJuggleView().frame(width: 80, height: 64).accessibilityHidden(true)
-      Text("Thinking")
+      Text(text)
         .font(.system(size: 14, weight: .medium))
-        .foregroundStyle(.white.opacity(0.45))
+        .foregroundStyle(.secondary)
         .overlay {
           GeometryReader { geometry in
             TimelineView(.animation(minimumInterval: 1.0 / 30)) { timeline in
@@ -1735,13 +1733,13 @@ struct ThinkingStatusView: View {
                 .offset(x: -32 + (geometry.size.width + 64) * progress)
             }
           }
-          .mask(Text("Thinking").font(.system(size: 14, weight: .medium)))
+          .mask(Text(text).font(.system(size: 14, weight: .medium)))
           .accessibilityHidden(true)
         }
     }
-    .fixedSize()
+    .fixedSize(horizontal: false, vertical: true)
     .accessibilityElement(children: .ignore)
-    .accessibilityLabel("Thinking")
+    .accessibilityLabel(text)
   }
 }
 

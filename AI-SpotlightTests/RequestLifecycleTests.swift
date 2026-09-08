@@ -52,6 +52,8 @@ final class RequestLifecycleTests: XCTestCase {
       XCTAssertFalse(viewModel.isBusy)
       XCTAssertNil(viewModel.activeRequest)
       XCTAssertEqual(viewModel.messages.last?.content, "B partial")
+      XCTAssertEqual(viewModel.messages.last?.activity?.phase, .cancelled)
+      XCTAssertNil(viewModel.activity)
     }
   }
 
@@ -89,6 +91,8 @@ final class RequestLifecycleTests: XCTestCase {
       XCTAssertEqual(viewModel.state, .idle)
       XCTAssertNil(viewModel.activeRequest)
       XCTAssertEqual(viewModel.messages.last?.content, "B partial")
+      XCTAssertEqual(viewModel.messages.last?.activity?.phase, .cancelled)
+      XCTAssertNil(viewModel.activity)
     }
   }
 

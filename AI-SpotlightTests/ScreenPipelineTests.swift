@@ -183,6 +183,9 @@ final class ScreenPipelineTests: XCTestCase {
     XCTAssertTrue(vision.requests[1].last?.content.contains("Memory evidence fixture") == true)
     XCTAssertEqual(stages.filter { $0 == .refiningSearch || $0 == .searching }, [.refiningSearch, .searching])
     XCTAssertEqual(fixture.chat.messages.map(\.content), [prompt, "local vision answer"])
+    XCTAssertEqual(fixture.chat.messages.last?.activity?.phase, .completed)
+    XCTAssertEqual(fixture.chat.messages.last?.activity?.sources, [PipelineSearch.source])
+    XCTAssertTrue(fixture.chat.messages.last?.activity?.phases.contains(.refiningSearch) == true)
     XCTAssertEqual(fixture.store.load().first?.messages.map(\.content), [prompt, "local vision answer"])
   }
 
