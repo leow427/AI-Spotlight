@@ -296,7 +296,7 @@ final class ScreenPipelineTests: XCTestCase {
         XCTAssertEqual(fixture.chat.state, .idle)
         let queries = await fixture.search.queries
         XCTAssertEqual(queries.map(\.prompt), [PipelinePlanning.query], "Search must resolve 'this' using the screen facts")
-        XCTAssertEqual(queries.first?.maximumTokens, mode == .cloud ? 4_096 : 1_024)
+        XCTAssertEqual(queries.first?.maximumTokens, 8_192)
         let requests: [ChatMessage]
         if mode == .cloud {
           let request = try XCTUnwrap(fixture.cloud.requests.last)

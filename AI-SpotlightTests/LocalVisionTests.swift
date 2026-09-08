@@ -531,6 +531,74 @@ final class LocalVisionTests: XCTestCase {
     try png.write(to: URL(fileURLWithPath: "/tmp/ai-spotlight-vision-update-preview.png"))
   }
 
+  func testServerPreparationUsesRealTokenCountsAndReusesPreparedContextForGeneration() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    var model = try controlledRuntimeModel(in: directory)
+    model.visionConfiguration?.contextWindow = 16_384
+    let runtime = LlamaServerVisionEngine()
+    let messages = [ChatMessage(role: .user, content: String(repeating: "Unicode evidence 🌍 ", count: 900))]
+    let prepared = try await runtime.prepare(messages: messages, image: nil, model: model)
+    XCTAssertEqual(prepared.budget.contextWindow, 16_384)
+    XCTAssertEqual(prepared.messages, messages, "UTF-8 size must not reject text that the tokenizer says fits")
+    XCTAssertLessThan(prepared.inputTokenCount, messages[0].content.utf8.count / 2)
+    let before = await runtime.runtimeProcessIdentifier()
+    let output = try await ScreenSearchContext.collect(runtime.stream(messages: prepared.messages, image: nil, model: model), maximumBytes: 100)
+    XCTAssertEqual(output, "fixture answer")
+    let after = await runtime.runtimeProcessIdentifier()
+    XCTAssertEqual(before, after)
+    let log = try String(contentsOf: directory.appending(path: "requests.jsonl"), encoding: .utf8)
+      .split(separator: "\n").map { try JSONDecoder().decode(CodexValue.self, from: Data($0.utf8)) }
+    let template = try XCTUnwrap(log.first { $0["path"].string == "/apply-template" })
+    let completion = try XCTUnwrap(log.first { $0["path"].string == "/v1/chat/completions" })
+    XCTAssertEqual(template["body"]["messages"], completion["body"]["messages"])
+    XCTAssertEqual(template["body"]["chat_template_kwargs"], completion["body"]["chat_template_kwargs"])
+    XCTAssertEqual(template["body"]["messages"].array?.first?["content"].string, ChatResponseStyle.instructions)
+    let tokenize = try XCTUnwrap(log.first { $0["path"].string == "/tokenize" })
+    XCTAssertEqual(tokenize["body"]["add_special"], .bool(true))
+    XCTAssertEqual(tokenize["body"]["parse_special"], .bool(true))
+    let image = PreparedScreenImage(data: Data([0xff, 0xd8, 0xff, 0xd9]), mimeType: "image/jpeg", pixelWidth: 10, pixelHeight: 10)
+    let imagePrepared = try await runtime.prepare(messages: messages, image: image, model: model)
+    XCTAssertEqual(imagePrepared.inputTokenCount, prepared.inputTokenCount + 4_096)
+    await runtime.unload()
+  }
+
+  func testUnavailableOrMalformedTokenizerFallsBackWithoutRepeatedEndpointRequests() async throws {
+    for mode in ["unavailable", "malformed"] {
+      let directory = try temporaryDirectory()
+      defer { try? FileManager.default.removeItem(at: directory) }
+      let model = try controlledRuntimeModel(in: directory, tokenizer: mode)
+      let runtime = LlamaServerVisionEngine()
+      let messages = [ChatMessage(role: .user, content: "Small question")]
+      let fallback = try LlamaServerVisionEngine.prepare(messages: messages, image: nil, model: model)
+      for _ in 0..<2 {
+        let prepared = try await runtime.prepare(messages: messages, image: nil, model: model)
+        XCTAssertEqual(prepared, fallback)
+      }
+      let log = try String(contentsOf: directory.appending(path: "requests.jsonl"), encoding: .utf8)
+        .split(separator: "\n").map { try JSONDecoder().decode(CodexValue.self, from: Data($0.utf8)) }
+      XCTAssertEqual(log.filter { $0["path"].string == "/apply-template" }.count, 1)
+      do {
+        _ = try await runtime.prepare(messages: [ChatMessage(role: .user, content: String(repeating: "x", count: 10_000))], image: nil, model: model)
+        XCTFail("Fallback must still enforce the full output reserve")
+      } catch { XCTAssertTrue(error is ChatContextError) }
+      await runtime.unload()
+    }
+  }
+
+  func testCancellingTokenizerPreparationClosesRuntimeInsteadOfFallingBack() async throws {
+    let directory = try temporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let model = try controlledRuntimeModel(in: directory)
+    let runtime = LlamaServerVisionEngine()
+    let task = Task { try await runtime.prepare(messages: [ChatMessage(role: .user, content: "hold-tokenizer")], image: nil, model: model) }
+    try await waitForRuntimeCondition { FileManager.default.fileExists(atPath: directory.appending(path: "tokenizer-started").path) }
+    task.cancel()
+    do { _ = try await task.value; XCTFail("Expected cancellation") }
+    catch { XCTAssertTrue(error is CancellationError || (error as? URLError)?.code == .cancelled) }
+    try await waitForRuntimeCondition { await runtime.runtimeProcessIdentifier() == nil }
+  }
+
   func testResidentRuntimeReusesModelForTextImagesAndPlanningThenSwitchesAndUnloads() async throws {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
@@ -605,9 +673,10 @@ final class LocalVisionTests: XCTestCase {
     }
   }
 
-  private func controlledRuntimeModel(in directory: URL) throws -> LocalModel {
+  private func controlledRuntimeModel(in directory: URL, tokenizer: String = "available") throws -> LocalModel {
     let source = try fixture(in: directory)
     let server = directory.appending(path: "controlled-server")
+    try Data(tokenizer.utf8).write(to: directory.appending(path: "tokenizer-mode"))
     let script = #"""
     #!/usr/bin/python3
     import http.server, json, sys, pathlib, threading
@@ -620,6 +689,20 @@ final class LocalVisionTests: XCTestCase {
             self.wfile.write(json.dumps({'data': [{'id': alias}]} if self.path == '/v1/models' else {'status': 'ok'}).encode())
         def do_POST(self):
             body = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            root = pathlib.Path(__file__).parent
+            with (root / 'requests.jsonl').open('a') as log:
+                log.write(json.dumps({'path': self.path, 'body': body}) + '\n')
+            if self.path in ['/apply-template', '/tokenize']:
+                mode = (root / 'tokenizer-mode').read_text()
+                if mode == 'unavailable':
+                    self.send_response(404); self.end_headers(); return
+                if self.path == '/tokenize' and 'hold-tokenizer' in body['content']:
+                    (root / 'tokenizer-started').write_text('ready')
+                    threading.Event().wait()
+                result = {'prompt': json.dumps(body['messages'], ensure_ascii=False)} if self.path == '/apply-template' else {'tokens': list(range((len(body['content']) + 3) // 4))}
+                if mode == 'malformed' and self.path == '/tokenize': result = {'tokens': 'invalid'}
+                self.send_response(200); self.send_header('Content-Type', 'application/json'); self.end_headers()
+                self.wfile.write(json.dumps(result).encode()); return
             self.send_response(200); self.send_header('Content-Type', 'text/event-stream'); self.end_headers()
             if body['messages'][-1]['content'] == 'hold':
                 pathlib.Path(__file__).with_name('request-started').write_text('ready')

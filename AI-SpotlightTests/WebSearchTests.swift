@@ -30,7 +30,8 @@ final class WebSearchTests: XCTestCase {
     let json = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(request.httpBody)) as? [String: Any])
     XCTAssertEqual(json["q"] as? String, "Latest news & updates?")
     XCTAssertEqual(json["maximum_number_of_tokens"] as? Int, 1_024)
-    XCTAssertEqual(json["maximum_number_of_urls"] as? Int, 5)
+    XCTAssertEqual(json["maximum_number_of_urls"] as? Int, 10)
+    XCTAssertEqual(json["maximum_number_of_tokens_per_url"] as? Int, 2_048)
     XCTAssertEqual(results.map(\.source.title), ["Source title", "Business", "Place"])
     XCTAssertEqual(results.first?.snippets, ["Fresh fact", "Second excerpt"])
   }
@@ -154,6 +155,8 @@ final class WebSearchTests: XCTestCase {
       XCTAssertTrue(accepted, route)
       let queries = await search.queries
       XCTAssertEqual(queries, [prompt], route)
+      let budgets = await search.budgets
+      XCTAssertEqual(budgets, [8_192], route)
       let localRequests = await engine.requests
       let cloudRequests = cloud.requests
       let content = localRequests.last?.prompt ?? cloudRequests.last?.messages.last?.content ?? ""
@@ -323,7 +326,7 @@ final class WebSearchTests: XCTestCase {
     XCTAssertEqual(activity.sources, [first, second])
     XCTAssertNotEqual(activity.colorIndex(for: first), activity.colorIndex(for: second))
     activity.apply(.sourcesSelected([second]))
-    XCTAssertEqual(activity.sources.count, 2, "Collected count stays distinct from context selection")
+    XCTAssertEqual(activity.sources, [second], "Only sources selected for context remain visible")
     XCTAssertEqual(activity.selectedSourceIDs, [second.id])
     activity.apply(.phase(.generating))
     activity.apply(.sourcesDiscovered([first]))
@@ -342,7 +345,7 @@ final class WebSearchTests: XCTestCase {
     XCTAssertEqual(restored.searchSources, [second])
   }
 
-  func testIncrementalSourcesUpdateBeforeResponseOnLocalAndCloud() async throws {
+  func testRetrievedCandidatesStayHiddenUntilPromptSelectionOnLocalAndCloud() async throws {
     for local in [true, false] {
       let search = ProgressiveSearch()
       let model = makeModel(search: search)
@@ -351,14 +354,15 @@ final class WebSearchTests: XCTestCase {
       if local { model.submit("Find sources", searchEnabled: true) }
       else { model.submitCloud("Find sources", provider: .openAI, modelID: "model", searchEnabled: true) }
       await fulfillment(of: [search.first.entered], timeout: 3)
-      XCTAssertEqual(model.activity?.status, "Reading sources (1)…")
+      XCTAssertEqual(model.activity?.status, "Reading sources…")
+      XCTAssertTrue(model.activity?.sources.isEmpty == true)
       XCTAssertTrue(model.messages.isEmpty)
       XCTAssertTrue(model.isWaitingForResponse)
       let requestID = try XCTUnwrap(model.activity?.id)
       await search.first.release()
       await fulfillment(of: [search.second.entered], timeout: 3)
-      XCTAssertEqual(model.activity?.status, "Reading sources (2)…")
-      XCTAssertEqual(model.activity?.sources, search.results.map(\.source))
+      XCTAssertEqual(model.activity?.status, "Reading sources…")
+      XCTAssertTrue(model.activity?.sources.isEmpty == true)
       await search.second.release()
       await finish(model)
       observation.cancel()
@@ -454,6 +458,122 @@ final class WebSearchTests: XCTestCase {
     }
   }
 
+  func testDefaultLocalPreparationUsesSelectedMetadataAndFallback() async throws {
+    var model = LocalModel(id: "metadata", displayName: "Metadata", fileURL: URL(fileURLWithPath: "/tmp/fixture.gguf"))
+    XCTAssertEqual(model.contextWindow, 4_096)
+    let fallback = try await SearchLocalEngine(model: model).prepare(LocalModelRequest(prompt: "Hello"))
+    XCTAssertEqual(fallback.budget.contextWindow, 4_096)
+    model.catalogDescriptor = BundledLocalModels.models[0]
+    let recommended = try await SearchLocalEngine(model: model).prepare(LocalModelRequest(prompt: String(repeating: "x", count: 5_000)))
+    XCTAssertEqual(recommended.budget.contextWindow, model.catalogDescriptor?.recommendedContextSize)
+    model.visionConfiguration = LocalVisionConfiguration(projectorURL: URL(fileURLWithPath: "/tmp/projector.gguf"),
+      serverExecutableURL: URL(fileURLWithPath: "/usr/bin/true"), contextWindow: 16_384)
+    let configured = try await SearchLocalEngine(model: model).prepare(LocalModelRequest(prompt: String(repeating: "x", count: 10_000)))
+    XCTAssertEqual(configured.budget.contextWindow, 16_384)
+  }
+
+  func testLargerRetrievalPoolRetainsTenDistinctSources() async throws {
+    let entries = (0..<12).map { ["url": "https://example.com/\($0)", "snippets": ["Evidence"]] as [String: Any] }
+    let transport = SearchTransport(data: try JSONSerialization.data(withJSONObject: ["grounding": ["generic": entries]]))
+    let results = try await BraveSearchClient(credentials: SearchCredentials("fixture"), transport: transport)
+      .search("A question", maximumTokens: BraveSearchClient.evidenceTokens)
+    XCTAssertEqual(results.count, 10)
+    let requests = await transport.requests
+    let body = try XCTUnwrap(JSONSerialization.jsonObject(with: XCTUnwrap(requests.first?.httpBody)) as? [String: Any])
+    XCTAssertEqual(body["maximum_number_of_tokens"] as? Int, 8_192)
+    XCTAssertEqual(body["maximum_number_of_urls"] as? Int, 10)
+    XCTAssertEqual(body["maximum_number_of_tokens_per_url"] as? Int, 2_048)
+  }
+
+  func testEvidenceScalesWithCapacityReservesHalfAndDisplacesOldHistory() async throws {
+    let results = (0..<10).map { index in
+      WebSearchResult(source: WebSearchSource(title: "Source \(index)", url: URL(string: "https://example.com/\(index)")!),
+        snippets: [String(repeating: "Detailed source \(index) evidence. ", count: 600)])
+    }
+    let current = ChatMessage(role: .user, content: "Explain the evidence.")
+    let history = [ChatMessage(role: .user, content: String(repeating: "old ", count: 20_000)),
+                   ChatMessage(role: .assistant, content: "Old answer"), current]
+    var previousTextCount = 0
+    for window in [1_400, 4_096, 8_192, 16_384] {
+      let budget = ContextBudget(contextWindow: window, outputTokens: 512, overheadTokens: 256)
+      let prepare: ([ChatMessage]) async throws -> PreparedConversation = {
+        try ChatContextPreparer.prepare($0, budget: budget) { $0.reduce(0) { $0 + ($1.content.utf8.count + 3) / 4 + 16 } }
+      }
+      let base = try await prepare([current])
+      let grounded = try await WebSearchContext.prepare(messages: history, results: results, using: prepare)
+      let currentOnly = try await prepare([XCTUnwrap(grounded.prepared.messages.last)])
+      XCTAssertLessThanOrEqual(currentOnly.inputTokenCount - base.inputTokenCount,
+        (budget.availableInputTokens - base.inputTokenCount) / 2)
+      XCTAssertEqual(grounded.prepared.omittedMessageCount, 2)
+      XCTAssertEqual(grounded.prepared.messages.last?.id, current.id)
+      let withoutHistory = try await WebSearchContext.prepare(messages: [current], results: results, using: prepare)
+      XCTAssertEqual(grounded.sources, withoutHistory.sources)
+      XCTAssertEqual(grounded.prepared.messages.last?.content, withoutHistory.prepared.messages.last?.content)
+      let excerpts = try decodedExcerpts(grounded)
+      XCTAssertEqual(excerpts.compactMap { $0["url"] }, grounded.sources.map { $0.url.absoluteString })
+      let counts = excerpts.compactMap { $0["text"]?.utf8.count }
+      XCTAssertGreaterThan(counts.reduce(0, +), previousTextCount)
+      previousTextCount = counts.reduce(0, +)
+      if window >= 4_096 { XCTAssertEqual(grounded.sources.count, 10) }
+      XCTAssertLessThanOrEqual(counts.max() ?? 0, 2_048 * 4)
+      if counts.count >= 3 {
+        XCTAssertLessThan(Double(counts.max() ?? 0) / Double(counts.reduce(0, +)), 0.4)
+      }
+    }
+  }
+
+  func testQuestionOutputAndImageReservesReduceEvidenceWithoutClassifyingQuestion() async throws {
+    let results = (0..<10).map { index in
+      WebSearchResult(source: WebSearchSource(title: "Source \(index)", url: URL(string: "https://example.com/\(index)")!),
+                      snippets: [String(repeating: "Useful evidence. ", count: 1_000)])
+    }
+    func fit(_ text: String, output: Int = 512, image: Int = 0) async throws -> GroundedConversation {
+      try await WebSearchContext.prepare(messages: [ChatMessage(role: .user, content: text)], results: results) {
+        try ChatContextPreparer.prepare($0, budget: ContextBudget(contextWindow: 8_192, outputTokens: output, overheadTokens: 256)) {
+          $0.reduce(image) { $0 + ($1.content.utf8.count + 3) / 4 + 16 }
+        }
+      }
+    }
+    let simple = try await fit("Define evidence")
+    let complex = try await fit("Assess evidence")
+    XCTAssertEqual(try decodedExcerpts(simple), try decodedExcerpts(complex), "Equal capacity produces equal evidence regardless of question wording")
+    let longQuestion = try await fit(String(repeating: "question ", count: 1_000))
+    let thinking = try await fit("Define evidence", output: 2_048)
+    let withImage = try await fit("Define evidence", image: 4_096)
+    let baseSize = try decodedExcerpts(simple).compactMap { $0["text"] }.joined().count
+    for smaller in [longQuestion, thinking, withImage] {
+      XCTAssertLessThan(try decodedExcerpts(smaller).compactMap { $0["text"] }.joined().count, baseSize)
+    }
+  }
+
+  func testShortSourcesDonateSpaceAndExcludedSourcesNeverAppearInPromptOrActivity() async throws {
+    let results = (0..<10).map { index in
+      WebSearchResult(source: WebSearchSource(title: "Source \(index)", url: URL(string: "https://example.com/\(index)")!),
+        snippets: [index == 0 ? String(repeating: "Long evidence 🌍 ", count: 1_000) : "A concise useful source excerpt."])
+    }
+    let grounded = try await WebSearchContext.prepare(messages: [ChatMessage(role: .user, content: "Question")], results: results) {
+      try ChatContextPreparer.prepare($0, budget: ContextBudget(contextWindow: 4_096, outputTokens: 512, overheadTokens: 256)) {
+        $0.reduce(0) { $0 + $1.content.utf8.count + 32 }
+      }
+    }
+    let texts = try decodedExcerpts(grounded).compactMap { $0["text"] }
+    XCTAssertGreaterThan(texts[0].count, 32)
+    XCTAssertTrue(texts.dropFirst().allSatisfy { $0 == "A concise useful source excerpt." })
+    XCTAssertFalse(texts.contains { $0.contains("�") })
+    var activity = AssistantActivity(id: UUID())
+    activity.apply(.sourcesDiscovered(results.map(\.source)))
+    activity.apply(.sourcesSelected(grounded.sources))
+    XCTAssertEqual(activity.sources, grounded.sources)
+    activity.apply(.sourcesDiscovered(results.map(\.source)))
+    XCTAssertEqual(activity.sources, grounded.sources)
+  }
+
+  private func decodedExcerpts(_ grounded: GroundedConversation) throws -> [[String: String]] {
+    let content = try XCTUnwrap(grounded.prepared.messages.last?.content)
+    let json = try XCTUnwrap(content.components(separatedBy: "Web excerpts (JSON):\n").last?.components(separatedBy: "\n\nUser question:").first)
+    return try JSONDecoder().decode([[String: String]].self, from: Data(json.utf8))
+  }
+
   private var fixtureResults: [WebSearchResult] {
     [WebSearchResult(source: WebSearchSource(title: "Example source", url: URL(string: "https://example.com/news")!),
                      snippets: ["Fresh verified fixture"])]
@@ -515,6 +635,7 @@ private actor SearchTransport: CloudNetworkTransport {
 
 private actor SearchSpy: WebSearchProvider {
   var queries: [String] = []
+  var budgets: [Int] = []
   let results: [WebSearchResult]
   let error: WebSearchError?
   let gate: SearchGate?
@@ -523,6 +644,7 @@ private actor SearchSpy: WebSearchProvider {
   }
   func search(_ query: String, maximumTokens: Int) async throws -> [WebSearchResult] {
     queries.append(query)
+    budgets.append(maximumTokens)
     if let gate {
       await withTaskCancellationHandler {
         await gate.wait()
@@ -547,10 +669,12 @@ private actor SearchGate {
 
 private actor SearchLocalEngine: LocalModelEngine {
   var requests: [LocalModelRequest] = []
-  func install(_ model: LocalModel) async throws {}
-  func installedModel() async -> LocalModel? {
-    LocalModel(id: "fixture", displayName: "Fixture", fileURL: URL(fileURLWithPath: "/tmp/fixture.gguf"))
+  let model: LocalModel
+  init(model: LocalModel = LocalModel(id: "fixture", displayName: "Fixture", fileURL: URL(fileURLWithPath: "/tmp/fixture.gguf"))) {
+    self.model = model
   }
+  func install(_ model: LocalModel) async throws {}
+  func installedModel() async -> LocalModel? { model }
   func installedModels() async -> [LocalModel] { await installedModel().map { [$0] } ?? [] }
   func selectModel(id: String) async throws {}
   func download(_ model: LocalModelDescriptor, progress: @escaping @Sendable (ModelDownloadProgress) async -> Void) async throws -> LocalModel {

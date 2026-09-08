@@ -112,8 +112,7 @@ struct AutoRouter: Sendable {
       self.localModel = localModel
       self.additionalInputTokens = max(0, min(additionalInputTokens, 1_000_000))
       self.localCapabilities = localCapabilities ?? ModelCapabilities(
-        maximumContextTokens: localModel?.visionConfiguration?.contextWindow
-          ?? localModel?.catalogDescriptor?.recommendedContextSize ?? ModelContextPolicy.localContextWindow,
+        maximumContextTokens: localModel?.contextWindow ?? ModelContextPolicy.localContextWindow,
         supportsCoding: localModel?.catalogDescriptor?.supportsVision == true,
         supportsWebSearch: false,
         reasoningLevel: localModel?.catalogDescriptor?.supportsVision == true ? .advanced : .basic)

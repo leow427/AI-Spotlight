@@ -42,7 +42,7 @@ struct AssistantActivityView: View {
             HStack(spacing: 8) {
               Image(systemName: phase == activity.phase && !phase.isTerminal ? "circle.dotted" : "checkmark")
                 .frame(width: 14)
-              Text(phase == .readingSources ? "Collected \(activity.sourceSummary)" : phase.label)
+              Text(phase == .readingSources && !activity.sources.isEmpty ? "Selected \(activity.sourceSummary)" : phase.label)
             }
             .font(.caption).foregroundStyle(.secondary)
           }
@@ -73,7 +73,7 @@ struct AssistantActivityView: View {
 
   private func sourceDetail(_ source: WebSearchSource) -> String {
     guard let selected = activity.selectedSourceIDs else { return "Collected excerpt" }
-    return selected.contains(source.id) ? "Included in context" : "Outside context budget"
+    return selected.contains(source.id) ? "Included in context" : "Collected excerpt"
   }
 }
 

@@ -51,6 +51,9 @@ enum WebSearchError: LocalizedError, Equatable {
 }
 
 struct BraveSearchClient: WebSearchProvider {
+  static let maximumSources = 10
+  static let evidenceTokens = 8_192
+  static let tokensPerSource = 2_048
   private let credentials: any WebSearchCredentialStore
   private let transport: any CloudNetworkTransport
 
@@ -127,15 +130,15 @@ struct BraveSearchClient: WebSearchProvider {
       )
     }
     guard !results.isEmpty else { throw WebSearchError.noResults }
-    return Array(results.prefix(5))
+    return Array(results.prefix(Self.maximumSources))
   }
 
   private struct Parameters: Encodable {
     let q: String
     let maximum_number_of_tokens: Int
     let count = 10
-    let maximum_number_of_urls = 5
-    let maximum_number_of_tokens_per_url = 1_024
+    let maximum_number_of_urls = BraveSearchClient.maximumSources
+    let maximum_number_of_tokens_per_url = BraveSearchClient.tokensPerSource
     let context_threshold_mode = "balanced"
   }
 

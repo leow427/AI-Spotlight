@@ -72,6 +72,31 @@ struct PreparedConversation: Equatable, Sendable {
 }
 
 enum ChatContextPreparer {
+  /// Uses the same complete-turn selection policy with an asynchronous runtime tokenizer.
+  static func prepareAsync(
+    _ messages: [ChatMessage], budget: ContextBudget,
+    countTokens: ([ChatMessage]) async throws -> Int
+  ) async throws -> PreparedConversation {
+    let canonical = try prepare(messages, budget: budget, countTokens: { _ in 0 }).messages
+    var retained = [canonical[canonical.count - 1]]
+    try Task.checkCancellation()
+    var count = try await countTokens(retained)
+    guard count >= 0, count <= budget.availableInputTokens else {
+      throw ChatContextError.oversizedPrompt(inputLimit: budget.availableInputTokens)
+    }
+    for start in stride(from: canonical.count - 3, through: 0, by: -2) {
+      try Task.checkCancellation()
+      let candidate = Array(canonical[start...])
+      let candidateCount = try await countTokens(candidate)
+      guard candidateCount >= 0, candidateCount <= budget.availableInputTokens else { break }
+      retained = candidate
+      count = candidateCount
+    }
+    try Task.checkCancellation()
+    return PreparedConversation(messages: retained, inputTokenCount: count,
+      omittedMessageCount: messages.count - retained.count, budget: budget)
+  }
+
   /// A request is a suffix of complete user/assistant turns plus the current user
   /// message. Empty placeholders and unanswered/otherwise orphaned turns stay on
   /// disk, but cannot become misleading context for a later question.

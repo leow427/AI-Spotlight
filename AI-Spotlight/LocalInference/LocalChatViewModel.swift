@@ -390,7 +390,7 @@ final class LocalChatViewModel: ObservableObject {
           try Task.checkCancellation()
           guard owner.activeRequest?.id == active.id else { return }
           owner.state = .searching
-          let results = try await owner.search(trimmedPrompt, maximumTokens: 1_024, requestID: active.id)
+          let results = try await owner.search(trimmedPrompt, maximumTokens: BraveSearchClient.evidenceTokens, requestID: active.id)
           try Task.checkCancellation()
           guard owner.activeRequest?.id == active.id else { return }
           owner.state = .preparing
@@ -502,7 +502,10 @@ final class LocalChatViewModel: ObservableObject {
               localModel = installedModel
               if installedModel.supportsVision {
                 try LocalVisionModelValidation.validate(installedModel)
-                prepare = { try LlamaServerVisionEngine.prepare(messages: $0, image: $1, model: installedModel) }
+                await engine.unload()
+                try Task.checkCancellation()
+                guard owner.activeRequest?.id == active.id else { return }
+                prepare = { try await owner.visionEngine.prepare(messages: $0, image: $1, model: installedModel) }
               } else {
                 guard requestImage == nil else { throw ScreenRequestError.textOnlyModel }
                 guard await engine.installedModel()?.id == target.id else {
@@ -549,7 +552,7 @@ final class LocalChatViewModel: ObservableObject {
                 owner.state = .searching
                 // Screen queries resolve the user's references with relevant observed facts.
                 // Pixels, raw OCR, and conversation history are never attached to Brave.
-                searchResults = try await owner.search(searchQuery ?? prompt, maximumTokens: target.isLocal ? 1_024 : 4_096, requestID: active.id)
+                searchResults = try await owner.search(searchQuery ?? prompt, maximumTokens: BraveSearchClient.evidenceTokens, requestID: active.id)
               }
               try Task.checkCancellation()
               guard owner.activeRequest?.id == active.id else { return }
@@ -626,9 +629,7 @@ final class LocalChatViewModel: ObservableObject {
     guard activeRequest?.id == activeID else { throw CancellationError() }
     if let localModel {
       if localModel.supportsVision {
-        await engine.unload()
-        try Task.checkCancellation()
-        guard activeRequest?.id == activeID else { throw CancellationError() }
+        // The embedded engine was released before loading the tokenizer for preparation.
         return visionEngine.stream(messages: prepared.messages, image: image, model: localModel, temperature: temperature)
       }
       guard await engine.installedModel()?.id == target.id else {
@@ -733,7 +734,7 @@ final class LocalChatViewModel: ObservableObject {
       do {
         try Task.checkCancellation()
         guard let owner = self, owner.activeRequest?.id == active.id else { return }
-        let results = try await owner.search(userMessage.content, maximumTokens: 4_096, requestID: active.id)
+        let results = try await owner.search(userMessage.content, maximumTokens: BraveSearchClient.evidenceTokens, requestID: active.id)
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
         let grounded = try await WebSearchContext.prepare(messages: history, results: results) {
@@ -939,10 +940,13 @@ final class LocalChatViewModel: ObservableObject {
   private func search(_ query: String, maximumTokens: Int, requestID: UUID) async throws -> [WebSearchResult] {
     receiveActivity(.phase(.searching), requestID: requestID)
     let results = try await webSearch.search(query, maximumTokens: maximumTokens) { [weak self] event in
-      await self?.receiveActivity(event, requestID: requestID)
+      // Retrieval candidates are not citation sources until context fitting selects them.
+      if case .sourcesDiscovered = event {
+        await self?.receiveActivity(.phase(.readingSources), requestID: requestID)
+      }
     }
     try Task.checkCancellation()
-    receiveActivity(.sourcesDiscovered(results.map(\.source)), requestID: requestID)
+    receiveActivity(.phase(.readingSources), requestID: requestID)
     return results
   }
 

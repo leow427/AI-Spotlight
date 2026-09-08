@@ -3,6 +3,7 @@ import Darwin
 import Foundation
 
 protocol LocalVisionServing: Sendable {
+  func prepare(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) async throws -> PreparedConversation
   func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) -> AsyncThrowingStream<String, Error>
   func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel, temperature: Float) -> AsyncThrowingStream<String, Error>
   func unload() async
@@ -10,6 +11,9 @@ protocol LocalVisionServing: Sendable {
 }
 
 extension LocalVisionServing {
+  func prepare(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) async throws -> PreparedConversation {
+    try LlamaServerVisionEngine.prepare(messages: messages, image: image, model: model)
+  }
   func unload() async { }
   func benchmark(model: LocalModel) async throws -> LocalBenchmarkMetrics? { nil }
   func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel, temperature: Float) -> AsyncThrowingStream<String, Error> {
@@ -43,6 +47,7 @@ enum LocalVisionModelValidation {
 actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
   private var runtime: LocalModelRuntimeSession?
   private var activeID: UUID?
+  private var tokenizerUnavailable = false
   private var idleTask: Task<Void, Never>?
   private var idleID: UUID?
   private let idleDelay: Duration
@@ -92,16 +97,68 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
             "--fit", "off", "--image-max-tokens", "4096"]
   }
 
-  static func prepare(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) throws -> PreparedConversation {
+  private static func preparationBudget(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) throws -> ContextBudget {
     guard model.supportsVision, let config = model.visionConfiguration else { throw ScreenRequestError.textOnlyModel }
     if image != nil, model.id == "smolvlm-2b-q4:vision",
        config.packageRevision != "1bc3c9f74ceafd4c8d4411cc9cf188bba3798f91" {
       throw LocalInferenceError.bridgeFailure("This legacy SmolVLM package cannot process images with its runtime. Install and select a recommended model in Settings → Local Models. Your draft has been kept.")
     }
     if let image { try ScreenRequestGuard.validateImage(image) }
-    return try ChatContextPreparer.prepare(messages,
-      budget: ContextBudget(contextWindow: config.contextWindow, outputTokens: ThinkCommand.localOutputTokens(messages), overheadTokens: 256),
+    return ContextBudget(contextWindow: model.contextWindow, outputTokens: ThinkCommand.localOutputTokens(messages), overheadTokens: 256)
+  }
+
+  static func prepare(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) throws -> PreparedConversation {
+    try ChatContextPreparer.prepare(messages,
+      budget: preparationBudget(messages: messages, image: image, model: model),
       countTokens: { $0.reduce(image == nil ? 0 : 4096) { $0 + $1.content.utf8.count + 32 } })
+  }
+
+  func prepare(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) async throws -> PreparedConversation {
+    _ = try Self.preparationBudget(messages: messages, image: image, model: model)
+    let id = UUID()
+    if activeID != nil { await unload() }
+    idleTask?.cancel()
+    idleID = nil
+    activeID = id
+    return try await withTaskCancellationHandler {
+      do {
+        let session = try await load(model, requestID: id)
+        let prepared = try await prepare(messages: messages, image: image, model: model, session: session)
+        try Task.checkCancellation()
+        guard activeID == id else { throw CancellationError() }
+        activeID = nil
+        scheduleIdleUnload(id: id)
+        return prepared
+      } catch {
+        await cancel(id: id)
+        throw error
+      }
+    } onCancel: { Task { await self.cancel(id: id) } }
+  }
+
+  private func prepare(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel,
+                       session: LocalModelRuntimeSession) async throws -> PreparedConversation {
+    let budget = try Self.preparationBudget(messages: messages, image: image, model: model)
+    let client = LocalMultimodalClient(endpoint: session.base.appendingPathComponent("v1/chat/completions"),
+      api: .openAICompatible, transport: URLSessionCloudTransport(session: session.network), apiKey: session.key)
+    let runtimeModel = ScreenModel(id: session.alias, provider: "llama.cpp", isLocal: true,
+      capabilities: .textAndVision, visionProjectorPath: model.visionProjectorPath)
+    if !tokenizerUnavailable {
+      do {
+        return try await ChatContextPreparer.prepareAsync(messages, budget: budget) {
+          try await client.countChatTokens(messages: $0, model: runtimeModel) + (image == nil ? 0 : 4096)
+        }
+      } catch {
+        try Task.checkCancellation()
+        if error is CancellationError || (error as? URLError)?.code == .cancelled { throw CancellationError() }
+        if error is ChatContextError { throw error }
+        guard runtime === session else { throw CancellationError() }
+        // Older servers may lack these endpoints. Keep one counting policy per preparation
+        // and avoid retrying an unavailable tokenizer for every evidence candidate.
+        tokenizerUnavailable = true
+      }
+    }
+    return try Self.prepare(messages: messages, image: image, model: model)
   }
 
   nonisolated func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: LocalModel) -> AsyncThrowingStream<String, Error> {
@@ -128,8 +185,9 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
     await withTaskCancellationHandler {
       do {
         try Task.checkCancellation()
-        let prepared = try Self.prepare(messages: messages, image: image, model: model)
+        _ = try Self.preparationBudget(messages: messages, image: image, model: model)
         let session = try await load(model, requestID: id)
+        let prepared = try await prepare(messages: messages, image: image, model: model, session: session)
         try Task.checkCancellation()
         guard activeID == id else { throw CancellationError() }
         let runtimeModel = ScreenModel(id: session.alias, provider: "llama.cpp", isLocal: true,
@@ -310,6 +368,7 @@ actor LlamaServerVisionEngine: LocalVisionServing, LocalToolInference {
     if let runtime, runtime.model == model, runtime.process.isRunning { return runtime }
     runtime?.close()
     runtime = nil
+    tokenizerUnavailable = false
     if let descriptor = model.catalogDescriptor, descriptor.supportsVision {
       let hardware = LocalHardwareProfile.detect(modelsDirectory: model.fileURL.deletingLastPathComponent())
       let assessment = LocalModelSelector.assess(descriptor, hardware: hardware, installed: true)

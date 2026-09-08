@@ -6,6 +6,12 @@ struct LocalModel: Codable, Sendable, Equatable, Identifiable {
   let fileURL: URL
   var catalogDescriptor: LocalModelDescriptor? = nil
   var visionConfiguration: LocalVisionConfiguration? = nil
+
+  var contextWindow: Int {
+    if let configured = visionConfiguration?.contextWindow, configured > 0 { return configured }
+    if let recommended = catalogDescriptor?.recommendedContextSize, recommended > 0 { return recommended }
+    return ModelContextPolicy.localContextWindow
+  }
 }
 
 struct LocalModelRequest: Sendable, Equatable {
@@ -79,9 +85,10 @@ extension LocalModelEngine {
   func benchmark() async throws -> LocalBenchmarkMetrics? { nil }
 
   func prepare(_ request: LocalModelRequest) async throws -> PreparedConversation {
-    try ChatContextPreparer.prepare(
+    let contextWindow = await installedModel()?.contextWindow ?? ModelContextPolicy.localContextWindow
+    return try ChatContextPreparer.prepare(
       request.messages,
-      budget: ContextBudget(contextWindow: ModelContextPolicy.localContextWindow,
+      budget: ContextBudget(contextWindow: contextWindow,
                             outputTokens: request.maximumTokenCount, overheadTokens: 256),
       countTokens: { $0.reduce(0) { $0 + $1.content.utf8.count + 32 } }
     )

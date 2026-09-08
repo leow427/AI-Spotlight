@@ -34,6 +34,39 @@ struct LocalMultimodalClient: Sendable {
     return request
   }
 
+  /// Count the same system message, thinking settings, and chat template used for inference.
+  /// Images retain a separate conservative reserve; their base64 bytes are never tokenized.
+  func countChatTokens(messages: [ChatMessage], model: ScreenModel) async throws -> Int {
+    guard api == .openAICompatible else { throw CloudProviderError.invalidResponse }
+    let generation = try makeRequest(messages: messages, image: nil, model: model, maximumTokens: ThinkCommand.localOutputTokens(messages))
+    var template = generation
+    let base = endpoint.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+    template.url = base.appendingPathComponent("apply-template")
+    template.timeoutInterval = 5
+    let rendered = try await transport.data(for: template)
+    try Task.checkCancellation()
+    struct Template: Decodable { let prompt: String }
+    guard rendered.statusCode == 200, rendered.data.count <= 4 * 1_024 * 1_024 else {
+      throw CloudProviderError.invalidResponse
+    }
+    let prompt = try JSONDecoder().decode(Template.self, from: rendered.data).prompt
+    guard !prompt.isEmpty else { throw CloudProviderError.invalidResponse }
+    var tokenize = template
+    tokenize.url = base.appendingPathComponent("tokenize")
+    tokenize.httpBody = try JSONSerialization.data(withJSONObject: [
+      "content": prompt, "add_special": true, "parse_special": true
+    ])
+    let response = try await transport.data(for: tokenize)
+    try Task.checkCancellation()
+    struct Tokens: Decodable { let tokens: [Int] }
+    guard response.statusCode == 200, response.data.count <= 8 * 1_024 * 1_024 else {
+      throw CloudProviderError.invalidResponse
+    }
+    let count = try JSONDecoder().decode(Tokens.self, from: response.data).tokens.count
+    guard count > 0 else { throw CloudProviderError.invalidResponse }
+    return count
+  }
+
   func stream(messages: [ChatMessage], image: PreparedScreenImage?, model: ScreenModel, maximumTokens: Int = 512, temperature: Float = 0.7, timings: (@Sendable ([String: Double]) -> Void)? = nil) -> AsyncThrowingStream<String, Error> {
     AsyncThrowingStream { continuation in
       let task = Task {

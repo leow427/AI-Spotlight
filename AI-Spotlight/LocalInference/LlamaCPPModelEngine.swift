@@ -4,13 +4,13 @@ import LlamaBridge
 actor LlamaCPPModelEngine: LocalModelEngine {
   private let installationStore: LocalModelInstallationStore
   private let catalog: LocalModelCatalog
-  private let contextSize: Int32
+  private let contextSize: Int32?
   private var engineHandle: AISLlamaEngineHandle?
   private var loadedModelURL: URL?
 
   init(
     installationStore: LocalModelInstallationStore = LocalModelInstallationStore(),
-    contextSize: Int32 = Int32(ModelContextPolicy.localContextWindow)
+    contextSize: Int32? = nil
   ) {
     self.installationStore = installationStore
     catalog = LocalModelCatalog(installationStore: installationStore)
@@ -206,14 +206,13 @@ actor LlamaCPPModelEngine: LocalModelEngine {
     }
 
     releaseEngine()
-    var requestedContext = contextSize
+    let requestedContext = contextSize ?? Int32(clamping: installedModel.contextWindow)
     if let descriptor = installedModel.catalogDescriptor {
       let hardware = LocalHardwareProfile.detect(modelsDirectory: installationStore.modelsDirectoryURL)
       guard LocalModelCompatibility.supports(descriptor), hardware.physicalMemory >= descriptor.minimumMemory,
             hardware.inferenceMemoryBudget >= descriptor.estimatedRuntimeMemory else {
         throw LocalInferenceError.bridgeFailure("The installed text model no longer fits this Mac or runtime. Choose a supported model in Local Models.")
       }
-      requestedContext = Int32(descriptor.recommendedContextSize)
     }
     let newHandle = installedModel.fileURL.path.withCString { path in
       AISLlamaEngineCreate(path, requestedContext)

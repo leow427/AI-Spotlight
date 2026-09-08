@@ -9,11 +9,12 @@ panel. The same control stays available during streaming and on the completed re
 Expansion follows the request when its pending row becomes an accepted message.
 Stop and errors end the indicator; late events cannot update a replacement request.
 
-Sources appear before the first response fragment. Each unique URL contributes once
-to the live count. Rows show a colored site initial, title, hostname, and link. Site
+Sources selected for the model prompt appear before the first response fragment.
+Each selected unique URL contributes once to the count. Retrieval candidates remain
+hidden while evidence is being fitted. Rows show a colored site initial, title, hostname, and link. Site
 colors remain consistent within a request, with collisions resolved across the first
-eight sites. The source list scrolls independently when it grows. Excerpts that fit
-into model context are distinguished from sources excluded by the context budget.
+eight sites. The source list scrolls independently when it grows. Only excerpts that fit
+into model context are shown; excluded candidates never appear as citation sources.
 A collected excerpt does not mean the assistant visited or verified the full page.
 
 ## Shared event contract
@@ -24,9 +25,9 @@ updates on the main actor only while the emitting request still owns the generat
 `AssistantActivityView` is independent of the inference provider.
 
 `WebSearchProvider` has an activity callback overload. Existing batch providers use
-the default adapter; incremental providers can override it and publish sources as
-they arrive. Brave's current LLM Context endpoint returns one batch, so its count
-updates on batch arrival. There are no timers simulating progress or individual page
+the default adapter; incremental providers can override it and report discovery as
+it happens. Brave's current LLM Context endpoint returns one batch. Discovery updates
+the processing phase; the visible source count/list updates after context selection. There are no timers simulating progress or individual page
 fetches. Local text, local vision, Screen with search, Auto, and cloud with search
 all use the same callback and reducer.
 
@@ -54,8 +55,8 @@ The images use deterministic local response/search fixtures, not live Brave or c
 requests. They were rendered through the repository's isolated app-hosted test helper.
 The unsigned verification app was not launched for interactive Screen testing.
 
-Build and static analysis passed. The full suite ran 415 tests with nine optional
-skips and zero failures. A final affected-suite run also passed after UI refinements.
+Build and static analysis passed. After the context-aware retrieval update, the full
+suite ran 424 tests with nine optional skips and zero failures.
 This screenshot is an intentionally versioned UI reference; build and test products
 remain outside the repository.
 

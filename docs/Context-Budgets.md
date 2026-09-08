@@ -25,7 +25,7 @@ limit metadata do not certify account access or billing.
 
 | Route/model | Context window or application policy | Reserved output | Reserved protocol | Input cap |
 |---|---:|---:|---:|---:|
-| Local | Smaller of runtime allocation, GGUF training context, and configured context (default 4,096) | 512 by default | Exact template/special tokens counted, plus 1 spare token | Remaining capacity |
+| Local | Smaller of runtime allocation, GGUF training context, and configured/recommended model context (4,096 fallback) | 512 by default | Exact template/special tokens counted, plus 1 spare token | Remaining capacity |
 | OpenAI GPT-5.6 Luna/Terra/Sol and `gpt-5.6` API alias | 1,050,000 supported context | 4,096, sent as `max_output_tokens` | 512 | 32,768 |
 | OpenAI GPT-5.4 Mini and GPT-5 Mini, reviewed IDs | 400,000 supported context | 4,096 | 512 | 32,768 |
 | OpenAI GPT-4.1 / Mini, reviewed IDs | 1,047,576 supported context | 4,096 | 512 | 32,768 |
@@ -46,8 +46,7 @@ Cloud input is conservatively charged one token per UTF-8 byte of serialized
 message roles/content, including JSON escaping. Codex charges its actual supplied
 text, including the conversation prefix and JSON envelope. Protocol reserves cover
 hidden/provider instructions separately. This can retain less history than a
-provider tokenizer would allow, particularly for ASCII prose. There is no token
-counting network request or tokenizer dependency. Auto uses a conservative byte
+provider tokenizer would allow, particularly for ASCII prose. Cloud preparation does not make a token-counting network request or add a tokenizer dependency. Auto uses a conservative byte
 estimate to choose a route; Local then measures its selected GGUF exactly.
 
 Codex App Server 0.151.0's generated `TurnStartParams` has no maximum-output-token
@@ -72,9 +71,20 @@ which prevents cross-chat/model leakage. The native boundary also checks the ful
 output reserve, so callers cannot squeeze input in by silently reducing output.
 Explicit Local uses installed files only. Legacy text-only models use the
 embedded bridge. Recommended multimodal packages use the pinned local server with
-8,192 tokens, a 512-token output reserve, 256 protocol tokens and up to 4,096 image
-tokens. Text is conservatively charged one token per UTF-8 byte plus message
-framing. Context shifting and prompt-cache reuse are disabled. See
+their configured context (currently 8,192 for most packages), a 512-token output
+reserve, 256 protocol tokens and up to 4,096 image tokens. `/think` reserves 2,048
+output tokens. Preparation calls the resident runtime's `/apply-template` and
+`/tokenize` endpoints to measure the same system message, chat template, and thinking
+settings used by generation. Unsupported or malformed tokenizer responses fall back
+to the existing UTF-8-byte estimate plus message framing. The runtime remembers an
+unavailable tokenizer until it reloads; cancellation closes the child and never
+falls back. Generation revalidates using the same counting policy, so text admitted
+by real tokenization is not later rejected by a byte-only check.
+
+The shared local context policy prefers explicit vision configuration, then catalog
+recommendations, and uses 4,096 only without metadata. An explicit embedded-engine
+context override takes precedence; its native allocation is still bounded by GGUF
+training metadata. Context shifting and prompt-cache reuse are disabled. See
 [the current local model policy](Local-Model-Selection.md).
 
 ## References checked 2026-09-04
@@ -87,3 +97,20 @@ framing. Context shifting and prompt-cache reuse are disabled. See
   CLI's generated JSON schema: thread/turn controls and model-list fields.
 - llama.cpp b5046 headers from the project's pinned binary: model training context,
   template application, tokenizer, allocated context size, and batch capacity.
+
+## Context-aware web evidence
+
+Every search route requests up to ten sources, about 8K retrieval tokens, and about
+2K per source. Evidence capacity is half of `availableInputTokens - currentTurnTokens`.
+Both terms come from selected-model preparation: output and protocol reserves,
+system/template text, the unmodified current question, and any image allowance have
+already been accounted for. The evidence envelope consumes part of that capacity.
+
+The packer measures candidate prompts, seeds sources in returned relevance order,
+and expands them with fair shares and a per-source cap. It adds recent complete
+history only after fitting the current evidence. The returned `searchSources`,
+activity list, and URLs offered for citation match the packed prompt exactly.
+Question wording never chooses source count or retrieval limits. See [Web Search](Web-Search.md).
+
+Endpoint contracts checked against [Brave LLM Context](https://api-dashboard.search.brave.com/documentation/services/llm-context)
+and the [pinned llama.cpp b10797 server](https://github.com/ggml-org/llama.cpp/blob/b10797/tools/server/README.md).

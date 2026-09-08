@@ -73,16 +73,33 @@ URLSession with redirects disabled and a 30-second timeout.
 
 The client uses `POST https://api.search.brave.com/res/v1/llm/context` with the
 `X-Subscription-Token` header. It supports generic, point-of-interest, and map
-grounding entries. Up to five distinct HTTP(S) sources are retained; empty excerpts
-and unsafe URLs are discarded. Local requests ask for 1,024 context tokens and
-cloud requests ask for 4,096. The selected model's normal context preparation then
-fits excerpts into its actual budget, reducing evidence before rejecting a request.
-The original question is never truncated to make room for evidence.
+grounding entries. Up to ten distinct HTTP(S) candidate sources are retrieved;
+empty excerpts and unsafe URLs are discarded. Every route requests an 8,192-token
+evidence pool, with at most 2,048 retrieval tokens per source. These limits are independent of question wording.
+
+Preparation reserves output, protocol/system instructions, the complete current
+question, and any image allowance first. Roughly half the remaining input capacity
+is available for evidence, including its JSON envelope, titles and URLs. The packer
+seeds ranked sources, expands their excerpts with fair shares, and redistributes
+unused space from shorter sources. Each source is capped at 2,048 measured tokens
+or one-third of the payload budget (one-half with two candidates; up to the full
+payload share, still capped at 2,048, when only one candidate exists).
+Unicode text stays intact. Complete recent chat turns fill remaining space only
+after current evidence is chosen. The original question is never truncated.
+
+Normal local preparation uses configured model context, then catalog recommendations,
+with 4,096 only for models lacking that metadata. The embedded bridge measures its
+actual allocated context and uses the GGUF tokenizer. Server-backed chat renders the
+same system/message/thinking template through `/apply-template`, then calls
+`/tokenize`. Images keep a separate 4,096-token reserve. An unavailable or malformed
+tokenizer falls back to the existing conservative byte estimator; cancellation
+never falls back. Cloud routes retain their existing serialization estimates.
 
 Retrieved excerpts are labeled as untrusted data and the model is instructed to
-cite exact source URLs. Source links also appear beneath the reply independently
-of the model's citation formatting. Only those links/titles and the normal chat
-messages are saved; injected excerpts are transient. Existing saved chats remain
+cite exact source URLs. Source links also appear in the reply’s expandable activity
+panel independently of the model’s citation formatting. Only sources retained in the actual prompt are
+shown or offered for citation; unselected retrieval candidates remain hidden. Only
+those links/titles and the normal chat messages are saved; injected excerpts are transient. Existing saved chats remain
 compatible. A source link indicates evidence supplied to the model, not independent
 verification of every claim in its answer.
 
@@ -107,3 +124,11 @@ rendering. Tests use deterministic fixtures and do not require a live Brave key.
 Run the repository's shared build, test, and analyze commands from `AGENTS.md`.
 A live smoke test additionally requires the owner's Brave key and an installed
 local model or configured cloud connection.
+
+The context-aware retrieval update passes build, static analysis, and the full suite:
+424 tests, nine optional skips, zero failures. Coverage includes 10-source retrieval,
+capacity scaling, half-budget allocation, per-source caps, short-source redistribution,
+history priority, model context metadata, endpoint token counting, fallback, image
+reserves, and cancellation. An unchanged Codex EOF/timeout test failed during an
+earlier local run and passed on the final full run; its assertions were not changed.
+Brave and generation fixtures are deterministic; live search quality was not evaluated.

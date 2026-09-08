@@ -112,6 +112,22 @@ final class ChatContextTests: XCTestCase {
     }
   }
 
+  func testAsyncTokenizerPreservesTheSameHistoryAndThinkingPolicy() async throws {
+    var current = ChatMessage(role: .user, content: "Current question")
+    current.extendedThinking = true
+    let messages = [ChatMessage(role: .assistant, content: "Orphan"),
+      ChatMessage(role: .user, content: String(repeating: "Old text ", count: 500)),
+      ChatMessage(role: .assistant, content: "Old answer"),
+      ChatMessage(role: .user, content: "Recent question"),
+      ChatMessage(role: .assistant, content: "Recent answer"), current]
+    let budget = ContextBudget(contextWindow: 1_024, outputTokens: 512, overheadTokens: 64)
+    let sync = try ChatContextPreparer.prepare(messages, budget: budget) { $0.reduce(0) { $0 + $1.content.count } }
+    let async = try await ChatContextPreparer.prepareAsync(messages, budget: budget) { $0.reduce(0) { $0 + $1.content.count } }
+    XCTAssertEqual(async, sync)
+    XCTAssertTrue(async.messages.last?.content.hasPrefix(ThinkCommand.guidance) == true)
+    XCTAssertEqual(async.messages.map(\.id), Array(messages.suffix(3)).map(\.id))
+  }
+
   func testNativeFormatterUsesAllMessagesAndAssistantGenerationPrefix() throws {
     let messages = [
       ChatMessage(role: .user, content: "Remember blåbær"),
