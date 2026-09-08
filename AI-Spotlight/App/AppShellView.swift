@@ -331,7 +331,7 @@ struct AppShellView: View {
                 if !selectionAccess.isGranted && (selectionShortcutEnabled || localChat.isTemporaryChat) {
                   VStack(alignment: .leading, spacing: 6) {
                     Label("Enable Selection Context", systemImage: "hand.raised").font(.caption.weight(.semibold))
-                    Text("Allow PrimaryAgent (Enigma) in System Settings → Privacy & Security → Accessibility to use double-Option and attach selected text.")
+                    Text("Allow \(SelectionAccessibilityAccess.appName) (Enigma) in System Settings → Privacy & Security → Accessibility to use double-Option and attach selected text.")
                       .font(.caption).foregroundStyle(.secondary)
                     Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
                       .buttonStyle(.bordered).controlSize(.small)
@@ -1356,7 +1356,7 @@ private struct KeyboardShortcutsHelpView: View {
           Label(selectionAccess.isGranted ? "Accessibility enabled" : "Accessibility permission required",
                 systemImage: selectionAccess.isGranted ? "checkmark.circle" : "hand.raised")
             .font(.caption)
-          Text("System Settings → Privacy & Security → Accessibility. Enable PrimaryAgent (Enigma). If it is missing, use + to add the app you are running.")
+          Text("System Settings → Privacy & Security → Accessibility. Enable \(SelectionAccessibilityAccess.appName) (Enigma). If it is missing, use + to add the app you are running.")
             .font(.caption).foregroundStyle(.secondary)
           Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
           shortcut("Show or hide engima", keys: "⌥ Space")

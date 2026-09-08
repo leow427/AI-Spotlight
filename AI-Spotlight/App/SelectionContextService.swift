@@ -359,6 +359,8 @@ enum SelectionCapturePolicy {
 @MainActor
 final class SelectionAccessibilityAccess: ObservableObject {
   static let shared = SelectionAccessibilityAccess()
+  static let appName = Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String
+    ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "Enigma"
   static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
   @Published private(set) var isGranted: Bool
   private let checkTrust: () -> Bool

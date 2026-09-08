@@ -11,7 +11,7 @@ solo double tap, an enable switch, and Fast/Normal/Relaxed timing.
 When Accessibility is missing, the composer asks to enable Selection Context and
 provides **Open Accessibility Settings…**. This requests system trust and opens the
 Accessibility page directly even if macOS suppresses a repeated popup. Enable
-**PrimaryAgent** (the current bundle name for Enigma). Permission status and shortcut
+**AI Spotlight** (the current macOS display name for Enigma). Permission status and shortcut
 monitors refresh when switching apps, so granting access does not require a restart.
 
 The source is captured before the panel becomes key. The small “Selected text ·
