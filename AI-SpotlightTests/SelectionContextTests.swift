@@ -5,6 +5,30 @@ import XCTest
 
 @MainActor
 final class SelectionContextTests: XCTestCase {
+  func testAccessibilityRequestOpensSettingsEvenWhenSystemPromptDoesNotGrantAccess() {
+    var operations: [String] = []
+    let access = SelectionAccessibilityAccess(checkTrust: { false }, prompt: { operations.append("prompt") },
+      openSettings: { url in
+        XCTAssertEqual(url, SelectionAccessibilityAccess.settingsURL)
+        operations.append("settings")
+      })
+    access.requestAccess()
+    XCTAssertEqual(operations, ["prompt", "settings"])
+    XCTAssertFalse(access.isGranted)
+  }
+
+  func testAccessibilityStateRefreshReflectsGrantAndRevocationWithoutPrompting() {
+    var trusted = false
+    let access = SelectionAccessibilityAccess(checkTrust: { trusted },
+      prompt: { XCTFail("Refresh must not prompt") }, openSettings: { _ in XCTFail("Refresh must not open Settings") })
+    trusted = true
+    access.refresh()
+    XCTAssertTrue(access.isGranted)
+    trusted = false
+    access.refresh()
+    XCTAssertFalse(access.isGranted)
+  }
+
   func testDoubleOptionRequiresTwoShortSoloTaps() {
     var detector = OptionDoubleTap()
     XCTAssertFalse(detector.flagsChanged(keyCode: 58, modifiers: .option, timestamp: 1))

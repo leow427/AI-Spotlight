@@ -47,6 +47,7 @@ final class SelectionShortcutMonitor {
   static let modifierKey = "enigma.selection.modifier"
   static let enabledKey = "enigma.selection.doubleOption.enabled"
   static let intervalKey = "enigma.selection.doubleOption.interval"
+  private var accessibilityGranted = false
   private var activationObserver: NSObjectProtocol?
   private var global: Any?
   private var local: Any?
@@ -58,9 +59,18 @@ final class SelectionShortcutMonitor {
   func reset() { detector.reset() }
 
   func start() {
+    accessibilityGranted = AXIsProcessTrusted()
     activationObserver = NSWorkspace.shared.notificationCenter.addObserver(
       forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] _ in
-        MainActor.assumeIsolated { self?.reset() }
+        MainActor.assumeIsolated {
+          guard let self else { return }
+          self.reset()
+          SelectionAccessibilityAccess.shared.refresh()
+          if self.accessibilityGranted != AXIsProcessTrusted() {
+            self.stop()
+            self.start()
+          }
+        }
       }
     let mask: NSEvent.EventTypeMask = [.flagsChanged, .keyDown, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
     global = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in self?.receive(event) }

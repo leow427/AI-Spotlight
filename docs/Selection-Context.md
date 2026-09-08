@@ -5,8 +5,14 @@
 Highlight text in another app and tap **Option twice** to start a new temporary
 Enigma chat close to the pointer. **Shift–Option–Space** is the conventional backup.
 Option–Space still toggles the existing panel. Help contains all shortcuts,
-an Accessibility permission button, a choice of Option/Command/Shift for the
+an Accessibility status and Settings button, a choice of Option/Command/Shift for the
 solo double tap, an enable switch, and Fast/Normal/Relaxed timing.
+
+When Accessibility is missing, the composer asks to enable Selection Context and
+provides **Open Accessibility Settings…**. This requests system trust and opens the
+Accessibility page directly even if macOS suppresses a repeated popup. Enable
+**PrimaryAgent** (the current bundle name for Enigma). Permission status and shortcut
+monitors refresh when switching apps, so granting access does not require a restart.
 
 The source is captured before the panel becomes key. The small “Selected text ·
 App” card stays above the composer across follow-ups. Removing it revokes the

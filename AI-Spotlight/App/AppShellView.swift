@@ -1,7 +1,6 @@
 import AppKit
 import Combine
 import SwiftUI
-@preconcurrency import ApplicationServices
 import UniformTypeIdentifiers
 import WebKit
 
@@ -234,6 +233,8 @@ private struct NatureButtonStyle: ButtonStyle {
 }
 
 struct AppShellView: View {
+  @ObservedObject private var selectionAccess = SelectionAccessibilityAccess.shared
+  @AppStorage(SelectionShortcutMonitor.enabledKey) private var selectionShortcutEnabled = true
   @ObservedObject private var selectionContext = SelectionContextService.shared
   @State private var replacementMessage: ChatMessage?
   @State private var replacementText = ""
@@ -327,6 +328,17 @@ struct AppShellView: View {
                   .foregroundStyle(.secondary)
                 }
 
+                if !selectionAccess.isGranted && (selectionShortcutEnabled || localChat.isTemporaryChat) {
+                  VStack(alignment: .leading, spacing: 6) {
+                    Label("Enable Selection Context", systemImage: "hand.raised").font(.caption.weight(.semibold))
+                    Text("Allow PrimaryAgent (Enigma) in System Settings → Privacy & Security → Accessibility to use double-Option and attach selected text.")
+                      .font(.caption).foregroundStyle(.secondary)
+                    Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
+                      .buttonStyle(.bordered).controlSize(.small)
+                  }
+                  .frame(maxWidth: .infinity, alignment: .leading)
+                  .padding(10).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                }
                 if localChat.isTemporaryChat {
                   Text("Temporary chat · Not saved to history").font(.caption2).foregroundStyle(.secondary)
                 }
@@ -409,6 +421,7 @@ struct AppShellView: View {
       isModePalettePresented = false
     }
     .onReceive(NotificationCenter.default.publisher(for: .panelPresented)) { _ in
+      selectionAccess.refresh()
       localChat.applicationBecameActive()
       Task { await modelAdvisor.refreshCatalog() }
       isComposerFocused = true
@@ -417,6 +430,7 @@ struct AppShellView: View {
       localChat.applicationBecameInactive()
     }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+      selectionAccess.refresh()
       localChat.applicationBecameActive()
     }
     .onReceive(NotificationCenter.default.publisher(for: NSApplication.didResignActiveNotification)) { _ in
@@ -1311,6 +1325,7 @@ private extension ChatMode {
 }
 
 private struct KeyboardShortcutsHelpView: View {
+  @ObservedObject private var selectionAccess = SelectionAccessibilityAccess.shared
   @AppStorage(SelectionShortcutMonitor.modifierKey) private var selectionModifier = SelectionModifier.option.rawValue
   @AppStorage(SelectionShortcutMonitor.enabledKey) private var doubleOptionEnabled = true
   @AppStorage(SelectionShortcutMonitor.intervalKey) private var doubleOptionInterval = 0.35
@@ -1338,10 +1353,12 @@ private struct KeyboardShortcutsHelpView: View {
           }
           Text("Highlight text in another app, then tap the chosen key twice by itself (Option by default). Context stays in a temporary chat and follows your selected model and Web Search settings. Replace Selection is available only while the original target can be verified. Password fields are excluded.")
             .font(.caption).foregroundStyle(.secondary)
-          Button("Enable Accessibility…") {
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
-          }
+          Label(selectionAccess.isGranted ? "Accessibility enabled" : "Accessibility permission required",
+                systemImage: selectionAccess.isGranted ? "checkmark.circle" : "hand.raised")
+            .font(.caption)
+          Text("System Settings → Privacy & Security → Accessibility. Enable PrimaryAgent (Enigma). If it is missing, use + to add the app you are running.")
+            .font(.caption).foregroundStyle(.secondary)
+          Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
           shortcut("Show or hide engima", keys: "⌥ Space")
           shortcut("Open Advanced Settings", keys: "⌥ S")
 

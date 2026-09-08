@@ -1,5 +1,5 @@
 import AppKit
-import ApplicationServices
+@preconcurrency import ApplicationServices
 import Carbon
 import Combine
 
@@ -352,5 +352,36 @@ enum SelectionCapturePolicy {
     if let range { return range.length > 0 || browsers.contains(bundleID) }
     let lineEditors = ["com.microsoft.VSCode", "com.jetbrains.", "com.sublimetext.", "com.todesktop.230313mzl4w4u92"]
     return !lineEditors.contains { bundleID.hasPrefix($0) }
+  }
+}
+
+/// macOS may suppress repeated trust prompts, so always provide a direct Settings route.
+@MainActor
+final class SelectionAccessibilityAccess: ObservableObject {
+  static let shared = SelectionAccessibilityAccess()
+  static let settingsURL = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility")!
+  @Published private(set) var isGranted: Bool
+  private let checkTrust: () -> Bool
+  private let prompt: () -> Void
+  private let openSettings: (URL) -> Void
+
+  init(checkTrust: @escaping () -> Bool = { AXIsProcessTrusted() },
+       prompt: @escaping () -> Void = {
+         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+         _ = AXIsProcessTrustedWithOptions(options)
+       },
+       openSettings: @escaping (URL) -> Void = { _ = NSWorkspace.shared.open($0) }) {
+    self.checkTrust = checkTrust
+    self.prompt = prompt
+    self.openSettings = openSettings
+    isGranted = checkTrust()
+  }
+
+  func refresh() { isGranted = checkTrust() }
+
+  func requestAccess() {
+    prompt()
+    openSettings(Self.settingsURL)
+    refresh()
   }
 }
