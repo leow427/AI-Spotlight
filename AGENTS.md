@@ -45,6 +45,7 @@ A change is complete when:
 5. The final diff contains no unrelated changes.
 6. No known regression or security issue was introduced.
 7. Any remaining limitation is explicitly reported.
+8. The completed feature is committed and published to the GitHub repository’s `main` branch, and required CI checks on `main` pass.
 
 ## Coding Style & Naming Conventions
 
@@ -65,6 +66,10 @@ avoid unexplained abbreviations, and add comments only for non-obvious intent.
 - Keep tests deterministic; avoid arbitrary sleeps, timing assumptions, and network dependencies where possible.
 
 ## Commit & Pull Request Guidelines
+
+- The owner has given standing authorization to publish completed features to `main`. Do not stop at a feature branch or an open PR, and do not request merge or push permission again unless the owner changes this instruction.
+- Finish implementation, inspect the final diff, and pass the required build, tests, and analyzer before publishing. Feature branches and PRs may be used for development and CI; merge them into `main` once required checks and reviews pass. Direct pushes to `main` are allowed when repository rules permit them.
+- After publishing, verify the commit is on `origin/main`, check required CI on `main`, and leave the local checkout on the updated `main` branch. Report any blocked check or required review instead of claiming completion.
 
 - Keep commits focused on one logical change with short, imperative subjects such as `Add configuration parser`.
 - Keep pull requests narrowly scoped. Before opening or updating one, inspect the diff, remove accidental changes, and run relevant checks.
@@ -98,4 +103,4 @@ avoid unexplained abbreviations, and add comments only for non-obvious intent.
 - Never commit API keys, tokens, passwords, certificates, `.env` contents, build artifacts, or local secrets.
 - Do not use force-push, destructive resets, or history rewriting unless explicitly requested.
 - Do not alter branch protection, required checks, repository permissions, or GitHub secrets unless explicitly requested.
-- Do not merge a PR unless explicitly authorized or bypass required reviews.
+- Publishing completed features to `main` is authorized by the standing instruction above. Never bypass required reviews, branch protection, or required CI checks.
