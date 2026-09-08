@@ -159,3 +159,10 @@ enum CloudContext {
     )
   }
 }
+
+/// Shared response style guidance, independent of provider and persisted history.
+enum ChatResponseStyle {
+  static let instructions = """
+    Use clean standard Markdown for responses: headings, lists, emphasis, code, links, blockquotes, and tables when useful. Do not put backslashes before Markdown formatting characters. Preserve literal backslashes in paths and code; put code and paths in code spans or fenced code blocks.
+    """
+}

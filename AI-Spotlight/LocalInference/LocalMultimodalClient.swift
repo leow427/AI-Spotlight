@@ -13,7 +13,7 @@ struct LocalMultimodalClient: Sendable {
           endpoint.user == nil, endpoint.password == nil, model.isLocal else { throw ScreenRequestError.invalidLocalEndpoint }
     if image != nil && !model.canUseVision { throw ScreenRequestError.textOnlyModel }
     let format: MultimodalSerialization.Format = api == .ollama ? .ollama : .openAIChat
-    var body: [String: Any] = ["model": model.id, "messages": try MultimodalSerialization.messages(messages, image: image, format: format), "stream": true]
+    var body: [String: Any] = ["model": model.id, "messages": [["role": "system", "content": ChatResponseStyle.instructions]] + (try MultimodalSerialization.messages(messages, image: image, format: format)), "stream": true]
     if api == .ollama {
       body["options"] = ["num_predict": maximumTokens, "temperature": temperature]
       body["think"] = ThinkCommand.enabled(in: messages)

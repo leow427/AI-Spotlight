@@ -254,7 +254,7 @@ struct AppShellView: View {
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
-  @State private var isSidebarVisible = true
+  @State private var isSidebarVisible = false
   @State private var selectedMode = ChatMode.auto
   @FocusState private var isComposerFocused: Bool
 
@@ -1221,7 +1221,7 @@ struct LocalMessageView: View {
           if message.content.isEmpty {
             if isThinking { ThinkingStatusView().allowsHitTesting(false) }
           } else {
-            Text(renderedMarkdown).font(ChatTypography.body).lineSpacing(4).textSelection(.enabled)
+            ChatMarkdownView(content: message.content)
           }
           if let sources = message.searchSources, !sources.isEmpty {
             VStack(alignment: .leading, spacing: 5) {
@@ -1237,10 +1237,6 @@ struct LocalMessageView: View {
         }.frame(maxWidth: .infinity, alignment: .leading)
       }
     }
-  }
-
-  private var renderedMarkdown: AttributedString {
-    (try? AttributedString(markdown: message.content, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(message.content)
   }
 }
 

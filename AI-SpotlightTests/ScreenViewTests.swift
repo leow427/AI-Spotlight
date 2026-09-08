@@ -9,6 +9,48 @@ import WebKit
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
+  func testMarkdownResponseRendersInBothAppearances() throws {
+    let content = ####"""
+      \### A cleaner response
+
+      \* **Bold**, *italic*, `inline code`, and [a link](https://example.com).
+      \* Another bullet with a longer sentence that wraps naturally in the chat.
+
+      1. First step
+      2. Second step
+
+      > A useful quote with **emphasis**.
+
+      ```swift
+      let path = #"C:\Users\leo\notes.md"#
+      ```
+
+      | Model | Output |
+      | --- | --- |
+      | Local | Clean Markdown |
+      | ChatGPT | Clean Markdown |
+      """####
+    for scheme in [ColorScheme.light, .dark] {
+      let view = NSHostingView(rootView: LocalMessageView(message: ChatMessage(role: .assistant, content: content))
+        .padding(24).frame(width: 620).background(Color(nsColor: .windowBackgroundColor)).environment(\.colorScheme, scheme))
+      let size = view.fittingSize
+      XCTAssertGreaterThan(size.height, 300)
+      let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
+      window.contentView = view
+      defer { window.contentView = nil }
+      view.frame = NSRect(origin: .zero, size: size)
+      view.layoutSubtreeIfNeeded()
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Markdown-\(scheme == .dark ? "dark" : "light").png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Markdown response"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+  }
+
   func testElasticThinkingRendersAnimation() async throws {
     XCTAssertNotNil(NSDataAsset(name: "ElasticJuggle"))
     let view = NSHostingView(rootView: ThinkingStatusView()
@@ -557,6 +599,14 @@ final class ScreenViewTests: XCTestCase {
       add(attachment)
     }
     window.setContentSize(NSSize(width: 752, height: 462))
+
+    view.layoutSubtreeIfNeeded()
+    XCTAssertFalse(descendants(view).compactMap { $0 as? NSScrollView }.contains {
+      let frame = view.convert($0.bounds, from: $0)
+      return frame.minX < 30 && frame.width >= 176 && frame.width < 270
+    }, "History must be hidden when the app starts")
+    NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
+    try await assertPanelControls(view, phase: "history opened from hidden startup")
 
     screen.draft = "Preserve this draft while toggling history"
     NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)

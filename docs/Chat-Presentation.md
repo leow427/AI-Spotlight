@@ -43,3 +43,30 @@ Final verification: build and static analysis passed; 392 tests completed with
 nine optional skips and zero failures. In the signed app, local Gemma showed
 the outgoing question during preparation, displayed the leaf while waiting,
 and removed it when the response arrived. The book-and-pen check returned 5 kr.
+
+## Markdown responses and startup history
+
+Assistant responses from every provider now use Foundation's full Markdown parser
+and native SwiftUI blocks. Headings, bulleted and numbered lists, emphasis,
+inline code, fenced code, links, blockquotes, and tables retain the existing
+14-point chat typography and light/dark surfaces. Code and tables scroll
+horizontally when necessary.
+
+A display-only normalizer repairs clear escaped headings, list markers, paired
+emphasis, and escaped links, plus non-breaking/invisible whitespace in prose.
+Ambiguous escapes are retained. Fenced/indented code, inline code, and paths are
+protected; parser-side escaping also preserves punctuation backslashes in plain
+paths. Stored messages, user bubbles, and provider streaming events are unchanged.
+All provider instructions request standard Markdown. Embedded local models receive
+that guidance in their first user turn because some bundled chat templates do not
+support a system role; token counting includes the same guidance.
+
+The sidebar starts hidden. Show History and double-Control still toggle it while
+preserving the selected conversation and draft.
+
+Regression tests cover normalization, partial streamed Markdown, literal paths,
+semantic blocks and links, provider guidance, light/dark native snapshots, and
+hidden startup followed by repeated history toggles.
+
+![Markdown response in dark mode](images/chat-markdown-dark.png)
+![Markdown response in light mode](images/chat-markdown-light.png)

@@ -22,6 +22,7 @@ struct GeminiContentClient: ChatProvider {
           wire.httpBody = try JSONSerialization.data(withJSONObject: [
             "contents": MultimodalSerialization.messages(prepared.messages, image: request.image, format: .gemini),
             "generationConfig": generationConfig,
+            "systemInstruction": ["parts": [["text": ChatResponseStyle.instructions]]],
           ])
           var parser = ServerSentEventParser()
           var status: Int?

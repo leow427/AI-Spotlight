@@ -290,7 +290,10 @@ enum LocalChatBridge {
       throw ChatContextError.invalidText
     }
     let roles = messages.map { Array($0.role.rawValue.utf8CString) }
-    let contents = messages.map { Array($0.content.utf8CString) }
+    // Some bundled templates do not support a system role.
+    let contents = messages.enumerated().map { index, message in
+      Array((index == 0 ? ChatResponseStyle.instructions + "\n\n" + message.content : message.content).utf8CString)
+    }
     var allocations: [UnsafeMutablePointer<CChar>] = []
     defer { allocations.forEach { $0.deallocate() } }
     func copy(_ bytes: [CChar]) -> UnsafePointer<CChar> {

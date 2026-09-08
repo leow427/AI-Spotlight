@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		DE1000000000000000000002 /* ChatMarkdown.swift in Sources */ = {isa = PBXBuildFile; fileRef = DE1000000000000000000001; };
 		14069C4454E33368512BA2E9 /* WorkspaceDocumentTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */; };
 		5C0A5F180D0B7823D387928F /* WorkspaceDocument.swift in Sources */ = {isa = PBXBuildFile; fileRef = 933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */; };
 		0009134391031E5AE19F8236 /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0FCD3B0B99B28590527862FF /* AI-SpotlightTests/WorkspaceWritePolicyTests.swift */; };
@@ -115,6 +116,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		DE1000000000000000000001 /* ChatMarkdown.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatMarkdown.swift; sourceTree = "<group>"; };
 		E5BBB661FBA940A548E2537C /* WorkspaceDocumentTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceDocumentTests.swift"; sourceTree = SOURCE_ROOT; };
 		933152B435FB0247758DB1B2 /* WorkspaceDocument.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/WorkspaceDocument.swift"; sourceTree = SOURCE_ROOT; };
 		0134D277D0D4590D1E9D4D24 /* AI-Spotlight/Files/LocalFileInference.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/LocalFileInference.swift"; sourceTree = SOURCE_ROOT; };
@@ -386,6 +388,7 @@
 			isa = PBXGroup;
 			children = (
 				C10000000000000000000001 /* ChatContext.swift */,
+				DE1000000000000000000001 /* ChatMarkdown.swift */,
 				E20000000000000000000001 /* ChatDomain.swift */,
 				E20000000000000000000002 /* ChatSessionStore.swift */,
 				E20000000000000000000005 /* AutoRouter.swift */,
@@ -533,6 +536,7 @@
 				9FD261360A6825094B8FB5CA /* AI-Spotlight/Screen/ScreenCaptureService.swift in Sources */,
 				D837B30691584362AC890087 /* AI-Spotlight/Screen/ScreenAttachment.swift in Sources */,
 				C10000000000000000000002 /* ChatContext.swift in Sources */,
+				DE1000000000000000000002 /* ChatMarkdown.swift in Sources */,
 				B60000000000000000000101 /* BraveSearchClient.swift in Sources */,
 				B60000000000000000000102 /* WebSearchSettings.swift in Sources */,
 				B60000000000000000000103 /* WebSearchContext.swift in Sources */,
