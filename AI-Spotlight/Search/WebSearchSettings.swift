@@ -24,10 +24,18 @@ struct KeychainSearchCredentialStore: WebSearchCredentialStore {
 final class WebSearchSettings: ObservableObject {
   static let shared = WebSearchSettings()
   @Published private(set) var hasAPIKey = false
+  @Published var automaticallySearch: Bool {
+    didSet { defaults.set(automaticallySearch, forKey: Self.automaticSearchKey) }
+  }
+  var canSearchAutomatically: Bool { automaticallySearch && hasAPIKey }
+  private static let automaticSearchKey = "webSearch.automaticallySearch"
+  private let defaults: UserDefaults
   private let credentials: any WebSearchCredentialStore
 
-  init(credentials: any WebSearchCredentialStore = KeychainSearchCredentialStore()) {
+  init(credentials: any WebSearchCredentialStore = KeychainSearchCredentialStore(), defaults: UserDefaults = .standard) {
     self.credentials = credentials
+    self.defaults = defaults
+    automaticallySearch = defaults.object(forKey: Self.automaticSearchKey) as? Bool ?? true
     hasAPIKey = (try? credentials.containsAPIKey()) ?? false
   }
 

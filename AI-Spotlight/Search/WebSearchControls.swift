@@ -116,6 +116,10 @@ struct WebSearchSettingsSection: View {
 
   var body: some View {
     Section("Web Search · Brave") {
+      Toggle("Search automatically when fresh information is needed", isOn: $settings.automaticallySearch)
+      Text("With a saved Brave key, questions about news, recent events and changing facts can search without /search. This also applies in Local mode and sends your current question to Brave. Turn this off to use search only when explicitly enabled.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
       SecureField(settings.hasAPIKey ? "Replace stored Brave API key" : "Brave Search API key", text: $apiKey)
         .textFieldStyle(.roundedBorder)
       HStack {
@@ -143,7 +147,7 @@ struct WebSearchSettingsSection: View {
       Text("Use a Brave Search key with LLM Context access. Stored in macOS Keychain. Brave usage is billed separately.")
         .font(.caption)
         .foregroundStyle(.secondary)
-      Text("Choose Web Search from + or type /search to add the search icon. Click it to toggle search, or remove it from +. Press ⌘⇧H to hide tools that are switched off. Search sends your current question to Brave, including in Local mode; your selected model writes the answer.")
+      Text("Choose Web Search from + or type /search to add the search icon. This forces search even for timeless questions. Turning it off returns to your automatic-search setting. Press ⌘⇧H to hide tools that are switched off. Search sends your current question to Brave, including in Local mode; your selected model writes the answer.")
         .font(.caption)
         .foregroundStyle(.secondary)
       Link("Brave Search API dashboard", destination: URL(string: "https://api-dashboard.search.brave.com/")!)

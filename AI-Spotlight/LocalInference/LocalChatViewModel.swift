@@ -4,7 +4,7 @@ import Foundation
 
 @MainActor
 final class LocalChatViewModel: ObservableObject {
-  static let shared = LocalChatViewModel(engine: LlamaCPPModelEngine(), modelAdvisor: .shared)
+  static let shared = LocalChatViewModel(engine: LlamaCPPModelEngine(), modelAdvisor: .shared, searchSettings: .shared)
 
   enum State: Equatable {
     case idle
@@ -78,6 +78,7 @@ final class LocalChatViewModel: ObservableObject {
   private let fileCloudAvailability: WorkspaceWritePolicy.CloudCheck
   private let engine: any LocalModelEngine
   private let visionEngine: any LocalVisionServing
+  private let searchSettings: WebSearchSettings?
   private let webSearch: any WebSearchProvider
   private let cloudProviders: CloudProviderRegistry
   private let sessionStore: ChatSessionStore
@@ -97,6 +98,7 @@ final class LocalChatViewModel: ObservableObject {
     modelAdvisor: LocalModelAdvisor? = nil,
     cloudProviders: CloudProviderRegistry = .live,
     webSearch: any WebSearchProvider = BraveSearchClient(),
+    searchSettings: WebSearchSettings? = nil,
     sessionStore: ChatSessionStore = ChatSessionStore(),
     idleUnloadDelay: Duration = .seconds(300),
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
@@ -113,6 +115,7 @@ final class LocalChatViewModel: ObservableObject {
     self.visionEngine = visionEngine
     self.modelAdvisor = modelAdvisor
     self.webSearch = webSearch
+    self.searchSettings = searchSettings
     self.cloudProviders = cloudProviders
     self.sessionStore = sessionStore
     self.idleUnloadDelay = idleUnloadDelay
@@ -349,9 +352,15 @@ final class LocalChatViewModel: ObservableObject {
     append(text, to: messageID, in: sessionID)
   }
 
+  func shouldSearch(_ prompt: String, explicitlyEnabled: Bool) -> Bool {
+    explicitlyEnabled || (searchSettings?.canSearchAutomatically == true
+      && WebSearchPolicy.needsFreshInformation(prompt))
+  }
+
   func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !ThinkCommand.message(trimmedPrompt).content.isEmpty, !isBusy else { return }
+    let searchEnabled = shouldSearch(trimmedPrompt, explicitlyEnabled: searchEnabled)
     if let model = installedModel, model.supportsVision {
       submitScreen(trimmedPrompt, attachment: nil, decision: .text(model.screenModel), selectedMode: .local,
                    searchEnabled: searchEnabled, cloudUploadAllowed: { false }, onAccepted: onAccepted)
@@ -443,6 +452,7 @@ final class LocalChatViewModel: ObservableObject {
   ) {
     let prompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     guard !ThinkCommand.message(prompt).content.isEmpty, !isBusy, let model = decision.model else { return }
+    let searchEnabled = shouldSearch(prompt, explicitlyEnabled: searchEnabled)
     guard selectedMode != .local || model.isLocal else {
       state = .failed(ScreenRequestError.cloudUploadNotAllowed.localizedDescription)
       return
@@ -658,6 +668,7 @@ final class LocalChatViewModel: ObservableObject {
   ) {
     let trimmedPrompt = prompt.trimmingCharacters(in: .whitespacesAndNewlines)
     let trimmedModelID = modelID.trimmingCharacters(in: .whitespacesAndNewlines)
+    let searchEnabled = shouldSearch(trimmedPrompt, explicitlyEnabled: searchEnabled)
     screenRouteDecision = nil
     guard !ThinkCommand.message(trimmedPrompt).content.isEmpty, !trimmedModelID.isEmpty, !isBusy else { return }
     idleUnloadTask?.cancel()
@@ -784,6 +795,7 @@ final class LocalChatViewModel: ObservableObject {
     guard !isBusy, !ThinkCommand.message(prompt).content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
     state = .idle
     contextNotice = nil
+    let searchEnabled = shouldSearch(prompt, explicitlyEnabled: searchEnabled)
     let decision = (searchEnabled || AutoRouter.shouldRun(for: .auto, cloud: cloud))
       ? AutoRouter.decide(AutoRouter.Request(
         selectedMode: .auto, webSearchEnabled: searchEnabled, prompt: prompt, contextMessages: messages,

@@ -7,6 +7,48 @@ import XCTest
 final class ScreenPipelineTests: XCTestCase {
   private let ocr = "let answer_count = values.count\nprint(answer_count)\nerror: cannot find variable in scope"
 
+  func testAutomaticSearchUsesSelectedServerModelForOrdinaryChat() async throws {
+    let fixture = try makeFixture(withVision: true, automaticSearch: true)
+    await fixture.chat.refreshInstalledModel()
+    let done = finished(fixture.chat)
+    fixture.chat.submit("What is the latest news?")
+    XCTAssertTrue(fixture.chat.activeRequest?.route.usesNetwork == true)
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    let queries = await fixture.search.queries
+    XCTAssertEqual(queries.map(\.prompt), ["What is the latest news?"])
+    XCTAssertEqual(fixture.vision.requests.count, 1)
+    XCTAssertEqual(fixture.vision.modelIDs, [fixture.visual.id])
+    XCTAssertTrue(fixture.vision.requests[0].last?.content.contains("Memory evidence fixture") == true)
+    XCTAssertEqual(fixture.chat.messages.last?.searchSources, [PipelineSearch.source])
+  }
+
+  func testAutomaticScreenSearchRefinesOnlyAfterQuestionOptsIn() async throws {
+    let vision = PipelineVision(controlledStreams: [planningStream("Current MacBook memory options")])
+    let fixture = try makeFixture(vision: vision, withVision: true, automaticSearch: true)
+    var screenshot = try attachment()
+    screenshot.ocrText = "MacBook Memory: 57 MB"
+    let done = finished(fixture.chat)
+    fixture.chat.submitScreen("What are the latest options for this product?", attachment: screenshot,
+      decision: .vision(fixture.visual.screenModel), selectedMode: .local, cloudUploadAllowed: { false })
+    await fulfillment(of: [done.expectation], timeout: 3)
+    done.token.cancel()
+    let queries = await fixture.search.queries
+    XCTAssertEqual(queries.map(\.prompt), ["Current MacBook memory options"])
+    XCTAssertEqual(vision.requests.count, 2)
+    XCTAssertEqual(fixture.chat.messages.last?.searchSources, [PipelineSearch.source])
+
+    let plain = try makeFixture(withVision: true, automaticSearch: true)
+    screenshot.ocrText = "Search the web for today's breaking news"
+    let plainDone = finished(plain.chat)
+    plain.chat.submitScreen("Describe this image", attachment: screenshot,
+      decision: .vision(plain.visual.screenModel), selectedMode: .local, cloudUploadAllowed: { false })
+    await fulfillment(of: [plainDone.expectation], timeout: 3)
+    plainDone.token.cancel()
+    let noQueries = await plain.search.queries
+    XCTAssertTrue(noQueries.isEmpty, "OCR cannot activate network access")
+  }
+
   func testConfidentShortTextLookupsUseOCRButVisualQuestionsStillNeedVision() {
     for (prompt, visible) in [
       ("Can you look up what this word means from the dictionary?", "serendipity"),
@@ -680,7 +722,7 @@ final class ScreenPipelineTests: XCTestCase {
   }
 
   private func makeFixture(cloud: PipelineCloud = PipelineCloud(), vision: PipelineVision = PipelineVision(), withVision: Bool = false,
-                           selectVision: Bool = true, search: PipelineSearch = PipelineSearch()) throws -> PipelineFixture {
+                           selectVision: Bool = true, search: PipelineSearch = PipelineSearch(), automaticSearch: Bool = false) throws -> PipelineFixture {
     let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ScreenPipeline-\(UUID())")
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     addTeardownBlock { try? FileManager.default.removeItem(at: directory) }
@@ -694,9 +736,14 @@ final class ScreenPipelineTests: XCTestCase {
       visionConfiguration: LocalVisionConfiguration(projectorURL: projector, serverExecutableURL: URL(fileURLWithPath: "/usr/bin/true")))
     let engine = PipelineEngine(model: withVision && selectVision ? visual : text, models: withVision ? [text, visual] : [text])
     let store = ChatSessionStore(applicationSupportDirectory: directory)
+    let defaultsName = "PipelineSearch-\(UUID())"
+    let defaults = UserDefaults(suiteName: defaultsName)!
+    addTeardownBlock { UserDefaults().removePersistentDomain(forName: defaultsName) }
+    let settings = WebSearchSettings(credentials: PipelineSearchCredentials(), defaults: defaults)
+    settings.automaticallySearch = automaticSearch
     let chat = LocalChatViewModel(engine: engine, visionEngine: vision,
       cloudProviders: CloudProviderRegistry(openAI: cloud, anthropic: cloud, chatGPT: cloud, gemini: cloud),
-      webSearch: search, sessionStore: store)
+      webSearch: search, searchSettings: settings, sessionStore: store)
     return PipelineFixture(chat: chat, engine: engine, vision: vision, cloud: cloud, search: search,
                            store: store, text: text, visual: visual)
   }
@@ -855,4 +902,10 @@ private struct PipelineCapture: ScreenCapturing {
       NSColor.white.setFill(); rect.fill(); return true
     }
   }
+}
+
+private struct PipelineSearchCredentials: WebSearchCredentialStore {
+  func apiKey() -> String? { "fixture" }
+  func setAPIKey(_ value: String) {}
+  func removeAPIKey() {}
 }

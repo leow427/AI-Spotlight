@@ -309,10 +309,11 @@ struct AppShellView: View {
                   Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
                     .font(.caption).foregroundStyle(.secondary)
                 }
-                if isSearchEnabled {
+                if isSearchEnabled || (searchSettings.canSearchAutomatically && files.selection == nil) {
                   HStack(spacing: 6) {
                     Text(searchSettings.hasAPIKey
-                      ? "Web Search · Queries sent to Brave may include screen details."
+                      ? (isSearchEnabled ? "Web Search · Queries sent to Brave may include screen details."
+                        : "Auto search · Current topics may use Brave, including relevant screen details.")
                       : "Add a Brave Search API key to search the web.")
                     if !searchSettings.hasAPIKey {
                       Button("Settings", action: openSettings).buttonStyle(.plain)
@@ -946,6 +947,9 @@ struct AppShellView: View {
         ? "Brave finds web sources. Your local model writes the answer on this Mac."
         : "Brave finds web sources for your selected model to answer with citations."
     }
+    if searchSettings.canSearchAutomatically && files.selection == nil {
+      return "Questions needing fresh information search Brave automatically. Your selected model writes the answer."
+    }
     if selectedMode == .local {
       return localChat.installedModel == nil
         ? "Choose a GGUF model once, then chat completely offline."
@@ -1121,8 +1125,9 @@ struct AppShellView: View {
     let cloudText = cloudSettings.isConfigured
       ? CloudModel(id: cloudSettings.preferredModelID, displayName: cloudSettings.preferredModelID,
                    provider: cloudSettings.preferredProvider).screenModel : nil
+    let searchEnabled = localChat.shouldSearch(prompt, explicitlyEnabled: isSearchEnabled)
     let automatic = selectedMode == .auto ? AutoRouter.decide(AutoRouter.Request(
-      selectedMode: .auto, webSearchEnabled: isSearchEnabled, prompt: prompt,
+      selectedMode: .auto, webSearchEnabled: searchEnabled, prompt: prompt,
       contextMessages: localChat.messages, localModel: localChat.installedModel,
       additionalInputTokens: attachment.ocrText.utf8.count + 512
         + (ScreenRoutingPolicy.requiresVision(prompt: prompt, ocr: ScreenOCRResult(text: attachment.ocrText,
@@ -1149,7 +1154,7 @@ struct AppShellView: View {
       screen.error = reason
     case .text, .vision:
       localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
-        searchEnabled: isSearchEnabled,
+        searchEnabled: searchEnabled,
         cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
           if draft == originalDraft { draft = "" }
           if screen.attachment?.id == attachment.id { screen.removeAttachment() }

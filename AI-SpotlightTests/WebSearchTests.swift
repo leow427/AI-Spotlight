@@ -6,6 +6,173 @@ import XCTest
 
 @MainActor
 final class WebSearchTests: XCTestCase {
+  func testAutomaticSearchRecognizesFreshFactsWithoutACommand() {
+    let date = Date(timeIntervalSince1970: 1_788_825_600) // September 2026
+    for prompt in [
+      "What happened in the news today?", "Latest AI news", "What happened last night?", "What's new with Apple?",
+      "What are the recent developments in fusion research?", "Write a report on today's AI news", "Who is the president of France?",
+      "Who is the CEO of Apple?", "Weather in Copenhagen", "Will it rain tomorrow?",
+      "What's Apple's stock price?", "What is the price of Bitcoin?", "USD EUR exchange rate",
+      "Who won the match last night?", "What is the score of the Arsenal match?",
+      "What is the latest stable Swift release?", "When does the next train to Aarhus leave?",
+      "What was announced at WWDC 2026?", "What were the 2025 election results?",
+      "Search the web for the meaning of serendipity", "/think What happened yesterday?",
+      "Is this product still available?", "How much does this phone cost today?"
+    ] {
+      XCTAssertTrue(WebSearchPolicy.needsFreshInformation(prompt, now: date), prompt)
+    }
+  }
+
+  func testAutomaticSearchAvoidsTimelessLocalQuotedAndOptedOutRequests() {
+    let date = Date(timeIntervalSince1970: 1_788_825_600)
+    for prompt in [
+      "Hello", "How do I search the web?", "Explain photosynthesis", "What is a binary tree?", "Who was the president in 1999?",
+      "Who won the 1998 World Cup?", "Who won World War II?", "What happened in 1812?",
+      "Explain electric current", "How does current flow through a resistor?", "What are exchange rates?",
+      "What is a stock price?", "What is 2026 divided by 2?", "Summarize this article: latest news today",
+      "Write a poem about the weather in Copenhagen", "Translate: \"What is the latest news?\"",
+      "Explain `latest news`", "Debug this code: ```\nprint(\"latest news\")\n```",
+      "Explain my current function", "Review the latest commit", "What's in the current directory?",
+      "Don't search the web. Who is the president?", "Do not browse. What happened today?",
+      "Without web search, explain the latest news", "Use only your existing knowledge: who is the CEO of Apple?",
+      "Stay offline. What is today's news?", "What happened today? Answer offline.", "Rewrite \"search the web\" as a shorter phrase"
+    ] {
+      XCTAssertFalse(WebSearchPolicy.needsFreshInformation(prompt, now: date), prompt)
+    }
+  }
+
+  func testAutomaticSearchSettingsPersistAndRequireAKey() throws {
+    let defaults = makeDefaults()
+    let credentials = SearchCredentials(nil)
+    let settings = WebSearchSettings(credentials: credentials, defaults: defaults)
+    XCTAssertTrue(settings.automaticallySearch)
+    XCTAssertFalse(settings.canSearchAutomatically)
+    try settings.saveAPIKey("fixture")
+    XCTAssertTrue(settings.canSearchAutomatically)
+    settings.automaticallySearch = false
+    let restored = WebSearchSettings(credentials: credentials, defaults: defaults)
+    XCTAssertFalse(restored.automaticallySearch)
+    XCTAssertFalse(restored.canSearchAutomatically)
+    restored.automaticallySearch = true
+    try restored.removeAPIKey()
+    XCTAssertFalse(restored.canSearchAutomatically)
+  }
+
+  func testAutomaticSearchGroundsLocalCloudAndAutoWithoutChangingQuestionOrBudget() async throws {
+    for route in ["local", "auto-local", "auto-cloud", "cloud"] {
+      let search = SearchSpy(results: fixtureResults)
+      let engine = SearchLocalEngine()
+      let cloud = SearchCloudProvider()
+      let model = makeModel(engine: engine, search: search, cloud: cloud, automatic: true)
+      await model.refreshInstalledModel()
+      let prompt = route == "auto-cloud" ? "Evaluate the latest news and risks." : "What happened in the news today?"
+      switch route {
+      case "local": model.submit(prompt)
+      case "auto-local": model.submitAuto(prompt, cloud: nil)
+      case "auto-cloud": model.submitAuto(prompt, cloud: .init(provider: .chatGPT, modelID: "model"))
+      default: model.submitCloud(prompt, provider: .chatGPT, modelID: "model")
+      }
+      XCTAssertTrue(try XCTUnwrap(model.activeRequest).route.usesNetwork)
+      await finish(model)
+      XCTAssertEqual(model.state, .idle)
+      let queries = await search.queries
+      let budgets = await search.budgets
+      XCTAssertEqual(queries, [prompt])
+      XCTAssertEqual(budgets, [8_192])
+      XCTAssertEqual(model.messages.first?.content, prompt)
+      XCTAssertEqual(model.messages.last?.searchSources, fixtureResults.map(\.source))
+      XCTAssertEqual(model.messages.last?.activity?.sources, fixtureResults.map(\.source))
+      let requests = await engine.requests
+      let content = requests.last?.prompt ?? cloud.requests.last?.messages.last?.content ?? ""
+      XCTAssertTrue(content.contains("Fresh verified fixture"))
+      XCTAssertTrue(content.hasSuffix(prompt))
+      if route.hasPrefix("auto") { XCTAssertTrue(model.autoRouteDecision?.route?.usesNetwork == true) }
+    }
+  }
+
+  func testAutomaticSearchOffAndMissingKeyStillAllowForcedSearch() async {
+    for (enabled, hasKey) in [(false, true), (true, false)] {
+      let settings = WebSearchSettings(credentials: SearchCredentials(hasKey ? "fixture" : nil), defaults: makeDefaults())
+      settings.automaticallySearch = enabled
+      let search = SearchSpy(results: fixtureResults)
+      let model = makeModel(search: search, settings: settings)
+      model.submitCloud("What happened today?", provider: .chatGPT, modelID: "model")
+      await finish(model)
+      let queries = await search.queries
+      XCTAssertTrue(queries.isEmpty)
+      model.submitCloud("Explain photosynthesis", provider: .chatGPT, modelID: "model", searchEnabled: true)
+      await finish(model)
+      let forced = await search.queries
+      XCTAssertEqual(forced, ["Explain photosynthesis"])
+    }
+  }
+
+  func testAutomaticSearchDoesNotBecomeStickyOrReadOldConversation() async {
+    let search = SearchSpy(results: fixtureResults)
+    let model = makeModel(search: search, automatic: true)
+    model.submitCloud("What happened today?", provider: .chatGPT, modelID: "model")
+    await finish(model)
+    model.submitCloud("Explain binary trees", provider: .chatGPT, modelID: "model")
+    await finish(model)
+    let queries = await search.queries
+    XCTAssertEqual(queries, ["What happened today?"])
+    XCTAssertNil(model.messages.last?.searchSources)
+    model.submitCloud("Don't search. Who is the president?", provider: .chatGPT, modelID: "model")
+    await finish(model)
+    let finalQueries = await search.queries
+    XCTAssertEqual(finalQueries, queries)
+  }
+
+  func testAutomaticSearchCancellationCannotPublishLateEvidence() async throws {
+    let gate = SearchGate()
+    let cloud = SearchCloudProvider()
+    let search = SearchSpy(results: fixtureResults, gate: gate)
+    let model = makeModel(search: search, cloud: cloud, automatic: true)
+    var draft = "What happened today?"
+    model.submitCloud(draft, provider: .chatGPT, modelID: "model") { draft = "" }
+    await fulfillment(of: [gate.entered], timeout: 2)
+    XCTAssertEqual(model.activity?.phase, .searching)
+    let old = try XCTUnwrap(model.stopStreaming())
+    await fulfillment(of: [gate.cancelled], timeout: 2)
+    model.newChat()
+    model.submitCloud("Hello", provider: .chatGPT, modelID: "model")
+    await finish(model)
+    await gate.release()
+    await old.value
+    XCTAssertEqual(draft, "What happened today?")
+    XCTAssertEqual(model.messages.map(\.content), ["Hello", "Answer"])
+    XCTAssertNil(model.messages.last?.searchSources)
+    XCTAssertEqual(cloud.requests.count, 1)
+  }
+
+  func testAutomaticSearchSettingsRenderInCurrentSettingsSection() throws {
+    let settings = WebSearchSettings(credentials: SearchCredentials("fixture"), defaults: makeDefaults())
+    let view = NSHostingView(rootView: Form { WebSearchSettingsSection(settings: settings) }
+      .formStyle(.grouped).frame(width: 620, height: 500))
+    view.frame = NSRect(x: 0, y: 0, width: 620, height: 500)
+    view.layoutSubtreeIfNeeded()
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Automatic-Search.png"))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Automatic web search settings"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+  }
+
+  func testAutomaticSearchFailureKeepsDraftInsteadOfAnsweringFromStaleKnowledge() async {
+    let cloud = SearchCloudProvider()
+    let model = makeModel(search: SearchSpy(error: .unavailable), cloud: cloud, automatic: true)
+    var draft = "What is the latest news?"
+    model.submitCloud(draft, provider: .chatGPT, modelID: "model") { draft = "" }
+    await finish(model)
+    XCTAssertEqual(draft, "What is the latest news?")
+    XCTAssertTrue(cloud.requests.isEmpty)
+    XCTAssertTrue(model.messages.isEmpty)
+    XCTAssertEqual(model.state, .failed(WebSearchError.unavailable.localizedDescription))
+  }
+
   func testBraveRequestAndGenericPOIMapResponse() async throws {
     let transport = SearchTransport(data: Data("""
       {"grounding":{"generic":[
@@ -83,7 +250,7 @@ final class WebSearchTests: XCTestCase {
 
   func testCredentialSaveAndRemoval() throws {
     let credentials = SearchCredentials(nil)
-    let settings = WebSearchSettings(credentials: credentials)
+    let settings = WebSearchSettings(credentials: credentials, defaults: makeDefaults())
     XCTAssertFalse(settings.hasAPIKey)
     try settings.saveAPIKey("  fixture-key\n")
     XCTAssertEqual(credentials.apiKey(), "fixture-key")
@@ -579,6 +746,13 @@ final class WebSearchTests: XCTestCase {
                      snippets: ["Fresh verified fixture"])]
   }
 
+  private func makeDefaults() -> UserDefaults {
+    let name = "AutomaticSearchTests-\(UUID())"
+    let defaults = UserDefaults(suiteName: name)!
+    addTeardownBlock { defaults.removePersistentDomain(forName: name) }
+    return defaults
+  }
+
   private func makeStore() -> ChatSessionStore {
     let root = FileManager.default.temporaryDirectory.appending(path: "WebSearchTests-\(UUID())")
     addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -587,11 +761,14 @@ final class WebSearchTests: XCTestCase {
 
   private func makeModel(
     engine: SearchLocalEngine = SearchLocalEngine(), search: any WebSearchProvider,
-    cloud: SearchCloudProvider = SearchCloudProvider(), store: ChatSessionStore? = nil
+    cloud: SearchCloudProvider = SearchCloudProvider(), store: ChatSessionStore? = nil,
+    automatic: Bool = false, settings: WebSearchSettings? = nil
   ) -> LocalChatViewModel {
-    LocalChatViewModel(
+    let searchSettings = settings ?? WebSearchSettings(credentials: SearchCredentials("fixture"), defaults: makeDefaults())
+    if settings == nil { searchSettings.automaticallySearch = automatic }
+    return LocalChatViewModel(
       engine: engine, cloudProviders: CloudProviderRegistry(openAI: cloud, anthropic: cloud, chatGPT: cloud),
-      webSearch: search, sessionStore: store ?? makeStore()
+      webSearch: search, searchSettings: searchSettings, sessionStore: store ?? makeStore()
     )
   }
 

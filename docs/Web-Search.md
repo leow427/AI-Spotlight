@@ -4,6 +4,47 @@ Add a Brave Search API key with **LLM Context** access in **Settings → Web Sea
 The key is stored in macOS Keychain under a separate search service, never in
 preferences or chat history. Brave API usage is separate from model-provider usage.
 
+## Automatic search
+
+**Search automatically when fresh information is needed** is on by default in
+Settings → Cloud & Search → Web Search · Brave. It becomes active once a Brave key
+is saved. Questions such as “What happened in the news today?”, “Latest AI news”,
+“What is the latest Swift release?” and “Who is the president of France?” can now
+retrieve evidence without `/search`. Weather, market prices, exchange rates,
+sports scores and upcoming schedules are also recognized. The composer explains
+that current topics may use Brave, including in Local mode.
+
+The shared `WebSearchPolicy` uses deterministic freshness and lookup cues in the
+current question, with no extra inference call and no simple/complex classifier.
+This decision controls whether to retrieve, never the source count, evidence
+budget, or selected model. Local (both embedded and server-backed), Cloud and Auto
+all resolve it before entering their existing search pipelines. Requests are
+independent: an automatically searched question does not turn on forced search
+for the following turn.
+
+Quoted text and code are excluded from the decision. Common text transformations,
+local file/code references, historical questions and requests such as “don't
+search” or “stay offline” avoid automatic retrieval. No conversation history,
+OCR, attached file contents or model output can opt a request into search. Screen
+questions that do opt in retain the existing query-refinement and image-consent
+flow. File Mode remains a separate workflow and does not automatically search.
+
+Turn the setting off for manual-only search. `/search` and the explicit search
+tool still force retrieval, including for timeless questions; disabling forced
+search returns to the automatic-search preference. Without a saved key, automatic
+retrieval is inactive and normal chat continues. Missing/rejected keys on an
+explicit search, or any failure after automatic retrieval starts, keep the draft
+and show the existing error instead of silently answering without evidence.
+
+The initial policy targets English and favors clear signals. It cannot recognize
+every paraphrase or resolve an ambiguous follow-up such as “And yesterday?” from
+private conversation history; use `/search` with a self-contained question when
+needed. It does not independently verify the freshness of each returned source.
+
+![Automatic search preference](images/automatic-web-search.png)
+
+## Explicit search
+
 The search icon starts hidden. Add and enable it with **+ → Web Search** or a
 leading **/search** command. It pops into place with a short spring animation as
 the text field moves over. Its expanding slot keeps the icon clear of the text
@@ -37,8 +78,8 @@ result bundles remain outside the repository.
 For requests without Screen, Local mode sends the current question to Brave and
 the local model generates the answer. Cloud mode passes evidence to the provider,
 including ChatGPT via the existing Codex bridge. Auto uses the same Brave search
-and keeps choosing the model based on task complexity and context size. Merely
-mentioning web search in ordinary text does not enable the tool.
+and keeps choosing the model based on task complexity and context size. Automatic freshness detection also runs in Local and Cloud modes; it is independent
+of Auto model routing.
 
 With Screen attached, the ordinarily selected model resolves the question using
 local OCR or the image and generates one focused query. Brave retrieves evidence,
@@ -106,7 +147,7 @@ verification of every claim in its answer.
 Stop cancels both retrieval and generation. Search failures, missing or rejected
 keys, rate limits, empty results, and insufficient context preserve the draft and
 do not silently produce an answer without search. Error responses are not echoed
-into the UI. Search-off requests do not call Brave.
+into the UI. Requests with neither explicit search nor an eligible automatic-search decision do not call Brave.
 
 The original icon is in `Icons/noun_WebSearch_199704.svg`; the green derivative is
 `Icons/noun_WebSearch_199704_green.svg`. The app bundles a vector image asset using
@@ -132,3 +173,13 @@ history priority, model context metadata, endpoint token counting, fallback, ima
 reserves, and cancellation. An unchanged Codex EOF/timeout test failed during an
 earlier local run and passed on the final full run; its assertions were not changed.
 Brave and generation fixtures are deterministic; live search quality was not evaluated.
+
+Automatic-search regression coverage includes positive and negative freshness
+examples, persisted opt-out and missing-key behavior, all text routes, selected
+server models, Screen refinement, OCR isolation, non-sticky requests, unchanged
+8K retrieval budgets, prompt-selected sources, failure handling and cancellation
+with late results. Tests inject search settings and fixtures; no live Brave key is
+needed. The settings screenshot is rendered by the native SwiftUI test host.
+
+Verification for automatic search: build and static analyzer passed; the full
+suite executed 435 tests with nine optional skips and zero failures.

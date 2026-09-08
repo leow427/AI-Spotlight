@@ -64,6 +64,7 @@
 		B60000000000000000000102 /* WebSearchSettings.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000002 /* WebSearchSettings.swift */; };
 		B60000000000000000000103 /* WebSearchContext.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000003 /* WebSearchContext.swift */; };
 		B60000000000000000000104 /* WebSearchControls.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000004 /* WebSearchControls.swift */; };
+		B60000000000000000000105 /* WebSearchPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000005 /* WebSearchPolicy.swift */; };
 		B60000000000000000000202 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000201 /* Assets.xcassets */; };
 		B60000000000000000000402 /* WebSearchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B60000000000000000000401 /* WebSearchTests.swift */; };
 		BADDBDB66366EC60115687D5 /* AI-Spotlight/Screen/ScreenComposerCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = E3AE294B06E2598E6419AF1E /* AI-Spotlight/Screen/ScreenComposerCoordinator.swift */; };
@@ -178,6 +179,7 @@
 		B60000000000000000000002 /* WebSearchSettings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchSettings.swift; sourceTree = "<group>"; };
 		B60000000000000000000003 /* WebSearchContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchContext.swift; sourceTree = "<group>"; };
 		B60000000000000000000004 /* WebSearchControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchControls.swift; sourceTree = "<group>"; };
+		B60000000000000000000005 /* WebSearchPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchPolicy.swift; sourceTree = "<group>"; };
 		B60000000000000000000201 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B60000000000000000000401 /* WebSearchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSearchTests.swift; sourceTree = "<group>"; };
 		C10000000000000000000001 /* ChatContext.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatContext.swift; sourceTree = "<group>"; };
@@ -371,6 +373,7 @@
 				B60000000000000000000002 /* WebSearchSettings.swift */,
 				B60000000000000000000003 /* WebSearchContext.swift */,
 				B60000000000000000000004 /* WebSearchControls.swift */,
+				B60000000000000000000005 /* WebSearchPolicy.swift */,
 			);
 			path = Search;
 			sourceTree = "<group>";
@@ -555,6 +558,7 @@
 				B60000000000000000000102 /* WebSearchSettings.swift in Sources */,
 				B60000000000000000000103 /* WebSearchContext.swift in Sources */,
 				B60000000000000000000104 /* WebSearchControls.swift in Sources */,
+				B60000000000000000000105 /* WebSearchPolicy.swift in Sources */,
 				A10000000000000000000001 /* AI_SpotlightApp.swift in Sources */,
 				A10000000000000000000002 /* ApplicationDelegate.swift in Sources */,
 				A10000000000000000000003 /* AppCommand.swift in Sources */,
