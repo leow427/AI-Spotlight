@@ -5,6 +5,7 @@ import Security
 import SwiftUI
 import XCTest
 import WebKit
+import Vision
 @testable import PrimaryAgent
 
 @MainActor
@@ -510,6 +511,9 @@ final class ScreenViewTests: XCTestCase {
     await fulfillment(of: [reply], timeout: 5)
     replyToken.cancel()
     try await renderPanel(view, state: "reply")
+    if searchEnabled && historyCount == 0 && commands == nil {
+      try await verifyActivityExpansion(in: view, chat: chat)
+    }
     if searchEnabled {
       let png = try Data(contentsOf: URL(fileURLWithPath: "/tmp/AI-Spotlight-Panel-reply.png"))
       try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Screen-Search.png"))
@@ -754,6 +758,59 @@ final class ScreenViewTests: XCTestCase {
     try await assertPanelControls(view, phase: "removed attachment")
   }
 
+  private func pressActivityStatus(in view: NSView) throws {
+    view.layoutSubtreeIfNeeded()
+    let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+    view.cacheDisplay(in: view.bounds, to: bitmap)
+    let request = VNRecognizeTextRequest()
+    request.recognitionLevel = .accurate
+    try VNImageRequestHandler(cgImage: XCTUnwrap(bitmap.cgImage)).perform([request])
+    let label = try XCTUnwrap(request.results?.filter {
+      $0.topCandidates(1).first?.string.lowercased().contains("generating response") == true
+    }.max { $0.boundingBox.midY < $1.boundingBox.midY })
+    let point = NSPoint(x: label.boundingBox.midX * view.bounds.width,
+      y: (view.isFlipped ? 1 - label.boundingBox.midY : label.boundingBox.midY) * view.bounds.height)
+    let window = try XCTUnwrap(view.window)
+    let location = view.convert(point, to: nil)
+    for type: NSEvent.EventType in [.leftMouseDown, .leftMouseUp] {
+      window.sendEvent(try XCTUnwrap(NSEvent.mouseEvent(with: type, location: location,
+        modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+        windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1)))
+    }
+  }
+
+  private func verifyActivityExpansion(in view: NSView, chat: LocalChatViewModel) async throws {
+    let originalSize = view.bounds.size
+    view.window?.setContentSize(NSSize(width: 752, height: 760))
+    await Task.yield()
+    view.layoutSubtreeIfNeeded()
+    try pressActivityStatus(in: view)
+    let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+    var text = ""
+    var png = Data()
+    repeat {
+      await Task.yield()
+      view.layoutSubtreeIfNeeded()
+      view.window?.displayIfNeeded()
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      text = try await ScreenOCRService().recognize(XCTUnwrap(bitmap.cgImage)).text.lowercased()
+    } while !text.contains("web sources") && ContinuousClock.now < deadline
+    XCTAssertTrue(text.contains("request activity"))
+    XCTAssertTrue(text.contains("web sources"))
+    XCTAssertTrue(text.contains("code reference"))
+    XCTAssertEqual(chat.messages.last?.activity?.sources, [PanelSearch.source])
+    try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Activity-App.png"))
+    let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+    attachment.name = "Live activity in current Liquid Glass app"
+    attachment.lifetime = .keepAlways
+    add(attachment)
+    try pressActivityStatus(in: view)
+    await Task.yield()
+    view.window?.setContentSize(originalSize)
+  }
+
   private func submitComposer(in view: NSView) throws {
     let window = try XCTUnwrap(view.window)
     XCTAssertTrue(window.makeFirstResponder(try composerField(in: view)))
@@ -805,8 +862,8 @@ final class ScreenViewTests: XCTestCase {
   private func renderPanel(_ view: NSView, state: String) async throws {
     let expected = switch state {
     case "attached": ["screen region", "what is the answer"]
-    case "loading": ["preparing", "stop", "what is the answer"]
-    case "reply": ["the answer is", "streaming", "stop"]
+    case "loading": ["thinking", "stop", "what is the answer"]
+    case "reply": ["the answer is", "generating response", "stop"]
     default: ["the answer is", "local ocr"]
     }
     // Real animations can leave labels temporarily transparent. Wait for the

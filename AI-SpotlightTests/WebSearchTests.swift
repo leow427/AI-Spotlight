@@ -311,6 +311,149 @@ final class WebSearchTests: XCTestCase {
     add(attachment)
   }
 
+  func testActivityDeduplicatesSourcesAndPreservesBudgetSelection() throws {
+    let first = fixtureResults[0].source
+    let second = WebSearchSource(title: "Second", url: URL(string: "https://swift.org/documentation")!)
+    let unsafe = WebSearchSource(title: "Unsafe", url: URL(string: "file:///tmp/example")!)
+    var activity = AssistantActivity(id: UUID())
+    activity.apply(.phase(.searching))
+    XCTAssertEqual(activity.status, "Searching…")
+    activity.apply(.sourcesDiscovered([first, first, second, unsafe]))
+    XCTAssertEqual(activity.status, "Reading sources (2)…")
+    XCTAssertEqual(activity.sources, [first, second])
+    XCTAssertNotEqual(activity.colorIndex(for: first), activity.colorIndex(for: second))
+    activity.apply(.sourcesSelected([second]))
+    XCTAssertEqual(activity.sources.count, 2, "Collected count stays distinct from context selection")
+    XCTAssertEqual(activity.selectedSourceIDs, [second.id])
+    activity.apply(.phase(.generating))
+    activity.apply(.sourcesDiscovered([first]))
+    XCTAssertEqual(activity.status, "Generating response…")
+    activity.apply(.phase(.cancelled))
+    let stopped = activity
+    activity.apply(.phase(.thinking))
+    activity.apply(.sourcesDiscovered([unsafe]))
+    XCTAssertEqual(activity, stopped)
+    XCTAssertEqual(first.monogram, "E")
+    XCTAssertEqual(first.colorIndex, WebSearchSource(title: "Another page", url: URL(string: "https://example.com/other")!).colorIndex)
+    var message = ChatMessage(role: .assistant, content: "Answer", searchSources: [second])
+    message.activity = activity
+    let restored = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(message))
+    XCTAssertNil(restored.activity, "Transient activity must not change saved history or prompt data")
+    XCTAssertEqual(restored.searchSources, [second])
+  }
+
+  func testIncrementalSourcesUpdateBeforeResponseOnLocalAndCloud() async throws {
+    for local in [true, false] {
+      let search = ProgressiveSearch()
+      let model = makeModel(search: search)
+      var phases: [AssistantActivity.Phase] = []
+      let observation = model.$activity.compactMap { $0?.phase }.sink { phases.append($0) }
+      if local { model.submit("Find sources", searchEnabled: true) }
+      else { model.submitCloud("Find sources", provider: .openAI, modelID: "model", searchEnabled: true) }
+      await fulfillment(of: [search.first.entered], timeout: 3)
+      XCTAssertEqual(model.activity?.status, "Reading sources (1)…")
+      XCTAssertTrue(model.messages.isEmpty)
+      XCTAssertTrue(model.isWaitingForResponse)
+      let requestID = try XCTUnwrap(model.activity?.id)
+      await search.first.release()
+      await fulfillment(of: [search.second.entered], timeout: 3)
+      XCTAssertEqual(model.activity?.status, "Reading sources (2)…")
+      XCTAssertEqual(model.activity?.sources, search.results.map(\.source))
+      await search.second.release()
+      await finish(model)
+      observation.cancel()
+      let completed = try XCTUnwrap(model.messages.last?.activity)
+      XCTAssertEqual(completed.id, requestID, "Expansion identity survives acceptance")
+      XCTAssertEqual(completed.phase, .completed)
+      XCTAssertEqual(completed.sources, search.results.map(\.source))
+      XCTAssertEqual(completed.selectedSourceIDs, Set(search.results.map { $0.source.id }))
+      XCTAssertNil(model.activity)
+      for phase: AssistantActivity.Phase in [.analyzing, .searching, .readingSources, .thinking, .generating, .completed] {
+        XCTAssertTrue(phases.contains(phase), "Missing \(phase) on local=\(local)")
+      }
+    }
+  }
+
+  func testLateIncrementalActivityCannotAffectReplacementRequest() async throws {
+    for local in [true, false] {
+      let search = ProgressiveSearch()
+      let model = makeModel(search: search)
+      if local { model.submit("Original", searchEnabled: true) }
+      else { model.submitCloud("Original", provider: .openAI, modelID: "model", searchEnabled: true) }
+      await fulfillment(of: [search.first.entered], timeout: 3)
+      let stopped = try XCTUnwrap(model.stopStreaming())
+      XCTAssertNil(model.activity)
+      model.newChat()
+      model.submitCloud("Replacement", provider: .openAI, modelID: "model")
+      await finish(model)
+      await search.first.release()
+      await fulfillment(of: [search.second.entered], timeout: 3)
+      XCTAssertTrue(model.messages.last?.activity?.sources.isEmpty == true)
+      await search.second.release()
+      await stopped.value
+      XCTAssertEqual(model.messages.map(\.content), ["Replacement", "Answer"])
+      XCTAssertEqual(model.messages.last?.activity?.phase, .completed)
+      XCTAssertNil(model.activity)
+    }
+  }
+
+  func testProviderActivityPassesThroughCloudAndScreenAdapter() async throws {
+    let source = fixtureResults[0].source
+    let provider = ActivityCloudProvider(source: source)
+    let model = LocalChatViewModel(engine: SearchLocalEngine(),
+      cloudProviders: CloudProviderRegistry(openAI: provider, anthropic: provider, chatGPT: provider),
+      sessionStore: makeStore())
+    model.submitCloud("Question", provider: .openAI, modelID: "model")
+    await finish(model)
+    XCTAssertEqual(model.messages.last?.activity?.sources, [source])
+    XCTAssertEqual(model.messages.last?.activity?.phase, .completed)
+    let events = ActivityRecorder()
+    let request = ChatRequest(sessionID: UUID(), messages: [],
+      route: Route(mode: .cloud, providerID: "openai", modelID: "model", usesNetwork: true))
+    var text = ""
+    for try await fragment in provider.textStream(request, onActivity: { await events.record($0) }) { text += fragment }
+    XCTAssertEqual(text, "Answer")
+    let recorded = await events.events
+    XCTAssertEqual(recorded, [.phase(.searching), .sourcesDiscovered([source])])
+  }
+
+  func testExpandedActivityRendersInLightAndDarkAtCompactWidth() throws {
+    for dark in [false, true] {
+      var activity = AssistantActivity(id: UUID())
+      activity.apply(.phase(.searching))
+      activity.apply(.sourcesDiscovered([
+        WebSearchSource(title: "Swift documentation and language reference", url: URL(string: "https://swift.org/documentation")!),
+        WebSearchSource(title: "A longer page title that wraps within the compact assistant panel", url: URL(string: "https://developer.apple.com/documentation/swiftui")!),
+        WebSearchSource(title: "Example research source", url: URL(string: "https://example.com/research")!)
+      ]))
+      activity.apply(.sourcesSelected(Array(activity.sources.prefix(2))))
+      activity.apply(.phase(.generating))
+      let preview = AssistantActivityView(activity: activity, expanded: .constant(true))
+        .padding(20).frame(width: 390)
+        .background(Color(nsColor: .windowBackgroundColor))
+        .environment(\.colorScheme, dark ? .dark : .light)
+      let view = NSHostingView(rootView: preview)
+      let size = view.fittingSize
+      XCTAssertLessThan(size.height, 650)
+      let window = NSWindow(contentRect: NSRect(origin: .zero, size: size),
+        styleMask: [.borderless], backing: .buffered, defer: false)
+      window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+      window.contentView = view
+      view.frame = NSRect(origin: .zero, size: size)
+      view.layoutSubtreeIfNeeded()
+      window.displayIfNeeded()
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      let suffix = dark ? "dark" : "light"
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Activity-\(suffix).png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Expanded activity · \(suffix)"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+  }
+
   private var fixtureResults: [WebSearchResult] {
     [WebSearchResult(source: WebSearchSource(title: "Example source", url: URL(string: "https://example.com/news")!),
                      snippets: ["Fresh verified fixture"])]
@@ -435,4 +578,43 @@ private final class SearchCloudProvider: ChatProvider, @unchecked Sendable {
     lock.withLock { stored.append(request) }
     return AsyncThrowingStream { $0.yield(.token("Answer")); $0.yield(.completed); $0.finish() }
   }
+}
+
+private struct ProgressiveSearch: WebSearchProvider {
+  let first = SearchGate()
+  let second = SearchGate()
+  let results = [
+    WebSearchResult(source: WebSearchSource(title: "First", url: URL(string: "https://example.com/one")!), snippets: ["First excerpt"]),
+    WebSearchResult(source: WebSearchSource(title: "Second", url: URL(string: "https://swift.org/two")!), snippets: ["Second excerpt"])
+  ]
+
+  func search(_ query: String, maximumTokens: Int) async throws -> [WebSearchResult] { results }
+
+  func search(_ query: String, maximumTokens: Int,
+              onActivity: @escaping AssistantActivitySink) async throws -> [WebSearchResult] {
+    await onActivity(.sourcesDiscovered([results[0].source]))
+    await first.wait()
+    // Deliberately publish after Stop, too: request ownership must reject late events.
+    await onActivity(.sourcesDiscovered(results.map(\.source)))
+    await second.wait()
+    return results
+  }
+}
+
+private struct ActivityCloudProvider: ChatProvider {
+  let source: WebSearchSource
+  func stream(_ request: ChatRequest) -> AsyncThrowingStream<ChatEvent, Error> {
+    AsyncThrowingStream {
+      $0.yield(.activity(.phase(.searching)))
+      $0.yield(.activity(.sourcesDiscovered([source])))
+      $0.yield(.token("Answer"))
+      $0.yield(.completed)
+      $0.finish()
+    }
+  }
+}
+
+private actor ActivityRecorder {
+  var events: [AssistantActivityEvent] = []
+  func record(_ event: AssistantActivityEvent) { events.append(event) }
 }

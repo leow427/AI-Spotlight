@@ -90,12 +90,13 @@ enum ScreenSearchContext {
 }
 
 extension ChatProvider {
-  func textStream(_ request: ChatRequest) -> AsyncThrowingStream<String, Error> {
+  func textStream(_ request: ChatRequest, onActivity: @escaping AssistantActivitySink = { _ in }) -> AsyncThrowingStream<String, Error> {
     AsyncThrowingStream { continuation in
       let task = Task {
         do {
           for try await event in stream(request) {
             try Task.checkCancellation()
+            if case .activity(let activity) = event { await onActivity(activity) }
             if case .token(let text) = event { continuation.yield(text) }
           }
           continuation.finish()

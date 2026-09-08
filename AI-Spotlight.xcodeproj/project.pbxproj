@@ -85,6 +85,8 @@
 		D10000000000000000000007 /* ThirdPartyNotices.txt in Resources */ = {isa = PBXBuildFile; fileRef = D20000000000000000000006 /* ThirdPartyNotices.txt */; };
 		D837B30691584362AC890087 /* AI-Spotlight/Screen/ScreenAttachment.swift in Sources */ = {isa = PBXBuildFile; fileRef = C914AEA42F47A9209266F278 /* AI-Spotlight/Screen/ScreenAttachment.swift */; };
 		E10000000000000000000001 /* ChatDomain.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000001 /* ChatDomain.swift */; };
+		AC1000000000000000000004 /* AssistantActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2000000000000000000004 /* AssistantActivityView.swift */; };
+		AC1000000000000000000003 /* AssistantActivity.swift in Sources */ = {isa = PBXBuildFile; fileRef = AC2000000000000000000003 /* AssistantActivity.swift */; };
 		E10000000000000000000002 /* ChatSessionStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000002 /* ChatSessionStore.swift */; };
 		E10000000000000000000003 /* LocalModelManifest.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000003 /* LocalModelManifest.swift */; };
 		E10000000000000000000004 /* ChatPersistenceTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = E20000000000000000000004 /* ChatPersistenceTests.swift */; };
@@ -196,6 +198,8 @@
 		DA71017E0A573695B2D29C84 /* AI-SpotlightTests/WorkspaceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/WorkspaceTests.swift"; sourceTree = SOURCE_ROOT; };
 		DC739E5346C6C117334001F2 /* AI-Spotlight/Screen/ScreenImagePreprocessor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenImagePreprocessor.swift"; sourceTree = SOURCE_ROOT; };
 		E20000000000000000000001 /* ChatDomain.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatDomain.swift; sourceTree = "<group>"; };
+		AC2000000000000000000004 /* AssistantActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantActivityView.swift; sourceTree = "<group>"; };
+		AC2000000000000000000003 /* AssistantActivity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantActivity.swift; sourceTree = "<group>"; };
 		E20000000000000000000002 /* ChatSessionStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatSessionStore.swift; sourceTree = "<group>"; };
 		E20000000000000000000003 /* LocalModelManifest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LocalModelManifest.swift; sourceTree = "<group>"; };
 		E20000000000000000000004 /* ChatPersistenceTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ChatPersistenceTests.swift; sourceTree = "<group>"; };
@@ -396,6 +400,8 @@
 				C10000000000000000000001 /* ChatContext.swift */,
 				DE1000000000000000000001 /* ChatMarkdown.swift */,
 				E20000000000000000000001 /* ChatDomain.swift */,
+				AC2000000000000000000004 /* AssistantActivityView.swift */,
+				AC2000000000000000000003 /* AssistantActivity.swift */,
 				E20000000000000000000002 /* ChatSessionStore.swift */,
 				E20000000000000000000005 /* AutoRouter.swift */,
 			);
@@ -563,6 +569,8 @@
 				D10000000000000000000003 /* LlamaCPPModelEngine.swift in Sources */,
 				D10000000000000000000004 /* LocalChatViewModel.swift in Sources */,
 				E10000000000000000000001 /* ChatDomain.swift in Sources */,
+				AC1000000000000000000004 /* AssistantActivityView.swift in Sources */,
+				AC1000000000000000000003 /* AssistantActivity.swift in Sources */,
 				E10000000000000000000002 /* ChatSessionStore.swift in Sources */,
 				AB0200000000000000000001 /* LocalHardwareProfile.swift in Sources */,
 				AB0200000000000000000002 /* LocalModelSelection.swift in Sources */,

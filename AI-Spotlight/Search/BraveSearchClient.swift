@@ -11,8 +11,23 @@ struct WebSearchResult: Equatable, Sendable {
   let snippets: [String]
 }
 
+typealias AssistantActivitySink = @Sendable (AssistantActivityEvent) async -> Void
+
 protocol WebSearchProvider: Sendable {
   func search(_ query: String, maximumTokens: Int) async throws -> [WebSearchResult]
+  func search(_ query: String, maximumTokens: Int,
+              onActivity: @escaping AssistantActivitySink) async throws -> [WebSearchResult]
+}
+
+extension WebSearchProvider {
+  /// Batch providers publish once on arrival; incremental providers override this overload.
+  func search(_ query: String, maximumTokens: Int,
+              onActivity: @escaping AssistantActivitySink) async throws -> [WebSearchResult] {
+    let results = try await search(query, maximumTokens: maximumTokens)
+    try Task.checkCancellation()
+    await onActivity(.sourcesDiscovered(results.map(\.source)))
+    return results
+  }
 }
 
 enum WebSearchError: LocalizedError, Equatable {

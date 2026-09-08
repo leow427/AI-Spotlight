@@ -38,6 +38,8 @@ final class LocalChatViewModel: ObservableObject {
   @Published private(set) var installedModel: LocalModel?
   @Published private(set) var installedModels: [LocalModel] = []
   @Published private(set) var contextNotice: String?
+  @Published private(set) var activity: AssistantActivity?
+  private var activityMessageID: UUID?
   @Published private(set) var activeRequest: ActiveRequest?
   @Published private(set) var autoRouteDecision: AutoRouter.Decision?
   @Published private(set) var screenRouteDecision: ScreenRoutingPolicy.Decision?
@@ -311,6 +313,7 @@ final class LocalChatViewModel: ObservableObject {
       var failure: Error?
       do {
         try Task.checkCancellation()
+        self?.receiveActivity(.phase(.thinking), requestID: active.id)
         if local, let model {
           // The inference-only bridge releases its model before the tool-capable runtime loads it.
           await engine.unload()
@@ -322,6 +325,7 @@ final class LocalChatViewModel: ObservableObject {
           let request = ChatRequest(sessionID: sessionID, messages: history, route: route)
           for try await event in fileCodex.stream(request, fileTools: fileTools) {
             try Task.checkCancellation()
+            if case .activity(let update) = event { self?.receiveActivity(update, requestID: active.id) }
             if case .token(let text) = event {
               self?.appendFileText(text, messageID: responseID, sessionID: sessionID, requestID: active.id)
             }
@@ -386,7 +390,7 @@ final class LocalChatViewModel: ObservableObject {
           try Task.checkCancellation()
           guard owner.activeRequest?.id == active.id else { return }
           owner.state = .searching
-          let results = try await owner.webSearch.search(trimmedPrompt, maximumTokens: 1_024)
+          let results = try await owner.search(trimmedPrompt, maximumTokens: 1_024, requestID: active.id)
           try Task.checkCancellation()
           guard owner.activeRequest?.id == active.id else { return }
           owner.state = .preparing
@@ -395,6 +399,7 @@ final class LocalChatViewModel: ObservableObject {
           }
           prepared = grounded.prepared
           sources = grounded.sources
+          owner.receiveActivity(.sourcesSelected(grounded.sources), requestID: active.id)
         }
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
@@ -410,6 +415,7 @@ final class LocalChatViewModel: ObservableObject {
           maximumTokenCount: request.maximumTokenCount,
           temperature: request.temperature
         )
+        owner.receiveActivity(.phase(.thinking), requestID: active.id)
         for try await fragment in engine.stream(boundedRequest) {
           try Task.checkCancellation()
           guard let self, self.activeRequest?.id == active.id else { return }
@@ -525,6 +531,7 @@ final class LocalChatViewModel: ObservableObject {
                 if let attachment, searchQuery == nil {
                   owner.activeRequest = ActiveRequest(id: active.id, route: route, modelDisplayName: target.id)
                   owner.state = .refiningSearch
+                  owner.receiveActivity(.phase(.refiningSearch), requestID: active.id)
                   let queryRequest = [ChatMessage(role: .user, content:
                     ScreenSearchContext.queryPrompt(question: prompt, facts: "", ocr: attachment.ocrText))]
                   let queryContext = try await prepare(queryRequest, requestImage)
@@ -542,7 +549,7 @@ final class LocalChatViewModel: ObservableObject {
                 owner.state = .searching
                 // Screen queries resolve the user's references with relevant observed facts.
                 // Pixels, raw OCR, and conversation history are never attached to Brave.
-                searchResults = try await owner.webSearch.search(searchQuery ?? prompt, maximumTokens: target.isLocal ? 1_024 : 4_096)
+                searchResults = try await owner.search(searchQuery ?? prompt, maximumTokens: target.isLocal ? 1_024 : 4_096, requestID: active.id)
               }
               try Task.checkCancellation()
               guard owner.activeRequest?.id == active.id else { return }
@@ -557,9 +564,11 @@ final class LocalChatViewModel: ObservableObject {
               }
               prepared = grounded.prepared
               sources = grounded.sources
+              owner.receiveActivity(.sourcesSelected(grounded.sources), requestID: active.id)
             }
             try Task.checkCancellation()
             guard owner.activeRequest?.id == active.id else { return }
+            owner.receiveActivity(.phase(.thinking), requestID: active.id)
             let output = try await owner.screenOutput(prepared, image: requestImage, target: target,
               localModel: localModel, activeID: active.id, cloudUploadAllowed: cloudUploadAllowed,
               temperature: searchEnabled ? 0.2 : 0.7)
@@ -634,7 +643,9 @@ final class LocalChatViewModel: ObservableObject {
       route: target.route, image: image, allowsCloudImages: image != nil && cloudUploadAllowed())
     // Recheck consent at every image-bearing stage, including after search.
     try ScreenRequestGuard.validateCloud(request)
-    return cloudProviders.provider(for: providerID).textStream(request)
+    return cloudProviders.provider(for: providerID).textStream(request) { [weak self] event in
+      await self?.receiveActivity(event, requestID: activeID)
+    }
   }
 
   func submitCloud(
@@ -685,10 +696,13 @@ final class LocalChatViewModel: ObservableObject {
       do {
         try Task.checkCancellation()
         guard self?.activeRequest?.id == active.id else { return }
+        self?.receiveActivity(.phase(.thinking), requestID: active.id)
         for try await event in provider.stream(request) {
           try Task.checkCancellation()
           guard let self, self.activeRequest?.id == active.id else { return }
           switch event {
+          case .activity(let update):
+            self.receiveActivity(update, requestID: active.id)
           case .token(let fragment):
             self.state = .streaming
             self.append(fragment, to: responseID, in: sessionID)
@@ -719,7 +733,7 @@ final class LocalChatViewModel: ObservableObject {
       do {
         try Task.checkCancellation()
         guard let owner = self, owner.activeRequest?.id == active.id else { return }
-        let results = try await owner.webSearch.search(userMessage.content, maximumTokens: 4_096)
+        let results = try await owner.search(userMessage.content, maximumTokens: 4_096, requestID: active.id)
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
         let grounded = try await WebSearchContext.prepare(messages: history, results: results) {
@@ -730,6 +744,7 @@ final class LocalChatViewModel: ObservableObject {
               let providerID = CloudProviderID(rawValue: route.providerID) else { return }
         let sessionID = owner.ensureSelectedSession()
         let responseID = UUID()
+        owner.receiveActivity(.sourcesSelected(grounded.sources), requestID: active.id)
         owner.contextNotice = grounded.prepared.notice
         owner.state = .preparing
         owner.append(userMessage, to: sessionID)
@@ -739,9 +754,11 @@ final class LocalChatViewModel: ObservableObject {
         guard owner.activeRequest?.id == active.id else { return }
         let request = ChatRequest(sessionID: sessionID, messages: grounded.prepared.messages, route: route)
         let provider = owner.cloudProviders.provider(for: providerID)
+        self?.receiveActivity(.phase(.thinking), requestID: active.id)
         for try await event in provider.stream(request) {
           try Task.checkCancellation()
           guard owner.activeRequest?.id == active.id else { return }
+          if case .activity(let update) = event { owner.receiveActivity(update, requestID: active.id) }
           if case .token(let fragment) = event {
             owner.state = .streaming
             owner.append(fragment, to: responseID, in: sessionID)
@@ -794,8 +811,11 @@ final class LocalChatViewModel: ObservableObject {
   func stopStreaming() -> Task<Void, Never>? {
     guard let task = generationTask else { return nil }
     files.revoke()
+    if let id = activeRequest?.id { receiveActivity(.phase(.cancelled), requestID: id) }
     // Revoke ownership before cancellation can release any queued events or cleanup.
     activeRequest = nil
+    activity = nil
+    activityMessageID = nil
     pendingUserMessage = nil
     generationTask = nil
     state = .idle
@@ -865,6 +885,11 @@ final class LocalChatViewModel: ObservableObject {
 
   private func append(_ message: ChatMessage, to sessionID: UUID) {
     guard let index = sessions.firstIndex(where: { $0.id == sessionID }) else { return }
+    var message = message
+    if message.role == .assistant, activeRequest != nil {
+      activityMessageID = message.id
+      message.activity = activity
+    }
     sessions[index].append(message)
     if pendingUserMessage?.id == message.id { pendingUserMessage = nil }
     sortAndPersistSessions()
@@ -873,7 +898,10 @@ final class LocalChatViewModel: ObservableObject {
   private func append(_ fragment: String, to messageID: UUID, in sessionID: UUID) {
     guard let sessionIndex = sessions.firstIndex(where: { $0.id == sessionID }),
           let messageIndex = sessions[sessionIndex].messages.firstIndex(where: { $0.id == messageID }) else { return }
-    if !fragment.isEmpty { hasReceivedResponse = true }
+    if !fragment.isEmpty {
+      hasReceivedResponse = true
+      if let id = activeRequest?.id { receiveActivity(.phase(.generating), requestID: id) }
+    }
     sessions[sessionIndex].messages[messageIndex].content.append(fragment)
     sessions[sessionIndex].lastActivityAt = .now
     sortAndPersistSessions()
@@ -908,17 +936,43 @@ final class LocalChatViewModel: ObservableObject {
     installationTask = nil
   }
 
+  private func search(_ query: String, maximumTokens: Int, requestID: UUID) async throws -> [WebSearchResult] {
+    receiveActivity(.phase(.searching), requestID: requestID)
+    let results = try await webSearch.search(query, maximumTokens: maximumTokens) { [weak self] event in
+      await self?.receiveActivity(event, requestID: requestID)
+    }
+    try Task.checkCancellation()
+    receiveActivity(.sourcesDiscovered(results.map(\.source)), requestID: requestID)
+    return results
+  }
+
+  private func receiveActivity(_ event: AssistantActivityEvent, requestID: UUID) {
+    guard activeRequest?.id == requestID, var updated = activity else { return }
+    updated.apply(event)
+    guard updated != activity else { return }
+    activity = updated
+    guard activeRequest?.id == requestID, let messageID = activityMessageID,
+          let sessionIndex = sessions.firstIndex(where: { $0.messages.contains(where: { $0.id == messageID }) }),
+          let messageIndex = sessions[sessionIndex].messages.firstIndex(where: { $0.id == messageID }) else { return }
+    sessions[sessionIndex].messages[messageIndex].activity = updated
+  }
+
   private func beginGeneration(route: Route, modelDisplayName: String) -> ActiveRequest {
     let request = ActiveRequest(id: UUID(), route: route, modelDisplayName: modelDisplayName)
     pendingUserMessage = nil
     hasReceivedResponse = false
     activeRequest = request
+    activityMessageID = nil
+    activity = AssistantActivity(id: request.id)
     return request
   }
 
   private func finishGeneration(id: UUID, error: Error? = nil) {
     guard activeRequest?.id == id else { return }
+    receiveActivity(.phase(error == nil ? .completed : .failed), requestID: id)
     activeRequest = nil
+    activity = nil
+    activityMessageID = nil
     pendingUserMessage = nil
     generationTask = nil
     state = error.map { .failed($0.localizedDescription) } ?? .idle
