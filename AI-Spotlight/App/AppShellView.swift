@@ -1724,7 +1724,7 @@ struct ThinkingStatusView: View {
 
   var body: some View {
     HStack(spacing: 2) {
-      ElasticJuggleView().frame(width: 80, height: 64).accessibilityHidden(true)
+      EnigmaCoalescenceView().frame(width: 80, height: 64).accessibilityHidden(true)
       Text(text)
         .font(.system(size: 14, weight: .medium))
         .foregroundStyle(.secondary)
@@ -1748,7 +1748,7 @@ struct ThinkingStatusView: View {
   }
 }
 
-private struct ElasticJuggleView: NSViewRepresentable {
+private struct EnigmaCoalescenceView: NSViewRepresentable {
   func makeNSView(context: Context) -> WKWebView {
     let configuration = WKWebViewConfiguration()
     configuration.websiteDataStore = .nonPersistent()
@@ -1760,10 +1760,10 @@ private struct ElasticJuggleView: NSViewRepresentable {
 
   func updateNSView(_ view: WKWebView, context: Context) {
     guard view.identifier == nil else { return }
-    guard let asset = NSDataAsset(name: "ElasticJuggle"), let svg = String(data: asset.data, encoding: .utf8) else { return }
-    view.identifier = NSUserInterfaceItemIdentifier("elastic-juggle")
+    guard let asset = NSDataAsset(name: "EnigmaCoalescence"), let svg = String(data: asset.data, encoding: .utf8) else { return }
+    view.identifier = NSUserInterfaceItemIdentifier("enigma-coalescence")
     // This indicator always animates; override the supplied SVG's still fallback.
-    let motionStyle = ".ej-motion { display: inline !important; } .ej-still { display: none !important; }"
+    let motionStyle = ".ec-motion { display: inline !important; } .ec-still { display: none !important; }"
     view.loadHTMLString("<html><head><meta name='viewport' content='width=device-width'><style>html,body{margin:0;width:100%;height:100%;overflow:hidden;background:transparent}svg{width:100%;height:100%}body{pointer-events:none}\(motionStyle)</style></head><body>\(svg)</body></html>", baseURL: nil)
   }
 }
