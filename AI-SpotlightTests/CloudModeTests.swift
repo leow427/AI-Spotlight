@@ -378,12 +378,13 @@ final class CloudModeTests: XCTestCase {
   }
 
   private func waitUntil(
-    _ condition: @escaping @Sendable () -> Bool,
-    iterations: Int = 1_000
+    _ condition: @escaping @Sendable () -> Bool
   ) async {
-    for _ in 0..<iterations {
+    // Scheduler yields do not provide a time budget on a busy CI runner.
+    let deadline = ContinuousClock.now.advanced(by: .seconds(5))
+    while ContinuousClock.now < deadline {
       if condition() { return }
-      await Task.yield()
+      try? await Task.sleep(for: .milliseconds(10))
     }
     XCTFail("Condition was not satisfied")
   }
