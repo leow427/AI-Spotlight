@@ -88,8 +88,13 @@ be applied; formatting failures show a notice instead. No keyword-based rewrite
 workflow or separate intent-classification model is used. Local, cloud, vision,
 Auto and File Mode share this request formatting; web-search query refinement
 receives the latest draft as source material without the editing-output protocol.
-Revision state and formatting metadata are session-only. Model compliance with
-this format affects whether a card can be produced.
+Revision state and formatting metadata are session-only. If a completed response
+omits the revision block (including a list of options), one additional request to
+the same model interprets the user's intent and prepares a single revision as JSON.
+It includes the original selection, conversation and latest manually edited draft.
+An explicit `answer` result leaves ordinary conversation unchanged. Invalid recovery
+shows a visible notice; it never treats arbitrary prose as replacement text or
+retries a paste. This recovery can add latency and still depends on model compliance.
 
 Capture still occurs only on double-Option (or the configured backup). Bounded
 readiness retries allow an editor time to expose a fresh AX selection. Cmd+C may
@@ -149,3 +154,11 @@ acknowledgement, so unusually delayed apps may not receive the temporary text.
 
 API references: [Apple AXSelectedText](https://developer.apple.com/documentation/applicationservices/kaxselectedtextattribute)
 and [Apple event monitoring](https://developer.apple.com/library/archive/documentation/Cocoa/Conceptual/EventOverview/MonitoringEvents/MonitoringEvents.html).
+
+The September 10 recovery fix was exercised against the installed Google Gemma 4
+12B model in Auto mode with synthetic text: “make the text sound more professional”
+produced a revision card. The real model also converted a deliberately unformatted
+options response into a valid single revision. Neither check pasted into a source
+application. Run this opt-in check with `TEST_RUNNER_ENIGMA_SELECTION_MODEL_SMOKE=1`
+and `scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/SelectionContextTests/testInstalledGemmaAutoProducesRevisionCard'`
+when that model is selected locally.

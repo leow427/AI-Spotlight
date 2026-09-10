@@ -23,6 +23,83 @@ final class SelectionContextTests: XCTestCase {
     observation.cancel()
   }
 
+  func testInstalledGemmaAutoProducesRevisionCard() async throws {
+    guard ProcessInfo.processInfo.environment["ENIGMA_SELECTION_MODEL_SMOKE"] == "1" else {
+      throw XCTSkip("Opt in to exercise installed Gemma with a synthetic selection.")
+    }
+    let engine = LlamaCPPModelEngine()
+    let model = await engine.installedModel()
+    XCTAssertTrue(model?.id.contains("12b") == true)
+    let vision = LlamaServerVisionEngine()
+    let chat = LocalChatViewModel(engine: engine, selectionEditingSettings: revisionSettings(),
+      replaceSelection: { _, _ in XCTFail("Live smoke must not paste"); return false },
+      visionEngine: vision,
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    await chat.refreshInstalledModel()
+    chat.startTemporaryChat(context: ConversationContext(sourceName: "Test editor", text: "hey team, send me that report today cuz i need it for the meeting. thanks"))
+    let done = expectation(description: "real Gemma revision")
+    let observation = chat.$activeRequest.dropFirst().sink { if $0 == nil { done.fulfill() } }
+    chat.submitAuto("make the text sound more professional", cloud: nil)
+    await fulfillment(of: [done], timeout: 180)
+    observation.cancel()
+    let revision = chat.selectionRevisions.values.first
+    XCTAssertNotNil(revision, "Missing card; response: \(chat.messages.last?.content ?? "none"); notice: \(chat.contextNotice ?? "none")")
+    XCTAssertFalse(revision?.text.isEmpty ?? true)
+    // Exercise real model recovery too, even when its first response follows the format.
+    var recovery = ChatMessage(role: .user, content: SelectionRevisionResponse.recoveryInstructions)
+    recovery.contexts = chat.attachedContexts
+    let history = [ChatMessage(role: .user, content: "make the text sound more professional"),
+      ChatMessage(role: .assistant, content: "Here are three options: formal, friendly, or concise."), recovery]
+    let installed = try XCTUnwrap(model)
+    let prepared = try await vision.prepare(messages: history, image: nil, model: installed)
+    let output = try await ScreenSearchContext.collect(vision.stream(messages: prepared.messages, image: nil, model: installed, temperature: 0), maximumBytes: 300_000)
+    if case .revision(let recovered) = SelectionRevisionResponse.recover(output) {
+      XCTAssertFalse(recovered.text.isEmpty)
+    } else { XCTFail("Gemma recovery failed: \(output)") }
+    _ = chat.stopStreaming()
+    await vision.unload()
+    await engine.unload()
+  }
+
+  func testOptionsResponseRecoversOneEditableRevisionOnLocalAndCloud() async throws {
+    for cloud in [false, true] {
+      let recovered = "{\"operation\":\"replace_selection\",\"text\":\"Please send the report at your earliest convenience.\"}"
+      let options = "Here are several options:\n1. Formal wording\n2. Friendly wording"
+      let engine = SelectionTestEngine(output: options, recovery: recovered)
+      let provider = SelectionTestCloud(output: options, recovery: recovered)
+      var pastes: [String] = []
+      let chat = LocalChatViewModel(engine: engine, selectionEditingSettings: revisionSettings(),
+        replaceSelection: { text, _ in pastes.append(text); return true },
+        cloudProviders: CloudProviderRegistry(openAI: provider, anthropic: provider, chatGPT: provider, gemini: provider),
+        sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+      chat.startTemporaryChat(context: ConversationContext(sourceName: "Google Chrome", text: "send report now"))
+      await completeRevisionRequest(chat, prompt: "make the text sound more professional", cloud: cloud)
+      let message = try XCTUnwrap(chat.messages.last)
+      let revision = try XCTUnwrap(chat.selectionRevisions[message.id])
+      XCTAssertEqual(revision.text, "Please send the report at your earliest convenience.")
+      XCTAssertFalse(chat.selectionDisplayMessage(message).content.contains("options"))
+      XCTAssertTrue(pastes.isEmpty)
+      await chat.applySelectionRevision(messageID: message.id)
+      XCTAssertEqual(pastes, [revision.text])
+      let request = cloud ? provider.requests.last?.messages.last : engine.lastRequest?.messages.last
+      XCTAssertTrue(request?.content.contains("send report now") == true)
+      XCTAssertFalse(request?.content.contains(SelectionRevisionResponse.instructions) == true)
+    }
+  }
+
+  func testFailedRecoveryShowsNoticeWithoutPastingOrRecursing() async {
+    let provider = SelectionTestCloud(output: "Here are some options", recovery: "Still some options")
+    let chat = LocalChatViewModel(engine: SelectionTestEngine(), selectionEditingSettings: revisionSettings(automatic: true),
+      replaceSelection: { _, _ in XCTFail("Invalid recovery must not paste"); return true },
+      cloudProviders: CloudProviderRegistry(openAI: provider, anthropic: provider, chatGPT: provider, gemini: provider),
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    chat.startTemporaryChat(context: ConversationContext(sourceName: "Word", text: "original"))
+    await completeRevisionRequest(chat, cloud: true)
+    XCTAssertEqual(provider.requests.count, 2)
+    XCTAssertTrue(chat.selectionRevisions.isEmpty)
+    XCTAssertTrue(chat.contextNotice?.contains("could not prepare") == true)
+  }
+
   func testRevisionProtocolSeparatesAcknowledgementAndRejectsPartialOrOrdinaryAnswers() {
     let parsed = SelectionRevisionResponse.parse(revisionOutput)
     XCTAssertEqual(parsed?.text, "Hello team, please send the report today.")
@@ -599,11 +676,12 @@ import Combine
 
 private final class SelectionTestEngine: LocalModelEngine, @unchecked Sendable {
   private let output: String
+  private let recovery: String
   private let fail: Bool
   private let hold: Bool
   private var held: AsyncThrowingStream<String, Error>.Continuation?
-  init(output: String = "Transformed text", fail: Bool = false, hold: Bool = false) {
-    self.output = output; self.fail = fail; self.hold = hold
+  init(output: String = "Transformed text", fail: Bool = false, hold: Bool = false, recovery: String = "{\"operation\":\"answer\"}") {
+    self.recovery = recovery; self.output = output; self.fail = fail; self.hold = hold
   }
   func finishHeldStream() { lock.withLock { held?.finish(); held = nil } }
   private let lock = NSLock()
@@ -618,7 +696,7 @@ private final class SelectionTestEngine: LocalModelEngine, @unchecked Sendable {
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> {
     lock.withLock { requests.append(request) }
     return AsyncThrowingStream { continuation in
-      continuation.yield(output)
+      continuation.yield(request.prompt.contains(SelectionRevisionResponse.recoveryInstructions) ? recovery : output)
       if hold { lock.withLock { held = continuation } }
       else if fail { continuation.finish(throwing: LocalInferenceError.invalidModelFile) }
       else { continuation.finish() }
@@ -628,7 +706,8 @@ private final class SelectionTestEngine: LocalModelEngine, @unchecked Sendable {
 
 private final class SelectionTestCloud: ChatProvider, @unchecked Sendable {
   private let output: String
-  init(output: String = "A normal response") { self.output = output }
+  private let recovery: String
+  init(output: String = "A normal response", recovery: String = "{\"operation\":\"answer\"}") { self.output = output; self.recovery = recovery }
   private let lock = NSLock()
   private var stored: [ChatRequest] = []
   var requests: [ChatRequest] { lock.withLock { stored } }
@@ -636,7 +715,7 @@ private final class SelectionTestCloud: ChatProvider, @unchecked Sendable {
     lock.withLock { stored.append(request) }
     let query = request.messages.last?.content.contains("Create one concise web search query") == true
     return AsyncThrowingStream { continuation in
-      continuation.yield(.token(query ? "Moon composition evidence" : output))
+      continuation.yield(.token(query ? "Moon composition evidence" : request.messages.last?.content.contains(SelectionRevisionResponse.recoveryInstructions) == true ? recovery : output))
       continuation.yield(.completed)
       continuation.finish()
     }

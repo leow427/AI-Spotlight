@@ -411,7 +411,7 @@ final class LocalChatViewModel: ObservableObject {
       if local { await fileInference.unload() }
       await files.finish(workspace: fileTools.workspace)
       if let failure, self?.activeRequest?.id == active.id { files.error = failure.localizedDescription }
-      self?.finishGeneration(id: active.id, error: failure)
+      await self?.finishGeneration(id: active.id, error: failure)
     }
     onAccepted()
   }
@@ -502,11 +502,11 @@ final class LocalChatViewModel: ObservableObject {
           self.append(fragment, to: responseID, in: sessionID)
         }
         try Task.checkCancellation()
-        self?.finishGeneration(id: active.id)
+        await self?.finishGeneration(id: active.id)
       } catch is CancellationError {
-        self?.finishGeneration(id: active.id)
+        await self?.finishGeneration(id: active.id)
       } catch {
-        self?.finishGeneration(id: active.id, error: error)
+        await self?.finishGeneration(id: active.id, error: error)
       }
     }
   }
@@ -691,11 +691,11 @@ final class LocalChatViewModel: ObservableObject {
             throw error
           }
         }
-        owner.finishGeneration(id: active.id)
+        await owner.finishGeneration(id: active.id)
       } catch is CancellationError {
-        owner.finishGeneration(id: active.id)
+        await owner.finishGeneration(id: active.id)
       } catch {
-        owner.finishGeneration(id: active.id, error: error)
+        await owner.finishGeneration(id: active.id, error: error)
       }
     }
   }
@@ -793,11 +793,11 @@ final class LocalChatViewModel: ObservableObject {
           }
         }
         try Task.checkCancellation()
-        self?.finishGeneration(id: active.id)
+        await self?.finishGeneration(id: active.id)
       } catch is CancellationError {
-        self?.finishGeneration(id: active.id)
+        await self?.finishGeneration(id: active.id)
       } catch {
-        self?.finishGeneration(id: active.id, error: error)
+        await self?.finishGeneration(id: active.id, error: error)
       }
     }
     // Install the handle before calling out: acceptance may synchronously Stop or start a new chat.
@@ -847,11 +847,11 @@ final class LocalChatViewModel: ObservableObject {
           }
         }
         try Task.checkCancellation()
-        owner.finishGeneration(id: active.id)
+        await owner.finishGeneration(id: active.id)
       } catch is CancellationError {
-        self?.finishGeneration(id: active.id)
+        await self?.finishGeneration(id: active.id)
       } catch {
-        self?.finishGeneration(id: active.id, error: error)
+        await self?.finishGeneration(id: active.id, error: error)
       }
     }
   }
@@ -1124,7 +1124,61 @@ final class LocalChatViewModel: ObservableObject {
     if !sent && revision.automatic { contextNotice = "Automatic replacement was not sent. Select the source text again and retry." }
   }
 
-  private func finishGeneration(id: UUID, error: Error? = nil) {
+  private func recoverSelectionResponse(active: ActiveRequest) async throws -> SelectionRevisionResponse.Recovery? {
+    // One bounded model recovery, using the same provider and context. Never retry a paste.
+    var instruction = contextualMessage(SelectionRevisionResponse.recoveryInstructions, editing: false)
+    if let draft = instruction.selectionDraft {
+      instruction.contexts?.append(ConversationContext(kind: .file, sourceName: "Latest proposed revision", text: draft))
+    }
+    let history = requestMessages + [instruction]
+    let stream: AsyncThrowingStream<String, Error>
+    if active.route.mode == .local {
+      guard let model = await engine.installedModel(), model.id == active.route.modelID else {
+        throw LocalInferenceError.noModelInstalled
+      }
+      if model.supportsVision {
+        let prepared = try await visionEngine.prepare(messages: history, image: nil, model: model)
+        stream = visionEngine.stream(messages: prepared.messages, image: nil, model: model, temperature: 0)
+      } else {
+        let prepared = try await engine.prepare(LocalModelRequest(messages: history))
+        stream = engine.stream(LocalModelRequest(messages: prepared.messages, temperature: 0))
+      }
+    } else {
+      guard let providerID = CloudProviderID(rawValue: active.route.providerID) else { throw CloudProviderError.invalidResponse }
+      let prepared = try CloudContext.prepare(ChatRequest(sessionID: selectedSessionID ?? UUID(), messages: history, route: active.route))
+      stream = cloudProviders.provider(for: providerID).textStream(ChatRequest(
+        sessionID: selectedSessionID ?? UUID(), messages: prepared.messages, route: active.route))
+    }
+    return SelectionRevisionResponse.recover(try await ScreenSearchContext.collect(stream, maximumBytes: 300_000))
+  }
+
+  private func finishGeneration(id: UUID, error: Error? = nil) async {
+    if error == nil, !Task.isCancelled, let active = activeRequest, active.id == id,
+       let editing = selectionEditRequest, editing.id == id,
+       attachedContexts.contains(where: { $0.id == editing.contextID }),
+       let message = messages.last, message.role == .assistant, !message.content.isEmpty,
+       !message.content.contains(SelectionRevisionResponse.opening) {
+      do {
+        let recovery = try await recoverSelectionResponse(active: active)
+        try Task.checkCancellation()
+        guard activeRequest?.id == id else { return }
+        if selectionEditRequest?.id == id, attachedContexts.contains(where: { $0.id == editing.contextID }) {
+          switch recovery {
+          case .revision(let response):
+            if let sessionIndex = sessions.firstIndex(where: { $0.id == selectedSessionID }),
+               let index = sessions[sessionIndex].messages.firstIndex(where: { $0.id == message.id }) {
+              sessions[sessionIndex].messages[index].content = response.formatted
+            }
+          case .answer: break
+          case nil: contextNotice = "The model could not prepare a revised-text card. Ask it to try again."
+          }
+        }
+      } catch {
+        if !Task.isCancelled, activeRequest?.id == id, selectionEditRequest?.id == id {
+          contextNotice = "The revised-text card could not be prepared. Please try again."
+        }
+      }
+    }
     guard activeRequest?.id == id else { return }
     if error == nil, !Task.isCancelled, let editing = selectionEditRequest, editing.id == id,
        attachedContexts.contains(where: { $0.id == editing.contextID }), let message = messages.last, message.role == .assistant {
