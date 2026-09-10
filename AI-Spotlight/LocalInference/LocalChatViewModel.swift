@@ -48,6 +48,13 @@ final class LocalChatViewModel: ObservableObject {
   private let modelAdvisor: LocalModelAdvisor?
 
   @Published private(set) var attachedContexts: [ConversationContext] = []
+  @Published private(set) var selectionRevisions: [UUID: SelectionRevision] = [:]
+  @Published private(set) var isApplyingSelection = false
+  private let selectionEditingSettings: SelectionEditingSettings
+  private let replaceSelection: @MainActor (String, UUID) async -> Bool
+  private var selectionEditRequest: (id: UUID, contextID: UUID, automatic: Bool)?
+  private var replacementTask: Task<Void, Never>?
+  private var selectionSettingsObservation: AnyCancellable?
   private var temporarySessionID: UUID?
   var isTemporaryChat: Bool { selectedSessionID != nil && selectedSessionID == temporarySessionID }
   var messages: [ChatMessage] { selectedSession?.messages ?? [] }
@@ -56,16 +63,22 @@ final class LocalChatViewModel: ObservableObject {
     var copy = message
     // The current attachment is authoritative. Removing it also removes it from future requests.
     copy.contexts = nil
+    copy.selectionEditingEnabled = false
+    copy.selectionDraft = nil
     return copy
   } }
 
-  private func contextualMessage(_ prompt: String) -> ChatMessage {
+  private func contextualMessage(_ prompt: String, editing: Bool = true) -> ChatMessage {
     var message = ThinkCommand.message(prompt)
     message.contexts = attachedContexts.isEmpty ? nil : attachedContexts
+    message.selectionEditingEnabled = editing && attachedContexts.contains { $0.kind == .selectedText }
+    message.selectionDraft = messages.reversed().compactMap { selectionRevisions[$0.id]?.text }.first
     return message
   }
 
   func removeContext(id: UUID) {
+    replacementTask?.cancel()
+    selectionEditRequest = nil
     attachedContexts.removeAll { $0.id == id }
     SelectionContextService.shared.discardTarget()
   }
@@ -87,6 +100,9 @@ final class LocalChatViewModel: ObservableObject {
   }
 
   private func discardTemporaryChat() {
+    replacementTask?.cancel(); replacementTask = nil
+    selectionEditRequest = nil
+    selectionRevisions = [:]
     if let temporarySessionID { sessions.removeAll { $0.id == temporarySessionID } }
     temporarySessionID = nil
     attachedContexts = []
@@ -108,7 +124,7 @@ final class LocalChatViewModel: ObservableObject {
 
   var isBusy: Bool {
     // A persistence error must not make a live request accept another submission.
-    if activeRequest != nil || generationTask != nil || installationTask != nil || files.isWorking || files.isPicking { return true }
+    if isApplyingSelection || activeRequest != nil || generationTask != nil || installationTask != nil || files.isWorking || files.isPicking { return true }
     switch state {
     case .installing, .deleting, .downloading, .benchmarking, .preparing, .refiningSearch, .searching, .streaming: return true
     case .idle, .failed: return false
@@ -133,6 +149,8 @@ final class LocalChatViewModel: ObservableObject {
 
   init(
     engine: any LocalModelEngine,
+    selectionEditingSettings: SelectionEditingSettings = .shared,
+    replaceSelection: @escaping @MainActor (String, UUID) async -> Bool = { await SelectionContextService.shared.replace(with: $0, contextID: $1) },
     files: FileModeCoordinator? = nil,
     fileInference: (any LocalToolInference)? = nil,
     fileCodex: CodexSubscriptionClient = .fileMode,
@@ -146,6 +164,8 @@ final class LocalChatViewModel: ObservableObject {
     idleUnloadDelay: Duration = .seconds(300),
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
   ) {
+    self.selectionEditingSettings = selectionEditingSettings
+    self.replaceSelection = replaceSelection
     self.engine = engine
     self.files = files ?? FileModeCoordinator()
     self.fileInference = fileInference ?? (visionEngine as? any LocalToolInference) ?? LlamaServerVisionEngine()
@@ -174,6 +194,13 @@ final class LocalChatViewModel: ObservableObject {
       guard let index = self.sessions.firstIndex(where: { $0.id == sessionID }) else { return }
       self.sessions[index].workspace = selection
       self.persistSessions()
+    }
+    selectionSettingsObservation = selectionEditingSettings.$automaticallyReplace.dropFirst().sink { [weak self] enabled in
+      guard !enabled, let self else { return }
+      self.replacementTask?.cancel()
+      for id in Array(self.selectionRevisions.keys) where self.selectionRevisions[id]?.status != .sent {
+        self.selectionRevisions[id]?.automatic = false
+      }
     }
   }
 
@@ -397,7 +424,7 @@ final class LocalChatViewModel: ObservableObject {
 
   func shouldSearch(_ prompt: String, explicitlyEnabled: Bool) -> Bool {
     explicitlyEnabled || (searchSettings?.canSearchAutomatically == true
-      && WebSearchPolicy.needsFreshInformation(ConversationContextPrompt.expand(contextualMessage(prompt)).content))
+      && WebSearchPolicy.needsFreshInformation(ConversationContextPrompt.expand(contextualMessage(prompt, editing: false)).content))
   }
 
   func submit(_ prompt: String, searchEnabled: Bool = false, onAccepted: @escaping @MainActor () -> Void = {}) {
@@ -842,7 +869,7 @@ final class LocalChatViewModel: ObservableObject {
     let decision = (searchEnabled || AutoRouter.shouldRun(for: .auto, cloud: cloud))
       ? AutoRouter.decide(AutoRouter.Request(
         selectedMode: .auto, webSearchEnabled: searchEnabled,
-        prompt: ConversationContextPrompt.expand(contextualMessage(prompt)).content, contextMessages: requestMessages,
+        prompt: ConversationContextPrompt.expand(contextualMessage(prompt, editing: false)).content, contextMessages: requestMessages,
         localModel: installedModel, cloud: cloud
       ))
       : AutoRouter.localFallback(localModel: installedModel)
@@ -1009,6 +1036,9 @@ final class LocalChatViewModel: ObservableObject {
         "Create one concise web search query that helps answer the user's question about the attached context. "
         + "Return only the query, without quotes or commentary. Question: " + query)
       message.contexts = attachedContexts
+      if let draft = messages.reversed().compactMap({ selectionRevisions[$0.id]?.text }).first {
+        message.contexts?.append(ConversationContext(sourceName: "Proposed revision", text: draft))
+      }
       let prepared: PreparedConversation
       let stream: AsyncThrowingStream<String, Error>
       if active.route.mode == .local {
@@ -1060,13 +1090,56 @@ final class LocalChatViewModel: ObservableObject {
     pendingUserMessage = nil
     hasReceivedResponse = false
     activeRequest = request
+    selectionEditRequest = attachedContexts.first(where: { $0.kind == .selectedText }).map {
+      (request.id, $0.id, selectionEditingSettings.automaticallyReplace)
+    }
     activityMessageID = nil
     activity = AssistantActivity(id: request.id)
     return request
   }
 
+  func selectionDisplayMessage(_ message: ChatMessage) -> ChatMessage {
+    guard isTemporaryChat, message.role == .assistant, !attachedContexts.isEmpty || selectionRevisions[message.id] != nil else { return message }
+    var copy = message
+    copy.content = SelectionRevisionResponse.visibleText(message.content, streaming: activeRequest != nil)
+    return copy
+  }
+
+  func updateSelectionRevision(messageID: UUID, text: String) {
+    guard selectionRevisions[messageID]?.status == .ready || selectionRevisions[messageID]?.status == .failed else { return }
+    selectionRevisions[messageID]?.text = text
+  }
+
+  func applySelectionRevision(messageID: UUID) async {
+    guard !Task.isCancelled, activeRequest == nil, !isApplyingSelection, let revision = selectionRevisions[messageID],
+          revision.status == .ready || revision.status == .failed,
+          attachedContexts.contains(where: { $0.id == revision.contextID }), !revision.text.isEmpty else { return }
+    if revision.automatic && !selectionEditingSettings.automaticallyReplace { return }
+    isApplyingSelection = true
+    selectionRevisions[messageID]?.status = .applying
+    defer { isApplyingSelection = false }
+    let sent = await replaceSelection(revision.text, revision.contextID)
+    guard selectionRevisions[messageID]?.contextID == revision.contextID else { return }
+    selectionRevisions[messageID]?.status = sent ? .sent : .failed
+    if !sent && revision.automatic { contextNotice = "Automatic replacement was not sent. Select the source text again and retry." }
+  }
+
   private func finishGeneration(id: UUID, error: Error? = nil) {
     guard activeRequest?.id == id else { return }
+    if error == nil, !Task.isCancelled, let editing = selectionEditRequest, editing.id == id,
+       attachedContexts.contains(where: { $0.id == editing.contextID }), let message = messages.last, message.role == .assistant {
+      if let response = SelectionRevisionResponse.parse(message.content) {
+        let automatic = editing.automatic && selectionEditingSettings.automaticallyReplace
+        selectionRevisions[message.id] = SelectionRevision(id: message.id, contextID: editing.contextID,
+          text: response.text, automatic: automatic)
+        if automatic {
+          replacementTask = Task { [weak self] in await self?.applySelectionRevision(messageID: message.id) }
+        }
+      } else if message.content.contains(SelectionRevisionResponse.opening) {
+        contextNotice = "The model did not return a complete revision. Ask it to try again."
+      }
+    }
+    selectionEditRequest = nil
     receiveActivity(.phase(error == nil ? .completed : .failed), requestID: id)
     activeRequest = nil
     activity = nil

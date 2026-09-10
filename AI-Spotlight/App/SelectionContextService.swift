@@ -68,13 +68,23 @@ final class SelectionContextService: ObservableObject {
     }
     let application = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(application, 0.15)
-    guard !IsSecureEventInputEnabled(), let element = element(application, kAXFocusedUIElementAttribute),
-          isSafe(element) else { return nil }
-    let range = selectedRange(element)
+    let mayCapture = {
+      !Task.isCancelled && !interaction.interrupted && !IsSecureEventInputEnabled()
+        && NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
+    }
+    guard let element = await SelectionCaptureRetry.first(mayContinue: mayCapture,
+      read: { self.element(application, kAXFocusedUIElementAttribute) }), isSafe(element) else { return nil }
     let document = webDocument(element)
-    var text = selectedText(element)
-    // Some editors expose a text range but not AXSelectedText.
-    if text == nil, let range { text = textForRange(element, range: range) }
+    let selection = await SelectionCaptureRetry.first(mayContinue: {
+      mayCapture() && self.sameFocus(app: app, element: element) && self.isSafe(element)
+    }, read: { () -> (CFRange?, String)? in
+      let range = self.selectedRange(element)
+      let text = self.selectedText(element) ?? range.flatMap { self.textForRange(element, range: $0) }
+      guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+      return (range, text)
+    })
+    let range = selection?.0 ?? selectedRange(element)
+    var text = selection?.1
     if text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true || (document != nil && (range?.length ?? 0) == 0) {
       guard SelectionCapturePolicy.allowsCopy(range: range, bundleID: app.bundleIdentifier) else { return nil }
       text = await copySelection(app: app, element: element)
@@ -162,16 +172,22 @@ final class SelectionContextService: ObservableObject {
     board.setString(UUID().uuidString, forType: marker)
     var ownedCount = board.changeCount
     defer { snapshot.restore(board, ifUnchanged: ownedCount) }
-    postCommand(key: 8, pid: app.processIdentifier)
-    for _ in 0..<30 {
-      try? await Task.sleep(for: .milliseconds(20))
-      guard !interaction.interrupted, sameFocus(app: app, element: element), isSafe(element) else { return nil }
-      if board.changeCount != ownedCount {
-        // A second writer must win: never restore over a newer user clipboard.
-        guard board.changeCount == ownedCount + 1 else { return nil }
-        ownedCount = board.changeCount
-        return board.string(forType: .string)
+    for _ in 0..<2 {
+      guard !Task.isCancelled, !interaction.interrupted, sameFocus(app: app, element: element), isSafe(element),
+            board.changeCount == ownedCount else { return nil }
+      guard postCommand(key: 8, pid: app.processIdentifier) else { return nil }
+      for _ in 0..<20 {
+        try? await Task.sleep(for: .milliseconds(20))
+        guard !Task.isCancelled, !interaction.interrupted, sameFocus(app: app, element: element), isSafe(element) else { return nil }
+        if board.changeCount != ownedCount {
+          // Never retry after any clipboard write, or restore over a newer copy.
+          guard board.changeCount == ownedCount + 1 else { return nil }
+          ownedCount = board.changeCount
+          return board.string(forType: .string)
+        }
       }
+      // A single retry handles an editor that was not ready for the first Cmd+C.
+      // The source is still focused and the marker has not been consumed.
     }
     return nil
   }
@@ -275,6 +291,20 @@ enum SelectionPanelPlacement {
   }
 }
 
+/// Bounded readiness retries occur only inside a deliberate invocation.
+@MainActor
+enum SelectionCaptureRetry {
+  static func first<Value>(mayContinue: () -> Bool, read: () -> Value?,
+                           wait: () async -> Void = { try? await Task.sleep(for: .milliseconds(30)) }) async -> Value? {
+    for attempt in 0..<3 {
+      guard !Task.isCancelled, mayContinue() else { return nil }
+      if let value = read() { return value }
+      if attempt < 2 { await wait() }
+    }
+    return nil
+  }
+}
+
 /// One process-targeted paste with a lossless, ownership-aware clipboard restore.
 /// The injectable operations keep transaction ordering and failure paths testable
 /// without sending keyboard events to real applications during unit tests.
@@ -286,8 +316,8 @@ enum SelectionPasteTransaction {
                       isAvailable: () -> Bool, activate: () async -> Bool,
                       isSafeToPaste: () -> Bool, postPaste: (pid_t) -> Bool,
                       settle: () async -> Void) async -> Outcome {
-    guard !text.isEmpty, text.utf8.count <= 256_000, isAvailable(), await activate(),
-          isAvailable(), isSafeToPaste() else { return .unavailable }
+    guard !Task.isCancelled, !text.isEmpty, text.utf8.count <= 256_000, isAvailable(), await activate(),
+          !Task.isCancelled, isAvailable(), isSafeToPaste() else { return .unavailable }
     guard let snapshot = SelectionPasteboardSnapshot(board) else { return .clipboardUnavailable }
     board.clearContents()
     var ownedCount = board.changeCount

@@ -63,7 +63,42 @@ uses change-count ownership, so a subsequent user clipboard write wins. Keyboard
 mouse, scroll and focus changes abort capture. Synthetic events are
 addressed to the source process and marked to distinguish them from user input.
 
-Replace Selection opens an editable preview and requires an explicit second click.
+## Revision cards and automatic replacement
+
+When the user asks to revise the selected text, the model gives a short
+acknowledgement followed by a separate **Revised text** card. **Edit** turns the
+card into an editable draft; **Done** returns to its preview. **Replace text**
+pastes that draft with one click. Follow-up requests receive the latest proposed
+revision, including manual changes. Each response retains its own draft in the
+temporary conversation. Normal questions, explanations, and verification requests
+remain ordinary conversation responses.
+
+**Settings → Selection Context → Automatically replace selected text** is off by
+default. When enabled before a request begins, a successfully completed revision
+is pasted directly, with no revision card or confirmation click. It never applies
+ordinary responses, malformed/incomplete revisions, failed or cancelled requests,
+or a response whose context has been removed. Turning the setting on does not
+apply responses already in progress; turning it off cancels pending automatic
+work and makes unsent drafts available for manual review.
+
+The provider-neutral prompt asks the model to choose whether a revision is
+appropriate, then emit acknowledgement plus one explicit JSON revision payload.
+The UI hides that payload while streaming. Only a valid completed payload can
+be applied; formatting failures show a notice instead. No keyword-based rewrite
+workflow or separate intent-classification model is used. Local, cloud, vision,
+Auto and File Mode share this request formatting; web-search query refinement
+receives the latest draft as source material without the editing-output protocol.
+Revision state and formatting metadata are session-only. Model compliance with
+this format affects whether a card can be produced.
+
+Capture still occurs only on double-Option (or the configured backup). Bounded
+readiness retries allow an editor time to expose a fresh AX selection. Cmd+C may
+retry once only if the clipboard marker remains untouched and the same safe source
+is still focused. These retries end on cancellation, user input or focus changes;
+there is no background selection monitoring.
+
+## Applying a revision
+
 Capture remembers the source application (including its PID) and the context ID.
 Replacement activates that same running application and sends one Cmd+V directly
 to its PID using CGEvent. The app's normal paste command acts on its **current**
@@ -71,7 +106,7 @@ selection or insertion point. There is no original AX element, range, text,
 document/URL, continuity, or expiry requirement. Moving the selection or opening
 another document in the same source app does not revoke replacement.
 
-The review sheet closes and the floating panel releases keyboard focus before the
+The floating panel releases keyboard focus before the
 source app is activated. Accessibility permission, a still-running source,
 successful activation, Secure Event Input, and the current field's password or
 protected status are checked. Unknown password status fails closed. No AX text
@@ -95,10 +130,20 @@ remain in place. Original-selection guard tests were replaced to reflect the
 explicitly requested September 9 change in behavior, not to hide failures.
 
 The September 8 signed Safari editor test verified the previous paste route.
-The simplified September 9 route has automated coverage; live Google Docs,
+The process-targeted paste route has automated coverage; live Google Docs,
 Gmail, and Word verification remains pending. Do not infer universal compatibility
 from unit tests. Safari was left alone at the user's request. Use the stably signed
 Xcode build for future interactive checks, never the unsigned verification host.
+The September 10 revision-card changes add coverage for acknowledgement/payload
+separation, local/manual follow-ups, cloud automatic application, draft-aware search,
+setting persistence, mid-response setting changes, cancelled/failed/incomplete
+responses, context removal, bounded readiness retries, and a native card render.
+A paste still consumes its source target to avoid repeating an ambiguous mutation.
+Refine drafts before applying them; to replace again after a successful paste,
+select the desired source text and invoke a fresh temporary chat.
+
+![Revision card](images/selection-revision-card.png)
+
 Some editors may delay or reject paste; the clipboard has no universal consumption
 acknowledgement, so unusually delayed apps may not receive the temporary text.
 

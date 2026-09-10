@@ -5,6 +5,230 @@ import XCTest
 
 @MainActor
 final class SelectionContextTests: XCTestCase {
+  private var revisionOutput: String {
+    "Sure—I’ll make it more professional.\n<enigma-revision>{\"operation\":\"replace_selection\",\"text\":\"Hello team, please send the report today.\"}</enigma-revision>"
+  }
+
+  private func revisionSettings(automatic: Bool = false) -> SelectionEditingSettings {
+    let settings = SelectionEditingSettings(defaults: UserDefaults(suiteName: UUID().uuidString)!)
+    settings.automaticallyReplace = automatic
+    return settings
+  }
+
+  private func completeRevisionRequest(_ chat: LocalChatViewModel, prompt: String = "Rewrite this professionally", cloud: Bool = false, search: Bool = false) async {
+    let done = expectation(description: "revision generation finished")
+    let observation = chat.$activeRequest.dropFirst().sink { if $0 == nil { done.fulfill() } }
+    if cloud { chat.submitCloud(prompt, provider: .chatGPT, modelID: "fixture", searchEnabled: search) } else { chat.submit(prompt, searchEnabled: search) }
+    await fulfillment(of: [done], timeout: 3)
+    observation.cancel()
+  }
+
+  func testRevisionProtocolSeparatesAcknowledgementAndRejectsPartialOrOrdinaryAnswers() {
+    let parsed = SelectionRevisionResponse.parse(revisionOutput)
+    XCTAssertEqual(parsed?.text, "Hello team, please send the report today.")
+    XCTAssertEqual(parsed?.acknowledgement, "Sure—I’ll make it more professional.")
+    XCTAssertNil(SelectionRevisionResponse.parse("Here is an explanation."))
+    XCTAssertNil(SelectionRevisionResponse.parse(String(revisionOutput.dropLast(5))))
+    XCTAssertNil(SelectionRevisionResponse.parse(revisionOutput + " extra text"))
+    XCTAssertNil(SelectionRevisionResponse.parse(revisionOutput + revisionOutput))
+    XCTAssertNil(SelectionRevisionResponse.parse(revisionOutput.replacingOccurrences(of: "replace_selection", with: "answer")))
+    XCTAssertEqual(SelectionRevisionResponse.visibleText("Sure.\n<enigma-rev"), "Sure.\n")
+    XCTAssertEqual(SelectionRevisionResponse.visibleText(revisionOutput), parsed?.acknowledgement)
+    XCTAssertEqual(SelectionRevisionResponse.visibleText("x <", streaming: false), "x <")
+  }
+
+  func testRevisionInstructionsAndDraftAreRequestOnlyAndExcludedFromSearchRefinement() throws {
+    var message = ChatMessage(role: .user, content: "Make it shorter")
+    message.contexts = [ConversationContext(sourceName: "Word", text: "original")]
+    message.selectionEditingEnabled = true
+    message.selectionDraft = "My manually edited draft"
+    let expanded = ConversationContextPrompt.expand(message)
+    XCTAssertTrue(expanded.content.contains(SelectionRevisionResponse.instructions))
+    XCTAssertTrue(expanded.content.contains("My manually edited draft"))
+    XCTAssertEqual(ConversationContextPrompt.expand(expanded), expanded)
+    XCTAssertEqual(message.content, "Make it shorter")
+    let decoded = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(message))
+    XCTAssertFalse(decoded.selectionEditingEnabled)
+    XCTAssertNil(decoded.selectionDraft)
+    message.selectionEditingEnabled = false
+    XCTAssertFalse(ConversationContextPrompt.expand(message).content.contains(SelectionRevisionResponse.instructions))
+  }
+
+  func testManualRevisionAndFollowupUseEditedDraftWithoutAutomaticPaste() async throws {
+    let engine = SelectionTestEngine(output: revisionOutput)
+    var pastes: [String] = []
+    let chat = LocalChatViewModel(engine: engine, selectionEditingSettings: revisionSettings(),
+      replaceSelection: { text, _ in pastes.append(text); return true },
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    chat.startTemporaryChat(context: ConversationContext(sourceName: "Word", text: "original selection"))
+    await completeRevisionRequest(chat)
+    let first = try XCTUnwrap(chat.messages.last)
+    XCTAssertEqual(chat.selectionDisplayMessage(first).content, "Sure—I’ll make it more professional.")
+    XCTAssertEqual(chat.selectionRevisions[first.id]?.text, "Hello team, please send the report today.")
+    XCTAssertTrue(pastes.isEmpty)
+    chat.updateSelectionRevision(messageID: first.id, text: "My manually edited draft")
+    await completeRevisionRequest(chat, prompt: "Make it warmer")
+    XCTAssertTrue(engine.lastRequest?.messages.last?.content.contains("My manually edited draft") == true)
+    let latest = try XCTUnwrap(chat.messages.last)
+    await chat.applySelectionRevision(messageID: latest.id)
+    await chat.applySelectionRevision(messageID: latest.id)
+    XCTAssertEqual(pastes, ["Hello team, please send the report today."])
+    XCTAssertEqual(chat.selectionRevisions[latest.id]?.status, .sent)
+    chat.newChat()
+    XCTAssertTrue(chat.selectionRevisions.isEmpty)
+  }
+
+  func testAutomaticCloudRevisionAppliesOnlyPayloadAndHidesTheCard() async throws {
+    let pasted = expectation(description: "automatic payload applied")
+    let provider = SelectionTestCloud(output: revisionOutput)
+    let context = ConversationContext(sourceName: "Google Chrome", text: "original")
+    let chat = LocalChatViewModel(engine: SelectionTestEngine(), selectionEditingSettings: revisionSettings(automatic: true),
+      replaceSelection: { text, id in
+        XCTAssertEqual(text, "Hello team, please send the report today.")
+        XCTAssertEqual(id, context.id)
+        pasted.fulfill(); return true
+      }, cloudProviders: CloudProviderRegistry(openAI: provider, anthropic: provider, chatGPT: provider, gemini: provider),
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    chat.startTemporaryChat(context: context)
+    await completeRevisionRequest(chat, cloud: true)
+    await fulfillment(of: [pasted], timeout: 3)
+    let revision = try XCTUnwrap(chat.selectionRevisions.values.first)
+    XCTAssertTrue(revision.automatic)
+    XCTAssertEqual(revision.status, .sent)
+    XCTAssertTrue(provider.requests.last?.messages.last?.content.contains(SelectionRevisionResponse.instructions) == true)
+  }
+
+  func testSearchRefinementReceivesManualRevisionWithoutEditingProtocol() async throws {
+    let provider = SelectionTestCloud(output: revisionOutput)
+    let chat = LocalChatViewModel(engine: SelectionTestEngine(), selectionEditingSettings: revisionSettings(),
+      replaceSelection: { _, _ in XCTFail("Manual preview must not paste"); return true },
+      cloudProviders: CloudProviderRegistry(openAI: provider, anthropic: provider, chatGPT: provider, gemini: provider),
+      webSearch: SelectionTestSearch(),
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    chat.startTemporaryChat(context: ConversationContext(sourceName: "Word", text: "original"))
+    await completeRevisionRequest(chat, cloud: true)
+    let message = try XCTUnwrap(chat.messages.last)
+    chat.updateSelectionRevision(messageID: message.id, text: "Manually revised claims about the Moon")
+    await completeRevisionRequest(chat, prompt: "Rewrite this using verified facts", cloud: true, search: true)
+    let query = try XCTUnwrap(provider.requests.first { $0.messages.last?.content.contains("Create one concise web search query") == true })
+    XCTAssertTrue(query.messages.last?.content.contains("Manually revised claims about the Moon") == true)
+    XCTAssertFalse(query.messages.last?.content.contains(SelectionRevisionResponse.instructions) == true)
+  }
+
+  func testAutomaticModeNeverAppliesOrdinaryPartialOrFailedResponses() async {
+    for (output, fail) in [("An explanation of the selection.", false), (String(revisionOutput.dropLast(5)), false), (revisionOutput, true)] {
+      let chat = LocalChatViewModel(engine: SelectionTestEngine(output: output, fail: fail), selectionEditingSettings: revisionSettings(automatic: true),
+        replaceSelection: { _, _ in XCTFail("Only a successfully completed revision may paste"); return true },
+        sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+      chat.startTemporaryChat(context: ConversationContext(sourceName: "Word", text: "original"))
+      await completeRevisionRequest(chat)
+      XCTAssertTrue(chat.selectionRevisions.isEmpty)
+    }
+  }
+
+  func testCancelledResponseCannotCreateRevisionEvenIfPayloadAlreadyStreamed() async {
+    let engine = SelectionTestEngine(output: revisionOutput, hold: true)
+    let chat = LocalChatViewModel(engine: engine, selectionEditingSettings: revisionSettings(automatic: true),
+      replaceSelection: { _, _ in XCTFail("Cancelled response must not paste"); return true },
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    chat.startTemporaryChat(context: ConversationContext(sourceName: "Word", text: "original"))
+    let streamed = expectation(description: "payload streamed")
+    let observation = chat.$hasReceivedResponse.dropFirst().sink { if $0 { streamed.fulfill() } }
+    chat.submit("Rewrite this")
+    await fulfillment(of: [streamed], timeout: 3)
+    observation.cancel()
+    let task = chat.stopStreaming()
+    engine.finishHeldStream()
+    await task?.value
+    XCTAssertTrue(chat.selectionRevisions.isEmpty)
+  }
+
+  func testEnablingAutomaticModeMidResponseDoesNotApplyThatResponse() async throws {
+    let settings = revisionSettings()
+    let engine = SelectionTestEngine(output: revisionOutput, hold: true)
+    let chat = LocalChatViewModel(engine: engine, selectionEditingSettings: settings,
+      replaceSelection: { _, _ in XCTFail("Enabling auto must not apply an already-started response"); return true },
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    chat.startTemporaryChat(context: ConversationContext(sourceName: "Word", text: "original"))
+    let streamed = expectation(description: "streaming before setting changes")
+    let done = expectation(description: "completed after setting changes")
+    let observation = chat.$hasReceivedResponse.dropFirst().sink { if $0 { streamed.fulfill() } }
+    let completion = chat.$activeRequest.dropFirst().sink { if $0 == nil { done.fulfill() } }
+    chat.submit("Rewrite this")
+    await fulfillment(of: [streamed], timeout: 3)
+    settings.automaticallyReplace = true
+    engine.finishHeldStream()
+    await fulfillment(of: [done], timeout: 3)
+    observation.cancel(); completion.cancel()
+    XCTAssertFalse(try XCTUnwrap(chat.selectionRevisions.values.first).automatic)
+  }
+
+  func testRemovedSelectionCannotProduceAnAutomaticRevision() async {
+    let engine = SelectionTestEngine(output: revisionOutput, hold: true)
+    let chat = LocalChatViewModel(engine: engine, selectionEditingSettings: revisionSettings(automatic: true),
+      replaceSelection: { _, _ in XCTFail("Removed context must not paste"); return true },
+      sessionStore: ChatSessionStore(applicationSupportDirectory: FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)))
+    let context = ConversationContext(sourceName: "Word", text: "original")
+    chat.startTemporaryChat(context: context)
+    let streamed = expectation(description: "stream before context removal")
+    let done = expectation(description: "finish after context removal")
+    let observation = chat.$hasReceivedResponse.dropFirst().sink { if $0 { streamed.fulfill() } }
+    let completion = chat.$activeRequest.dropFirst().sink { if $0 == nil { done.fulfill() } }
+    chat.submit("Rewrite this")
+    await fulfillment(of: [streamed], timeout: 3)
+    chat.removeContext(id: context.id)
+    engine.finishHeldStream()
+    await fulfillment(of: [done], timeout: 3)
+    observation.cancel(); completion.cancel()
+    XCTAssertTrue(chat.selectionRevisions.isEmpty)
+  }
+
+  func testAutomaticSettingDefaultsOffAndPersistsChoice() {
+    let defaults = UserDefaults(suiteName: UUID().uuidString)!
+    let settings = SelectionEditingSettings(defaults: defaults)
+    XCTAssertFalse(settings.automaticallyReplace)
+    settings.automaticallyReplace = true
+    XCTAssertTrue(SelectionEditingSettings(defaults: defaults).automaticallyReplace)
+  }
+
+  func testCaptureRetriesReadinessButStopsOnSourceChange() async {
+    var reads = 0
+    var waits = 0
+    let value: String? = await SelectionCaptureRetry.first(mayContinue: { true }, read: {
+      reads += 1; return reads == 2 ? "selected text" : nil
+    }, wait: { waits += 1 })
+    XCTAssertEqual(value, "selected text")
+    XCTAssertEqual(reads, 2)
+    XCTAssertEqual(waits, 1)
+    var unchanged = true
+    reads = 0
+    let missing: String? = await SelectionCaptureRetry.first(mayContinue: { unchanged }, read: {
+      reads += 1; return nil
+    }, wait: { unchanged = false })
+    XCTAssertNil(missing)
+    XCTAssertEqual(reads, 1)
+    reads = 0
+    let absent: String? = await SelectionCaptureRetry.first(mayContinue: { true }, read: { reads += 1; return nil }, wait: {})
+    XCTAssertNil(absent)
+    XCTAssertEqual(reads, 3)
+  }
+
+  func testRevisionCardRendersAcknowledgementSeparateFromEditableDraft() throws {
+    let revision = SelectionRevision(id: UUID(), contextID: UUID(), text: "Hello team,\n\nCould you please send the report today? Thank you for your help.", automatic: false)
+    let view = VStack(alignment: .leading, spacing: 16) {
+      Text("Sure—I’ll make it more professional.")
+      SelectionRevisionCard(revision: revision, disabled: false, update: { _ in }, replace: {})
+    }.padding(24).frame(width: 560).background(Color(red: 0.09, green: 0.13, blue: 0.11)).preferredColorScheme(.dark)
+    let host = NSHostingView(rootView: view)
+    host.frame = NSRect(origin: .zero, size: host.fittingSize)
+    host.layoutSubtreeIfNeeded()
+    XCTAssertGreaterThan(host.frame.height, 180)
+    XCTAssertLessThan(host.frame.height, 440)
+    let bitmap = try XCTUnwrap(host.bitmapImageRepForCachingDisplay(in: host.bounds))
+    host.cacheDisplay(in: host.bounds, to: bitmap)
+    try bitmap.representation(using: .png, properties: [:])?.write(to: URL(fileURLWithPath: "/tmp/selection-revision-card.png"))
+  }
+
   func testPasteUsesRememberedPIDAndCurrentSelectionThenRestoresAllClipboardItems() async throws {
     let board = NSPasteboard(name: .init(UUID().uuidString))
     defer { board.releaseGlobally() }
@@ -374,6 +598,14 @@ final class SelectionContextTests: XCTestCase {
 import Combine
 
 private final class SelectionTestEngine: LocalModelEngine, @unchecked Sendable {
+  private let output: String
+  private let fail: Bool
+  private let hold: Bool
+  private var held: AsyncThrowingStream<String, Error>.Continuation?
+  init(output: String = "Transformed text", fail: Bool = false, hold: Bool = false) {
+    self.output = output; self.fail = fail; self.hold = hold
+  }
+  func finishHeldStream() { lock.withLock { held?.finish(); held = nil } }
   private let lock = NSLock()
   private var requests: [LocalModelRequest] = []
   var lastRequest: LocalModelRequest? { lock.withLock { requests.last } }
@@ -385,11 +617,18 @@ private final class SelectionTestEngine: LocalModelEngine, @unchecked Sendable {
   func unload() async { }
   func stream(_ request: LocalModelRequest) -> AsyncThrowingStream<String, Error> {
     lock.withLock { requests.append(request) }
-    return AsyncThrowingStream { $0.yield("Transformed text"); $0.finish() }
+    return AsyncThrowingStream { continuation in
+      continuation.yield(output)
+      if hold { lock.withLock { held = continuation } }
+      else if fail { continuation.finish(throwing: LocalInferenceError.invalidModelFile) }
+      else { continuation.finish() }
+    }
   }
 }
 
 private final class SelectionTestCloud: ChatProvider, @unchecked Sendable {
+  private let output: String
+  init(output: String = "A normal response") { self.output = output }
   private let lock = NSLock()
   private var stored: [ChatRequest] = []
   var requests: [ChatRequest] { lock.withLock { stored } }
@@ -397,7 +636,7 @@ private final class SelectionTestCloud: ChatProvider, @unchecked Sendable {
     lock.withLock { stored.append(request) }
     let query = request.messages.last?.content.contains("Create one concise web search query") == true
     return AsyncThrowingStream { continuation in
-      continuation.yield(.token(query ? "Moon composition evidence" : "A normal response"))
+      continuation.yield(.token(query ? "Moon composition evidence" : output))
       continuation.yield(.completed)
       continuation.finish()
     }

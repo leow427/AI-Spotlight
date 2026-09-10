@@ -236,9 +236,6 @@ struct AppShellView: View {
   @ObservedObject private var selectionAccess = SelectionAccessibilityAccess.shared
   @AppStorage(SelectionShortcutMonitor.enabledKey) private var selectionShortcutEnabled = true
   @ObservedObject private var selectionContext = SelectionContextService.shared
-  @State private var replacementMessage: ChatMessage?
-  @State private var replacementText = ""
-  @State private var pendingReplacement: (contextID: UUID, text: String)?
   @State private var expandedActivities: Set<UUID> = []
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
@@ -403,7 +400,6 @@ struct AppShellView: View {
       isSearchPresented = false
       isModePalettePresented = false
       isHelpPresented = false
-      replacementMessage = nil
       localChat.startTemporaryChat(context: notification.object as? ConversationContext)
       isComposerFocused = true
     }
@@ -481,26 +477,6 @@ struct AppShellView: View {
       if !allowed, localChat.screenRouteDecision?.sendsImage == true, localChat.activeRequest?.route.mode == .cloud {
         localChat.stopStreaming()
       }
-    }
-    .sheet(item: $replacementMessage, onDismiss: {
-      guard let request = pendingReplacement else { return }
-      pendingReplacement = nil
-      Task { _ = await selectionContext.replace(with: request.text, contextID: request.contextID) }
-    }) { _ in
-      VStack(alignment: .leading, spacing: 16) {
-        Text("Replace Selection").font(.headline)
-        Text("Review or edit the text to paste into the source app’s current selection.").font(.caption)
-        TextEditor(text: $replacementText).font(.body).scrollContentBackground(.hidden)
-        HStack {
-          Button("Cancel") { replacementMessage = nil }
-          Spacer()
-          Button("Replace Selection") {
-            guard let contextID = localChat.attachedContexts.first?.id else { return }
-            pendingReplacement = (contextID, replacementText)
-            replacementMessage = nil
-          }.buttonStyle(.borderedProminent)
-        }
-      }.padding(24).frame(width: 520, height: 360).naturePresentation()
     }
     .sheet(isPresented: $isHelpPresented) {
       KeyboardShortcutsHelpView()
@@ -726,13 +702,13 @@ struct AppShellView: View {
       ScrollView {
         LazyVStack(alignment: .leading, spacing: 18) {
           ForEach(localChat.presentationMessages) { message in
-            LocalMessageView(message: message, isThinking: localChat.isWaitingForResponse && message.id == localChat.presentationMessages.last?.id,
+            LocalMessageView(message: localChat.selectionDisplayMessage(message), isThinking: localChat.isWaitingForResponse && message.id == localChat.presentationMessages.last?.id,
                              expandedActivity: activityExpansion(message.activity?.id ?? message.id))
               .id(message.id)
-            if message.role == .assistant, !message.content.isEmpty, !localChat.isBusy,
-               !localChat.attachedContexts.isEmpty, selectionContext.canReplace {
-              Button("Replace Selection") { replacementText = message.content; replacementMessage = message }
-                .buttonStyle(.bordered).controlSize(.small)
+            if let revision = localChat.selectionRevisions[message.id], !revision.automatic {
+              SelectionRevisionCard(revision: revision, disabled: localChat.isBusy || !selectionContext.canReplace,
+                update: { localChat.updateSelectionRevision(messageID: message.id, text: $0) },
+                replace: { Task { await localChat.applySelectionRevision(messageID: message.id) } })
             }
           }
           if let activity = localChat.activity, localChat.presentationMessages.last?.role != .assistant {
@@ -1355,7 +1331,7 @@ private struct KeyboardShortcutsHelpView: View {
             Text("Normal").tag(0.35)
             Text("Relaxed").tag(0.5)
           }
-          Text("Highlight text in another app, then tap the chosen key twice by itself (Option by default). Context stays in a temporary chat and follows your selected model and Web Search settings. Replace Selection pastes into the selection currently active in the source app. Your clipboard is preserved. Password fields are excluded.")
+          Text("Highlight text in another app, then tap the chosen key twice by itself (Option by default). Context stays in a temporary chat and follows your selected model and Web Search settings. Editing requests show a revised-text card with Edit and Replace text. Settings → Selection Context offers automatic replacement without a preview. Replacement pastes into the selection currently active in the source app. Your clipboard is preserved. Password fields are excluded.")
             .font(.caption).foregroundStyle(.secondary)
           Label(selectionAccess.isGranted ? "Accessibility enabled" : "Accessibility permission required",
                 systemImage: selectionAccess.isGranted ? "checkmark.circle" : "hand.raised")
@@ -1491,7 +1467,45 @@ private struct DeveloperToolsView: View {
   }
 }
 
+struct SelectionRevisionCard: View {
+  let revision: SelectionRevision
+  let disabled: Bool
+  let update: (String) -> Void
+  let replace: () -> Void
+  @State private var editing = false
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 12) {
+      HStack {
+        Label("Revised text", systemImage: "text.alignleft").font(.caption).foregroundStyle(.secondary)
+        Spacer()
+        if revision.status == .sent { Label("Replacement sent", systemImage: "checkmark").font(.caption) }
+      }
+      if editing {
+        TextEditor(text: Binding(get: { revision.text }, set: update))
+          .font(.body).scrollContentBackground(.hidden).frame(minHeight: 120, maxHeight: 240)
+          .accessibilityLabel("Edit revised text")
+      } else {
+        ScrollView { Text(revision.text).frame(maxWidth: .infinity, alignment: .leading).textSelection(.enabled) }
+          .frame(maxHeight: 240).fixedSize(horizontal: false, vertical: true)
+      }
+      HStack(spacing: 10) {
+        Button(editing ? "Done" : "Edit", systemImage: editing ? "checkmark" : "pencil") { editing.toggle() }
+          .disabled(disabled || revision.status == .sent)
+        Button("Replace text", systemImage: "arrow.up.doc") { editing = false; replace() }
+          .buttonStyle(.borderedProminent)
+          .disabled(disabled || revision.text.isEmpty || revision.status == .sent || revision.status == .applying)
+        if revision.status == .applying { ProgressView().controlSize(.small) }
+      }.controlSize(.small)
+    }
+    .padding(16).background(.primary.opacity(0.035), in: RoundedRectangle(cornerRadius: 14))
+    .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(.primary.opacity(0.1)))
+    .accessibilityElement(children: .contain)
+  }
+}
+
 struct SettingsView: View {
+  @ObservedObject private var selectionEditing = SelectionEditingSettings.shared
   @ObservedObject private var settings: CloudSettingsModel
   @State private var openAIAPIKey = ""
   @State private var anthropicAPIKey = ""
@@ -1507,8 +1521,9 @@ struct SettingsView: View {
   enum SettingsDestination: String, CaseIterable, Identifiable {
     case local = "Local Models"
     case cloud = "Cloud & Search"
+    case selection = "Selection Context"
     var id: Self { self }
-    var symbol: String { self == .local ? "laptopcomputer" : "cloud" }
+    var symbol: String { switch self { case .local: "laptopcomputer"; case .cloud: "cloud"; case .selection: "text.cursor" } }
   }
 
   var body: some View {
@@ -1539,7 +1554,7 @@ struct SettingsView: View {
       .natureSurface(navigation: true).padding(12)
       VStack(alignment: .leading, spacing: 8) {
         Text(destination.rawValue).font(.system(size: 24, weight: .semibold)).padding(.horizontal, 20).padding(.top, 24)
-        Text(destination == .local ? "Intelligence, right on your Mac." : "Connect your models and the web.")
+        Text(destination == .local ? "Intelligence, right on your Mac." : destination == .selection ? "Choose how your text revisions are applied." : "Connect your models and the web.")
           .foregroundStyle(NatureGlass.secondary).padding(.horizontal, 20)
         Group {
           switch destination {
@@ -1547,6 +1562,16 @@ struct SettingsView: View {
             Form { LocalModelManagerSection() }.formStyle(.grouped)
           case .cloud:
             cloudForm
+          case .selection:
+            Form {
+              Section("Text editing") {
+                Toggle("Automatically replace selected text", isOn: $selectionEditing.automaticallyReplace)
+                Text("When enabled, completed editing responses are pasted directly into the source app, without a preview card or Replace text click. Normal questions are answered as usual.")
+                  .font(.caption).foregroundStyle(.secondary)
+                Text("When off, review the revised text, edit it yourself, or ask for more changes before choosing Replace text. Text is captured only when you double-tap Option.")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+            }.formStyle(.grouped)
           }
         }
         .scrollContentBackground(.hidden)
