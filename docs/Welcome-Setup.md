@@ -1,5 +1,8 @@
 # Welcome setup and walkthrough
 
+Welcome fills the rounded app window with the same continuous forest backdrop
+and a frosted navigation bar as the main interface, without a dark inset card.
+
 First launch introduces Enigma in four steps:
 
 1. **Welcome.** The supplied ASCII Hello characters, column timing, colors, and
@@ -19,16 +22,19 @@ First launch introduces Enigma in four steps:
    page distinguishes a signed-in account, a saved search key, and missing
    connections. Opening a link does not mark a service as connected. Guides
    can replace or supplement these buttons later. Either service may be deferred.
-4. **Walkthrough invitation.** Users can finish immediately or take five short
-   steps pointing at chat history, the composer, files, mode/model selection,
-   and Help. Next advances, Finish setup returns to chat, and End tour or
-   Escape exits early. Popups use the actual SwiftUI control bounds, adapt to
+4. **Walkthrough invitation.** Users can finish immediately or take six short
+   steps pointing at chat history, the composer, slash commands, files,
+   mode/model selection, and Help. Next advances, Finish setup returns to chat, and End tour or
+   Escape exits early. The command stop highlights the message box and shows
+   the actual command catalog, including how to open and navigate its menu.
+   Popups use the actual SwiftUI control bounds, adapt to
    the minimum panel size, and support the sidebar being shown or hidden.
 
 ![Welcome](images/welcome-setup/hello.jpg)
 ![Model choices](images/welcome-setup/models.jpg)
 ![Connections](images/welcome-setup/connections.jpg)
 ![Walkthrough](images/welcome-setup/tour.jpg)
+![Slash-command tour step](images/welcome-setup/commands.jpg)
 
 ## Installation and continuation
 
@@ -64,7 +70,7 @@ To test in the development app:
    action when the sidebar is visible.
 3. Walk through the local opt-out path to test without downloading anything.
    On the connections page, open the setup links or Settings, then continue.
-4. Choose the walkthrough and use Next through all five stops. Repeat and try
+4. Choose the walkthrough and use Next through all six stops. Repeat and try
    End tour. Resize the panel down to 640 × 420; scroll the model and connection
    pages to reach additional content.
 5. Replay again to exercise a real model install or select an already-installed
@@ -91,8 +97,10 @@ These checks do not download multi-gigabyte models, purchase subscriptions, sign
 in to real accounts, or send paid search/chat requests. The checked-in screenshots
 use deterministic hardware and empty-account fixtures.
 
-Local verification for this feature: build and static analysis passed. The full
-suite ran 486 tests with 10 optional skips and no failures; after final viewport
-and focus refinements, all 55 affected model-selection and screen-view tests
-passed again. Live account authentication and multi-gigabyte downloads remain
-manual checks.
+Local verification after the full-window and slash-command refinements: build
+and static analysis passed. The full suite ran 486 tests with 10 optional skips
+and no failures. Rendering checks verify transparent outer corners on every
+welcome page and the integrated app window, plus all six tour steps at both
+window sizes. Native chat fixtures use isolated startup preferences so saved
+user settings cannot change their routing. Live account authentication and
+multi-gigabyte downloads remain manual checks.

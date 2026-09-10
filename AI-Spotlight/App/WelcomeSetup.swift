@@ -155,7 +155,14 @@ struct WelcomeSetupView: View {
 
   var body: some View {
     GeometryReader { geometry in
-      setupContent(helloHeight: min(230, max(100, geometry.size.height * 0.25)))
+      setupContent(helloHeight: min(260, max(100, geometry.size.height * 0.3)))
+    }
+    .naturePresentation()
+    .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+    .overlay {
+      RoundedRectangle(cornerRadius: 24, style: .continuous)
+        .strokeBorder(NatureGlass.edge, lineWidth: 0.75)
+        .allowsHitTesting(false)
     }
   }
 
@@ -175,22 +182,23 @@ struct WelcomeSetupView: View {
           case .walkthrough: walkthrough
           }
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(maxWidth: 820, alignment: .leading)
         .padding(2)
+        .frame(maxWidth: .infinity)
       }
+      .defaultScrollAnchor(.center, for: .alignment)
       .scrollIndicators(.visible)
       .id(setup.step)
-      Divider().padding(.vertical, 14)
-      if setup.step == .models { modelControls.padding(.bottom, 12) }
-      footer
+      VStack(spacing: 12) {
+        if setup.step == .models { modelControls }
+        footer
+      }
+      .padding(16)
+      .natureSurface(radius: 20)
+      .padding(.top, 16)
     }
     .padding(24)
-    .frame(maxWidth: 700, maxHeight: .infinity)
-    .background(NatureGlass.canvas.opacity(0.88), in: RoundedRectangle(cornerRadius: 24))
-    .natureSurface()
-    .padding(20)
     .frame(maxWidth: .infinity, maxHeight: .infinity)
-    .naturePresentation()
     .sheet(isPresented: $showConnections) {
       SettingsView(settings: cloud, initialDestination: .cloud)
         .overlay(alignment: .topTrailing) {
@@ -303,7 +311,7 @@ struct WelcomeSetupView: View {
       Image(systemName: "sparkles").font(.system(size: 44)).foregroundStyle(NatureGlass.accent)
       Text("Make yourself at home").font(.system(size: 28, weight: .semibold))
       Text("Would you like an interactive walkthrough?").font(.title3)
-      Text("Five quick stops show you chat history, the message box, files, model choices, and Help. Follow the highlighted controls with Next, or leave the tour anytime.")
+      Text("Six quick stops show you chat history, the message box, slash commands, files, model choices, and Help. Follow the highlighted controls with Next, or leave the tour anytime.")
         .foregroundStyle(.secondary)
       if chat.installedModel == nil && !cloud.isConfigured {
         Label("No model is ready yet. Connect Cloud or install a model in Settings before sending your first message.", systemImage: "info.circle")
@@ -339,11 +347,13 @@ struct WelcomeSetupView: View {
 }
 
 enum WelcomeTourStep: Int, CaseIterable {
-  case history, composer, files, model, help
+  case history, composer, commands, files, model, help
+  var target: Self { self == .commands ? .composer : self }
   var title: String {
     switch self {
     case .history: "Your conversations"
     case .composer: "Start a conversation"
+    case .commands: "Shortcuts start with /"
     case .files: "Bring your files"
     case .model: "Choose how I think"
     case .help: "Help is always here"
@@ -352,7 +362,8 @@ enum WelcomeTourStep: Int, CaseIterable {
   var detail: String {
     switch self {
     case .history: "Use the sidebar button to show or hide your five most recent chats. Double-tap Control to toggle history, and use the pencil for a new chat."
-    case .composer: "Type here and press Return to send. Slash commands such as /search and /screen add tools; /screen asks for capture permission when needed."
+    case .composer: "Type here and press Return to send. Use Shift–Return for a new line. Your draft stays here while you explore the tour."
+    case .commands: "Type / in the message box to browse commands. Use ↑ and ↓, then Tab or Return to choose one before adding your question."
     case .files: "Open the file picker to work with a file or folder. Enigma asks for access to what you choose."
     case .model: "Choose Local, Cloud, or Auto and select a model. Local answers on your Mac; Cloud uses your connected provider; Auto selects a route."
     case .help: "Find keyboard shortcuts here. Settings is nearby for models, connections, and replaying welcome setup. Use Option–Space to hide or summon Enigma."
@@ -382,7 +393,7 @@ struct WelcomeTourOverlay: View {
     GeometryReader { geometry in
       if let step = setup.tour {
         let bounds = CGRect(origin: .zero, size: geometry.size)
-        let target = anchors[step].map { geometry[$0].insetBy(dx: -5, dy: -5).intersection(bounds) }
+        let target = anchors[step.target].map { geometry[$0].insetBy(dx: -5, dy: -5).intersection(bounds) }
         let rect = target.flatMap { $0.isNull ? nil : $0 }
           ?? CGRect(x: geometry.size.width / 2, y: 24, width: 0, height: 0)
         let cardWidth = min(340.0, geometry.size.width - 32)
@@ -397,6 +408,7 @@ struct WelcomeTourOverlay: View {
             Text("\(step.rawValue + 1) of \(WelcomeTourStep.allCases.count)").font(.caption).foregroundStyle(NatureGlass.accent)
             Text(step.title).font(.headline).accessibilityFocused($isHeadingFocused)
             Text(step.detail).font(.subheadline).fixedSize(horizontal: false, vertical: true)
+            if step == .commands { commandPreview }
             HStack {
               Button("End tour") { setup.endTour() }
               Spacer()
@@ -415,6 +427,20 @@ struct WelcomeTourOverlay: View {
         .onExitCommand { setup.endTour() }
       }
     }
+  }
+
+  private var commandPreview: some View {
+    VStack(alignment: .leading, spacing: 8) {
+      ForEach(SlashCommand.allCases) { command in
+        HStack(spacing: 8) {
+          Text(command.token).font(.caption.monospaced().weight(.semibold))
+            .foregroundStyle(NatureGlass.accent).frame(width: 76, alignment: .leading)
+          Text(command.description).font(.caption).foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+      }
+    }
+    .padding(10).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
   }
 }
 

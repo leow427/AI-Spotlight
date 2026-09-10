@@ -450,7 +450,7 @@ final class LocalModelSelectionTests: XCTestCase {
   }
 
   @MainActor
-  private func render<V: View>(_ root: V, size: NSSize, name: String) throws {
+  private func render<V: View>(_ root: V, size: NSSize, name: String, roundedWindow: Bool = false) throws {
     let view = NSHostingView(rootView: root)
     let window = NSWindow(contentRect: NSRect(origin: .zero, size: size), styleMask: [.borderless], backing: .buffered, defer: false)
     window.contentView = view
@@ -459,6 +459,12 @@ final class LocalModelSelectionTests: XCTestCase {
     window.displayIfNeeded()
     let image = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
     view.cacheDisplay(in: view.bounds, to: image)
+    if roundedWindow {
+      for (x, y) in [(0, 0), (image.pixelsWide - 1, 0), (0, image.pixelsHigh - 1), (image.pixelsWide - 1, image.pixelsHigh - 1)] {
+        XCTAssertLessThan(try XCTUnwrap(image.colorAt(x: x, y: y)).alphaComponent, 0.05, "Window corners must stay transparent")
+      }
+      XCTAssertGreaterThan(try XCTUnwrap(image.colorAt(x: image.pixelsWide / 2, y: image.pixelsHigh / 2)).alphaComponent, 0.95)
+    }
     let png = try XCTUnwrap(image.representation(using: .png, properties: [:]))
     try png.write(to: FileManager.default.temporaryDirectory.appending(path: "\(name).png"))
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
@@ -813,9 +819,14 @@ extension LocalModelSelectionTests {
     for step in WelcomeSetup.Step.allCases {
       setup.step = step
       for size in [NSSize(width: 640, height: 420), NSSize(width: 1000, height: 780)] {
-        try render(WelcomeSetupView(setup: setup, advisor: advisor, chat: chat, cloud: cloud, search: search, chooseMode: { _ in }), size: size, name: "welcome-\(step)-\(Int(size.width))")
+        try render(WelcomeSetupView(setup: setup, advisor: advisor, chat: chat, cloud: cloud, search: search, chooseMode: { _ in }), size: size, name: "welcome-\(step)-\(Int(size.width))", roundedWindow: true)
       }
     }
+    setup.step = .welcome
+    let shell = AppShellView(glassAppearance: GlassAppearanceSettings(defaults: defaults), cloudSettings: cloud,
+      localChat: chat, modelAdvisor: advisor, searchSettings: search,
+      startPreferences: StartPreferences(defaults: defaults), welcomeSetup: setup)
+    try render(shell, size: NSSize(width: 640, height: 420), name: "welcome-window-rounded", roundedWindow: true)
     setup.finish(takeTour: true)
     for sidebar in [false, true] {
       let preferences = StartPreferences(defaults: defaults)

@@ -66,7 +66,12 @@ final class FileModeUITests: XCTestCase {
     let chat = LocalChatViewModel(engine: FileTestEngine(), files: files, sessionStore: .init(applicationSupportDirectory: root))
     let screen = ScreenComposerCoordinator()
     screen.draft = "Keep my draft"
-    let view = NSHostingView(rootView: AppShellView(glassAppearance: GlassAppearanceSettings(), localChat: chat, screen: screen))
+    let suite = "FileModePanel-\(UUID())"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defaults.set(true, forKey: WelcomeSetup.completedKey)
+    addTeardownBlock { UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite) }
+    let view = NSHostingView(rootView: AppShellView(glassAppearance: GlassAppearanceSettings(), localChat: chat, screen: screen,
+      startPreferences: StartPreferences(defaults: defaults), welcomeSetup: WelcomeSetup(defaults: defaults)))
     let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: view)
     controller.show()
     defer { controller.hide() }

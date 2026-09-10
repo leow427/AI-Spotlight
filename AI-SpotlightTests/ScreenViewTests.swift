@@ -452,6 +452,7 @@ final class ScreenViewTests: XCTestCase {
     let suite = "ScreenPanel-\(UUID())"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
     defaults.set(true, forKey: "localModelOnboardingDismissed")
+    defaults.set(ChatMode.auto.rawValue, forKey: StartPreferences.modeKey)
     addTeardownBlock {
       try? FileManager.default.removeItem(at: directory)
       UserDefaults().removePersistentDomain(forName: suite)
@@ -482,7 +483,8 @@ final class ScreenViewTests: XCTestCase {
     let appearance = GlassAppearanceSettings(defaults: defaults)
     let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, cloudSettings: cloud,
       localChat: chat, screen: screen, modelAdvisor: advisor,
-      searchSettings: WebSearchSettings(credentials: PresenceOnlyCredentials()))
+      searchSettings: WebSearchSettings(credentials: PresenceOnlyCredentials(), defaults: defaults),
+      startPreferences: StartPreferences(defaults: defaults), welcomeSetup: WelcomeSetup(defaults: defaults))
       .transaction { if historyCount == 0 { $0.disablesAnimations = true } })
     let sizes = PanelSizeStore(defaults: defaults)
     sizes.save(NSSize(width: 752, height: 462))
@@ -587,6 +589,7 @@ final class ScreenViewTests: XCTestCase {
     let suite = "RepeatedScreenPanel-\(UUID())"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
     defaults.set(true, forKey: "localModelOnboardingDismissed")
+    defaults.set(ChatMode.auto.rawValue, forKey: StartPreferences.modeKey)
     addTeardownBlock {
       try? FileManager.default.removeItem(at: directory)
       UserDefaults().removePersistentDomain(forName: suite)
@@ -608,7 +611,8 @@ final class ScreenViewTests: XCTestCase {
     let appearance = GlassAppearanceSettings(defaults: defaults)
     let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, cloudSettings: cloud,
       localChat: chat, screen: screen, modelAdvisor: advisor,
-      searchSettings: WebSearchSettings(credentials: PanelSearchCredentials())))
+      searchSettings: WebSearchSettings(credentials: PanelSearchCredentials(), defaults: defaults),
+      startPreferences: StartPreferences(defaults: defaults), welcomeSetup: WelcomeSetup(defaults: defaults)))
     let sizes = PanelSizeStore(defaults: defaults)
     sizes.save(NSSize(width: 752, height: 462))
     let controller = SpotlightPanelController(glassAppearance: appearance, sizeStore: sizes, contentView: view)
