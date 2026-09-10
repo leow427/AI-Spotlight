@@ -39,7 +39,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     )
 
     let panelController = SpotlightPanelController(
-      glassAppearance: GlassAppearanceSettings()
+      glassAppearance: GlassAppearanceSettings(), welcomeSetup: .shared
     )
     let menuBarController = MenuBarController(panelController: panelController)
     menuBarController.install()

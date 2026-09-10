@@ -33,8 +33,8 @@ final class WelcomeSetup: ObservableObject {
   }
 
   func replay() {
-    tour = nil
     isPresented = true
+    tour = nil
     step = .welcome
   }
 
@@ -42,8 +42,8 @@ final class WelcomeSetup: ObservableObject {
     defaults.set(true, forKey: Self.completedKey)
     defaults.removeObject(forKey: Self.progressKey)
     defaults.set(true, forKey: "localModelOnboardingDismissed")
-    isPresented = false
     tour = takeTour ? .history : nil
+    isPresented = false
   }
 
   func nextTourStep() {
@@ -215,9 +215,22 @@ struct WelcomeSetupView: View {
   private func welcome(helloHeight: CGFloat) -> some View {
     VStack(spacing: 18) {
       EnigmaHelloView().frame(height: helloHeight)
-      Text("(My name is Enigma)").font(.system(size: 19, weight: .medium, design: .rounded))
-      Text("A little intelligence. Right where you need it.")
-        .font(.title3).foregroundStyle(.secondary)
+      HStack(spacing: 8) {
+        Image(systemName: "sparkle").accessibilityHidden(true)
+        Text("(My name is Enigma)")
+      }
+      .font(.system(size: 15, weight: .medium, design: .rounded))
+      .foregroundStyle(NatureGlass.accent)
+      .padding(.horizontal, 16).padding(.vertical, 8)
+      .background(NatureGlass.accent.opacity(0.08), in: Capsule())
+      .overlay { Capsule().strokeBorder(NatureGlass.accent.opacity(0.22), lineWidth: 0.75) }
+      VStack(spacing: 2) {
+        Text("A little intelligence.").foregroundStyle(.primary)
+        Text("Right where you need it.")
+          .foregroundStyle(LinearGradient(colors: [.white, NatureGlass.accent], startPoint: .leading, endPoint: .trailing))
+      }
+      .font(.system(size: 28, weight: .semibold, design: .rounded))
+      .multilineTextAlignment(.center)
       Text("Let’s make this Mac feel like home. Choose how I think, connect what you need, and take a quick look around.")
         .foregroundStyle(.secondary).multilineTextAlignment(.center).frame(maxWidth: 450)
     }.frame(maxWidth: .infinity).padding(.vertical, 8)

@@ -2,6 +2,10 @@
 
 Welcome fills the rounded app window with the same continuous forest backdrop
 and a frosted navigation bar as the main interface, without a dark inset card.
+Setup temporarily expands the window to at least 1280 × 860, fitted to the
+current display. It keeps that space through the optional tour, then restores
+the normal window size. Resizing during setup does not overwrite the saved chat
+size. The Hello caption pairs a sage name badge with a two-line gradient greeting.
 
 First launch introduces Enigma in four steps:
 
@@ -97,10 +101,12 @@ These checks do not download multi-gigabyte models, purchase subscriptions, sign
 in to real accounts, or send paid search/chat requests. The checked-in screenshots
 use deterministic hardware and empty-account fixtures.
 
-Local verification after the full-window and slash-command refinements: build
-and static analysis passed. The full suite ran 486 tests with 10 optional skips
+Local verification after the window sizing and greeting refinements: build
+and static analysis passed. The full suite ran 487 tests with 10 optional skips
 and no failures. Rendering checks verify transparent outer corners on every
 welcome page and the integrated app window, plus all six tour steps at both
-window sizes. Native chat fixtures use isolated startup preferences so saved
+window sizes. A native panel regression verifies temporary enlargement, size
+restoration after skipping or ending the tour, replay, and saved-size preservation.
+Native chat fixtures use isolated startup preferences so saved
 user settings cannot change their routing. Live account authentication and
 multi-gigabyte downloads remain manual checks.

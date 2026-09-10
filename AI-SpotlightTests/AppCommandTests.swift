@@ -179,6 +179,37 @@ final class AppCommandTests: XCTestCase {
   }
 
   @MainActor
+  func testWelcomeTemporarilyEnlargesPanelThroughTourWithoutSavingItsSize() throws {
+    let suite = "WelcomePanel-\(UUID())"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    let store = PanelSizeStore(defaults: defaults)
+    let normal = NSSize(width: 900, height: 610)
+    store.save(normal)
+    let setup = WelcomeSetup(defaults: defaults)
+    let view = NSView()
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(defaults: defaults),
+      sizeStore: store, contentView: view, welcomeSetup: setup)
+    let window = try XCTUnwrap(view.window)
+    defer { controller.hide() }
+    setup.start(hasInstalledModels: false)
+    let visible = try XCTUnwrap(window.screen ?? NSScreen.main).visibleFrame
+    let enlarged = PanelSizeStore.centeredFrame(size: NSSize(width: 1280, height: 860), in: visible).size
+    XCTAssertEqual(window.frame.size, enlarged)
+    controller.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
+    XCTAssertEqual(store.load(), normal)
+    setup.finish(takeTour: true)
+    XCTAssertEqual(window.frame.size, enlarged)
+    setup.endTour()
+    XCTAssertEqual(window.frame.size, normal)
+    setup.replay()
+    XCTAssertEqual(window.frame.size, enlarged)
+    setup.finish(takeTour: false)
+    XCTAssertEqual(window.frame.size, normal)
+    XCTAssertEqual(store.load(), normal)
+  }
+
+  @MainActor
   func testPanelRequestsCaptureExclusionWhileRemainingVisibleAndEditable() throws {
     let draft = NSTextField(string: "Visible only where capture exclusion is supported")
     let controller = SpotlightPanelController(

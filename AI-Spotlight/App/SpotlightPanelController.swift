@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import SwiftUI
 
 struct PanelSizeStore {
@@ -52,6 +53,8 @@ struct PanelSizeStore {
 final class SpotlightPanelController: NSObject, NSWindowDelegate {
   private let panel: SpotlightPanel
   private let sizeStore: PanelSizeStore
+  private var welcomeObservation: AnyCancellable?
+  private var normalSize: NSSize?
 
   private(set) var isCapturingScreen = false
   private var captureHiddenWindows: [NSWindow] = []
@@ -60,7 +63,8 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   init(
     glassAppearance: GlassAppearanceSettings,
     sizeStore: PanelSizeStore = PanelSizeStore(),
-    contentView: NSView? = nil
+    contentView: NSView? = nil,
+    welcomeSetup: WelcomeSetup? = nil
   ) {
     self.sizeStore = sizeStore
     panel = SpotlightPanel(
@@ -95,6 +99,11 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
     NotificationCenter.default.addObserver(self, selector: #selector(beginSelectionReplacement), name: .selectionReplacementBegan, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(endSelectionReplacement), name: .selectionReplacementEnded, object: nil)
+    if let welcomeSetup {
+      welcomeObservation = welcomeSetup.$isPresented.combineLatest(welcomeSetup.$tour)
+        .map { $0 || $1 != nil }.removeDuplicates()
+        .sink { [weak self] active in self?.setWelcomeSizing(active) }
+    }
     panel.onHide = { [weak self] in
       self?.hide()
     }
@@ -182,7 +191,25 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
+    guard normalSize == nil else { return }
     sizeStore.save(panel.frame.size)
+  }
+
+  private func setWelcomeSizing(_ active: Bool) {
+    let size: NSSize
+    if active {
+      guard normalSize == nil else { return }
+      normalSize = panel.frame.size
+      size = NSSize(width: max(1280, panel.frame.width), height: max(860, panel.frame.height))
+    } else {
+      guard let previous = normalSize else { return }
+      size = previous
+      normalSize = nil
+    }
+    let visible = panel.screen?.visibleFrame ?? NSScreen.main?.visibleFrame
+    let frame = visible.map { PanelSizeStore.centeredFrame(size: size, in: $0) }
+      ?? NSRect(origin: panel.frame.origin, size: size)
+    panel.setFrame(frame, display: true)
   }
 
   private func centerOnActiveDisplay() {
