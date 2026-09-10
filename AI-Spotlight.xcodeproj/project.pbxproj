@@ -239,6 +239,7 @@
 		F2000000000000000000000B /* CodexSubscriptionTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexSubscriptionTests.swift; sourceTree = "<group>"; };
 		F225835FFF11A442B82A63B4 /* AI-Spotlight/Screen/ScreenControls.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Screen/ScreenControls.swift"; sourceTree = SOURCE_ROOT; };
 		F854E7BC1B8BD8048823C508 /* AI-Spotlight/Files/FileModeCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Files/FileModeCoordinator.swift"; sourceTree = SOURCE_ROOT; };
+		E91000000000000000000001 /* Enigma.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = Enigma.entitlements; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -352,6 +353,7 @@
 			isa = PBXGroup;
 			children = (
 				A20000000000000000000006 /* Info.plist */,
+				E91000000000000000000001 /* Enigma.entitlements */,
 				D20000000000000000000006 /* ThirdPartyNotices.txt */,
 				B60000000000000000000201 /* Assets.xcassets */,
 			);
@@ -501,6 +503,11 @@
 				TargetAttributes = {
 					A50000000000000000000001 = {
 						CreatedOnToolsVersion = 26.6;
+						SystemCapabilities = {
+							com.apple.HardenedRuntime = {
+								enabled = 1;
+							};
+						};
 					};
 					A50000000000000000000002 = {
 						CreatedOnToolsVersion = 26.6;
@@ -723,11 +730,13 @@
 		AC0000000000000000000003 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "AI-Spotlight/Resources/Enigma.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 5JXMXR2W9L;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -745,11 +754,13 @@
 		AC0000000000000000000004 /* Release */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = "AI-Spotlight/Resources/Enigma.entitlements";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 1;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_TEAM = 5JXMXR2W9L;
+				ENABLE_HARDENED_RUNTIME = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = "AI-Spotlight/Resources/Info.plist";
 				LD_RUNPATH_SEARCH_PATHS = (
