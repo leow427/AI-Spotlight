@@ -13,7 +13,7 @@ enum CodexFileMode {
       "environments": .array([]),
       "runtimeWorkspaceRoots": .array(selection.attachments.filter(\.isDirectory).map { .string($0.url.path) }),
       "dynamicTools": .array(AgentFileTools.definitions(access: .readWrite).map(\.codex)),
-      "baseInstructions": .string("You are engima, a helpful assistant for file analysis and editing.\n" + ChatResponseStyle.instructions),
+      "baseInstructions": .string("You are Enigma, a helpful assistant for file analysis and editing.\n" + ChatResponseStyle.instructions),
       "developerInstructions": .string(AgentFileTools.instructions + "\nAccess: Read & Edit\n" + selection.context),
       "config": .object(["project_doc_max_bytes": .number(0), "features.skip_host_skill_discovery": .bool(true),
         "features.shell_tool": .bool(false), "features.unified_exec": .bool(false),
@@ -72,7 +72,7 @@ enum CodexFileModeSupport {
           schema["definitions"]["DynamicToolSpec"] != .null,
           Set(["arguments", "callId", "threadId", "tool", "turnId"]).isSubset(of: required),
           ["callId", "threadId", "tool", "turnId"].allSatisfy({ callSchema?["properties"][$0]["type"].string == "string" }) else {
-      throw FileModeError.operation("This Codex version does not expose the isolated file tools AI Spotlight needs. Ordinary chat is still available.")
+      throw FileModeError.operation("This Codex version does not expose the isolated file tools Enigma needs. Ordinary chat is still available.")
     }
   }
 }

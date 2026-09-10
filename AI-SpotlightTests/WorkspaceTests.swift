@@ -1,6 +1,6 @@
 import Darwin
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class WorkspaceTests: XCTestCase {
   private var root: URL!

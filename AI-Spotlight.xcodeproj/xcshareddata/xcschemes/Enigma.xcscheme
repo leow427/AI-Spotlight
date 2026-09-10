@@ -16,8 +16,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A50000000000000000000001"
-               BuildableName = "PrimaryAgent.app"
-               BlueprintName = "AI Spotlight"
+               BuildableName = "Enigma.app"
+               BlueprintName = "Enigma"
                ReferencedContainer = "container:AI-Spotlight.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -30,8 +30,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A50000000000000000000002"
-               BuildableName = "AI SpotlightTests.xctest"
-               BlueprintName = "AI SpotlightTests"
+               BuildableName = "EnigmaTests.xctest"
+               BlueprintName = "EnigmaTests"
                ReferencedContainer = "container:AI-Spotlight.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
@@ -54,8 +54,8 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "A50000000000000000000002"
-               BuildableName = "AI SpotlightTests.xctest"
-               BlueprintName = "AI SpotlightTests"
+               BuildableName = "EnigmaTests.xctest"
+               BlueprintName = "EnigmaTests"
                ReferencedContainer = "container:AI-Spotlight.xcodeproj">
             </BuildableReference>
          </TestableReference>
@@ -76,8 +76,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A50000000000000000000001"
-            BuildableName = "PrimaryAgent.app"
-            BlueprintName = "AI Spotlight"
+            BuildableName = "Enigma.app"
+            BlueprintName = "Enigma"
             ReferencedContainer = "container:AI-Spotlight.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
@@ -93,8 +93,8 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "A50000000000000000000001"
-            BuildableName = "PrimaryAgent.app"
-            BlueprintName = "AI Spotlight"
+            BuildableName = "Enigma.app"
+            BlueprintName = "Enigma"
             ReferencedContainer = "container:AI-Spotlight.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>

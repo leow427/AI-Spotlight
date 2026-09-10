@@ -1,7 +1,7 @@
 import AppKit
 import SwiftUI
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 @MainActor
 final class SelectionContextTests: XCTestCase {

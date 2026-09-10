@@ -52,7 +52,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
       try togglePanelHotKeyMonitor.start()
       globalHotKeyMonitors.append(togglePanelHotKeyMonitor)
     } catch {
-      NSLog("Unable to register the AI Spotlight shortcut: %@", error.localizedDescription)
+      NSLog("Unable to register the Enigma shortcut: %@", error.localizedDescription)
     }
 
     let openSettingsHotKeyMonitor = GlobalHotKeyMonitor(hotKey: .openSettings) { [weak self] in
@@ -63,7 +63,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
       try openSettingsHotKeyMonitor.start()
       globalHotKeyMonitors.append(openSettingsHotKeyMonitor)
     } catch {
-      NSLog("Unable to register the AI Spotlight settings shortcut: %@", error.localizedDescription)
+      NSLog("Unable to register the Enigma settings shortcut: %@", error.localizedDescription)
     }
 
     let selectionShortcut = SelectionShortcutMonitor { panelController.summonSelectionContext() }

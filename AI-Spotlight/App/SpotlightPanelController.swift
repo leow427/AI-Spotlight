@@ -76,7 +76,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     super.init()
 
     panel.delegate = self
-    panel.title = "engima"
+    panel.title = "Enigma"
     // Best-effort exclusion for capture clients that honor the legacy window flag.
     // ScreenCaptureKit may still include this window; keep it visible locally.
     panel.sharingType = .none

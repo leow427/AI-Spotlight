@@ -1,7 +1,7 @@
 import AppKit
 @preconcurrency import Carbon
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class AppCommandTests: XCTestCase {
   func testDoubleControlRequiresTwoShortTapsAndResetsAfterToggling() {

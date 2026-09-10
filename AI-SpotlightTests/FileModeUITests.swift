@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 @MainActor
 final class FileModeUITests: XCTestCase {

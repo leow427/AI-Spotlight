@@ -6,7 +6,7 @@ import SwiftUI
 import XCTest
 import WebKit
 import Vision
-@testable import PrimaryAgent
+@testable import Enigma
 
 @MainActor
 final class ScreenViewTests: XCTestCase {
@@ -114,7 +114,7 @@ final class ScreenViewTests: XCTestCase {
     let preview = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
     view.cacheDisplay(in: view.bounds, to: preview)
     let png = try XCTUnwrap(preview.representation(using: .png, properties: [:]))
-    try png.write(to: URL(fileURLWithPath: "/tmp/engima-Thinking-Animated.png"))
+    try png.write(to: URL(fileURLWithPath: "/tmp/Enigma-Thinking-Animated.png"))
     let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
     attachment.name = "Thinking · enigma coalescence"
     attachment.lifetime = .keepAlways
@@ -662,9 +662,9 @@ final class ScreenViewTests: XCTestCase {
         menuPNG = try XCTUnwrap(menuBitmap.representation(using: .png, properties: [:]))
       } while !menuText.contains("search the web") && ContinuousClock.now < deadline
       XCTAssertTrue(menuText.contains("search the web"), "Suggestions must be visibly rendered: \(menuText)")
-      try menuPNG.write(to: URL(fileURLWithPath: "/tmp/engima-Slash-Commands-\(Int(size.width)).png"))
+      try menuPNG.write(to: URL(fileURLWithPath: "/tmp/Enigma-Slash-Commands-\(Int(size.width)).png"))
       let menuAttachment = XCTAttachment(data: menuPNG, uniformTypeIdentifier: "public.png")
-      menuAttachment.name = "engima slash commands \(Int(size.width))"
+      menuAttachment.name = "Enigma slash commands \(Int(size.width))"
       menuAttachment.lifetime = .keepAlways
       add(menuAttachment)
       field.completion?.dismiss()
@@ -691,7 +691,7 @@ final class ScreenViewTests: XCTestCase {
     XCTAssertEqual(screen.draft, "Preserve this draft while toggling history")
     XCTAssertEqual(chat.selectedSessionID, session)
     let hiddenPNG = try XCTUnwrap(hiddenBitmap.representation(using: .png, properties: [:]))
-    try hiddenPNG.write(to: URL(fileURLWithPath: "/tmp/engima-Hidden-Sidebar.png"))
+    try hiddenPNG.write(to: URL(fileURLWithPath: "/tmp/Enigma-Hidden-Sidebar.png"))
     let hiddenAttachment = XCTAttachment(data: hiddenPNG, uniformTypeIdentifier: "public.png")
     hiddenAttachment.name = "Hidden history with accessible Help"
     hiddenAttachment.lifetime = .keepAlways

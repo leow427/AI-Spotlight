@@ -1,5 +1,5 @@
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class FileAgentTests: XCTestCase {
   private var root: URL!

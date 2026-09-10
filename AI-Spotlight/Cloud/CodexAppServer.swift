@@ -67,13 +67,13 @@ enum CodexError: LocalizedError, Equatable {
   var errorDescription: String? {
     switch self {
     case .notInstalled:
-      "Install the Codex CLI, then reopen Settings. AI Spotlight uses its supported ChatGPT sign-in."
+      "Install the Codex CLI, then reopen Settings. Enigma uses its supported ChatGPT sign-in."
     case .notSignedIn:
       "Sign in with ChatGPT in Settings to use your plan's Codex allowance."
     case .invalidResponse:
-      "AI Spotlight could not read the Codex response. Try again."
+      "Enigma could not read the Codex response. Try again."
     case .fileModePreparationFailed(let status):
-      "AI Spotlight could not prepare Codex File Mode (startup check exited with code \(status)). Restart AI Spotlight and try again."
+      "Enigma could not prepare Codex File Mode (startup check exited with code \(status)). Restart Enigma and try again."
     case .disconnected:
       "The Codex connection closed. Try again; if it persists, update the Codex CLI."
     case .timedOut:
@@ -203,7 +203,7 @@ actor CodexAppServer: CodexRPCTransport {
   func prepareFileMode() async throws {
     if fileModeVerified { return }
     guard let executableURL = executable() else { throw CodexError.notInstalled }
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ai-spotlight-schema-" + UUID().uuidString)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("enigma-schema-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let process = Process()
@@ -248,7 +248,7 @@ actor CodexAppServer: CodexRPCTransport {
     let threadID = params["threadId"].string ?? ""
     guard let handler = fileHandlers[threadID] else {
       try? write(.object(["id": message["id"], "error": .object([
-        "code": .number(-32601), "message": .string("Unsupported by AI Spotlight")])]))
+        "code": .number(-32601), "message": .string("Unsupported by Enigma")])]))
       return
     }
     let generation = generation
@@ -280,7 +280,7 @@ actor CodexAppServer: CodexRPCTransport {
       try launch()
       _ = try await sendRequest("initialize", params: .object([
         "clientInfo": .object([
-          "name": .string("ai_spotlight"), "title": .string("AI Spotlight"), "version": .string("1.0"),
+          "name": .string("enigma"), "title": .string("Enigma"), "version": .string("1.0"),
         ]),
         "capabilities": .object(["experimentalApi": .bool(true)]),
       ]))

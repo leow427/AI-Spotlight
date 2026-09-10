@@ -23,7 +23,7 @@ including Auto and Legacy/Previous operating systems, with availability dependin
 on the operating system. If a legacy option is available, it is worth testing;
 its compatibility with this flag is an inference, not a Zoom guarantee.
 See [Zoom's advanced screen-sharing settings](https://support.zoom.com/hc/en/article?id=zm_kb&sysparm_article=KB0063824).
-AI Spotlight does not change Zoom's preferences.
+Enigma does not change Zoom's preferences.
 
 ## Verify with Zoom
 
@@ -33,7 +33,7 @@ AI Spotlight does not change Zoom's preferences.
    and move it while watching the receiving participant's screen. The desired
    result is an interactive local panel with the underlying content visible to
    the participant, without a blank rectangle or panel shadow.
-3. Start sharing both before and after opening AI Spotlight. Stop/restart the
+3. Start sharing both before and after opening Enigma. Stop/restart the
    share, reopen the panel, and open Settings and the model menu. Check each
    surface on the receiving screen.
 4. Repeat with the capture modes offered by the installed Zoom version,

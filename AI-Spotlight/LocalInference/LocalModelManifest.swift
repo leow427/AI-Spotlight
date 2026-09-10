@@ -27,6 +27,8 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
   var publisher: String? = nil
   var modelSummary: String? = nil
   var inferenceProfile: LocalMultimodalProfile? = nil
+  var advertisedMemoryRange: String? = nil
+  var modelSupportsAudio: Bool? = nil
 
   var summary: String {
     modelSummary ?? (supportsVision ? "A local model for general text answers and screenshot understanding."
@@ -121,6 +123,7 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
   case gemma4E2B, gemma4E4B, gemma4_12B, gemma4A4B, gemma4_31B
   case ministral3B, ministral8B, ministral14B
   case miniCPMV4, miniCPMV45
+  case smolVLM2, qwen35_4B, qwen35_9B, miniCPMO45
 
   static func legacyQwen(parameters: Double) -> Self? {
     switch parameters { case 4: .qwen3VL4B; case 8: .qwen3VL8B; case 32: .qwen3VL32B; default: nil }
@@ -132,7 +135,9 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
     case .gemma4E2B, .gemma4E4B, .gemma4_12B, .gemma4A4B, .gemma4_31B: "gemma4"
     case .ministral3B, .ministral8B, .ministral14B: "mistral3"
     case .miniCPMV4: "llama"
-    case .miniCPMV45: "qwen3"
+    case .miniCPMV45, .miniCPMO45: "qwen3"
+    case .smolVLM2: "llama"
+    case .qwen35_4B, .qwen35_9B: "qwen35"
     }
   }
 
@@ -143,6 +148,9 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
     case .ministral3B, .ministral8B, .ministral14B: "ministral3-instruct"
     case .miniCPMV4: "minicpm-v4"
     case .miniCPMV45: "minicpm-v4.5"
+    case .miniCPMO45: "minicpm-o4.5"
+    case .smolVLM2: "smolvlm2"
+    case .qwen35_4B, .qwen35_9B: "qwen3.5"
     }
   }
 
@@ -153,11 +161,13 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
     case .gemma4A4B: 26; case .gemma4_31B: 31
     case .ministral3B: 3.4; case .ministral8B: 8.5; case .ministral14B: 13.5
     case .miniCPMV4: 3.6; case .miniCPMV45: 8.2
+    case .miniCPMO45: 9; case .smolVLM2: 2.2
+    case .qwen35_4B: 4; case .qwen35_9B: 9
     }
   }
 
   var quantizations: [String] {
-    architecture == "gemma4" ? ["Q4_0"] : ["Q4_K_M", "Q8_0"]
+    architecture == "gemma4" ? ["Q4_0", "Q4_K_M", "Q5_K_M"] : ["Q4_K_M", "Q5_K_M", "Q8_0"]
   }
 
   var cacheBytesPerToken: Int64 {
@@ -165,7 +175,7 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
     // layers use different head dimensions/head counts. PLE/MoE weights
     // are already included in the actual artifact bytes, never active params.
     switch self {
-    case .qwen3VL4B, .qwen3VL8B, .miniCPMV45: 36 * 8 * 128 * 4
+    case .qwen3VL4B, .qwen3VL8B, .miniCPMV45, .miniCPMO45: 36 * 8 * 128 * 4
     case .qwen3VL32B: 64 * 8 * 128 * 4
     case .gemma4E2B: (28 * 1 * 256 + 7 * 1 * 512) * 4
     case .gemma4E4B: (35 * 2 * 256 + 7 * 2 * 512) * 4
@@ -176,6 +186,8 @@ enum LocalMultimodalProfile: String, Codable, CaseIterable, Sendable {
     case .ministral8B: 34 * 8 * 128 * 4
     case .ministral14B: 40 * 8 * 128 * 4
     case .miniCPMV4: 32 * 2 * 128 * 4
+    case .smolVLM2: 24 * 32 * 64 * 4
+    case .qwen35_4B, .qwen35_9B: 8 * 4 * 256 * 4
     }
   }
 
@@ -198,7 +210,7 @@ struct LocalModelManifest: Codable, Sendable, Equatable {
     try models.forEach { try $0.validate() }
   }
 
-  static let bundled = LocalModelManifest(version: 4, models: BundledLocalModels.models)
+  static let bundled = LocalModelManifest(version: 5, models: BundledLocalModels.models)
 }
 
 struct ModelDownloadProgress: Sendable, Equatable {
@@ -491,10 +503,10 @@ struct LocalVisionModelDescriptor: Sendable, Equatable, Identifiable {
     for artifact in [model, projector] {
       try artifact.validate()
       let path = artifact.url.pathComponents
-      guard artifact.url.host == "huggingface.co", path.count == 6, ["ggml-org", "Qwen", "google", "mistralai", "openbmb"].contains(path[1]),
+      guard artifact.url.host == "huggingface.co", (path.count == 6 || (path.count == 7 && path[5] == "vision")), ["ggml-org", "Qwen", "google", "mistralai", "openbmb", "unsloth", "bartowski"].contains(path[1]),
             path[3] == "resolve", path[4].range(of: "^[0-9a-f]{40}$", options: .regularExpression) != nil,
             artifact.url.pathExtension == "gguf",
-            artifact.url.deletingLastPathComponent() == model.url.deletingLastPathComponent() else {
+            Array(path.prefix(5)) == Array(model.url.pathComponents.prefix(5)) else {
         throw LocalModelCatalogError.invalidManifest(id)
       }
     }

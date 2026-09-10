@@ -2,9 +2,9 @@
 
 ## Project Structure & Architecture
 
-AI Spotlight is a native macOS app written in Swift 6. The Xcode project is
-`AI-Spotlight.xcodeproj`; its shared `AI-Spotlight` scheme builds the app and
-the `AI SpotlightTests` XCTest target. The app currently targets macOS 26.0.
+Enigma is a native macOS app written in Swift 6. The Xcode project is
+`AI-Spotlight.xcodeproj`; its shared `Enigma` scheme builds the app and
+the `EnigmaTests` XCTest target. The app currently targets macOS 26.0.
 
 - `AI-Spotlight/App/` contains application lifecycle, menu-bar/panel, shortcuts,
   settings, and top-level SwiftUI composition.
@@ -41,7 +41,7 @@ scripts/verify-xcode.sh analyze
 The helper uses `/tmp/AI-Spotlight-Verification`, disables signing, avoids
 Launch Services registration, and unregisters any temporary test host before
 and after each action. Pass normal `xcodebuild` options after the action; for
-example, `scripts/verify-xcode.sh test -only-testing:AI\ SpotlightTests/ScreenViewTests`.
+example, `scripts/verify-xcode.sh test -only-testing:EnigmaTests/ScreenViewTests`.
 
 Do not use the helper's unsigned product for interactive Screen Recording or
 accessibility testing: its changing code identity can invalidate macOS consent.

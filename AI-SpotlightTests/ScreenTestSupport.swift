@@ -1,5 +1,5 @@
 import Foundation
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class ScreenTestCredentialStore: CloudCredentialStore, @unchecked Sendable {
   private let lock = NSLock()

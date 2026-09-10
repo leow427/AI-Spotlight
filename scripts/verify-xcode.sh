@@ -8,7 +8,7 @@ launch_services_tool="/System/Library/Frameworks/CoreServices.framework/Versions
 
 unregister_verification_apps() {
   for build_configuration in Debug Release; do
-    verification_app="$verification_derived_data/Build/Products/$build_configuration/PrimaryAgent.app"
+    verification_app="$verification_derived_data/Build/Products/$build_configuration/Enigma.app"
     if [ -d "$verification_app" ]; then
       "$launch_services_tool" -u "$verification_app" >/dev/null 2>&1 || true
     fi
@@ -39,7 +39,7 @@ trap unregister_verification_apps EXIT HUP INT TERM
 cd "$repository_root"
 xcodebuild "$verification_action" \
   -project AI-Spotlight.xcodeproj \
-  -scheme AI-Spotlight \
+  -scheme Enigma \
   -destination 'platform=macOS' \
   -derivedDataPath "$verification_derived_data" \
   CODE_SIGNING_ALLOWED=NO \

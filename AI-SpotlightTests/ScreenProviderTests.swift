@@ -1,5 +1,5 @@
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class ScreenProviderTests: XCTestCase {
   private let image = PreparedScreenImage(data: Data([0xff, 0xd8, 0xff, 0xd9]), mimeType: "image/jpeg", pixelWidth: 10, pixelHeight: 10)

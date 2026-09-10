@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 @MainActor
 final class ScreenCaptureTests: XCTestCase {

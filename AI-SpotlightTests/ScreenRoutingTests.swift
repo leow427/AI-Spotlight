@@ -1,5 +1,5 @@
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class ScreenRoutingTests: XCTestCase {
   private let ocr = ScreenOCRResult(text: String(repeating: "let answer = 42;\n", count: 5), confidence: 0.9)

@@ -392,7 +392,7 @@ final class WorkspaceAccess: @unchecked Sendable {
         return
       }
       guard data.count <= Self.fileLimit else { throw FileModeError.tooLarge }
-      let temporary = ".ai-spotlight-\(UUID().uuidString).tmp"
+      let temporary = ".enigma-\(UUID().uuidString).tmp"
       let file = openat(fd, temporary, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode_t(0o600))
       guard file >= 0 else { throw posixError() }
       var renamed = false

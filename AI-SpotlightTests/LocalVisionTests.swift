@@ -4,7 +4,7 @@ import CryptoKit
 import Darwin
 import SwiftUI
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class LocalVisionTests: XCTestCase {
   func testVisionPairPersistsAndDoesNotReplaceTextSelection() throws {
@@ -81,7 +81,7 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertEqual(LocalVisionModelDescriptor.bundled.count, 13)
     for model in LocalVisionModelDescriptor.bundled {
       try model.validate()
-      XCTAssertEqual(model.model.url.deletingLastPathComponent(), model.projector.url.deletingLastPathComponent())
+      XCTAssertEqual(Array(model.model.url.pathComponents.prefix(5)), Array(model.projector.url.pathComponents.prefix(5)))
       XCTAssertGreaterThan(model.downloadByteCount, model.model.expectedByteCount + model.projector.expectedByteCount)
     }
     try LocalVisionRuntime.bundled.validate()
@@ -112,7 +112,8 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertNoThrow(try LlamaServerVisionEngine.prepare(messages: [ChatMessage(role: .user, content: "Describe the shapes.")], image: image, model: repaired))
     XCTAssertTrue(FileManager.default.fileExists(atPath: source.fileURL.path))
     XCTAssertTrue(FileManager.default.fileExists(atPath: source.visionConfiguration!.projectorURL.path))
-    XCTAssertFalse(LocalModelManifest.bundled.models.contains { $0.id.contains("smol") })
+    XCTAssertFalse(LocalModelManifest.bundled.models.contains { $0.id == "smolvlm-2b-q4:vision" })
+    XCTAssertTrue(LocalModelManifest.bundled.models.contains { $0.id == "smolvlm2-2.2b-q8_0" })
   }
 
   func testPackageReplacementPreservesSelectedVisionAndRollsBackOnFailure() throws {
@@ -121,7 +122,7 @@ final class LocalVisionTests: XCTestCase {
     let library = directory.appending(path: "library")
     let store = LocalModelInstallationStore(modelsDirectory: library)
     let source = try fixture(in: directory)
-    let descriptor = LocalVisionModelDescriptor.bundled[1]
+    let descriptor = try XCTUnwrap(LocalVisionModelDescriptor.bundled.first { $0.id == "qwen3.5-4b-q5_k_m" })
     let legacy = LocalModel(id: descriptor.id, displayName: "SmolVLM 2.2B", fileURL: source.fileURL,
       visionConfiguration: source.visionConfiguration)
     let original = try store.install(legacy)
@@ -469,10 +470,10 @@ final class LocalVisionTests: XCTestCase {
     XCTAssertTrue(text.contains("Local Models"), text)
     XCTAssertFalse(text.contains("Image understanding"), text)
     XCTAssertTrue(text.contains("Qwen3"), text)
-    XCTAssertTrue(text.contains("Google Gemma 4 E4B"), text)
+    XCTAssertTrue(text.contains("Middleweight"), text)
     XCTAssertTrue(text.contains("OpenBMB"), text)
-    XCTAssertTrue(text.contains("Mistral"), text)
-    XCTAssertTrue(text.contains("everyday writing and screenshot understanding"), text)
+    XCTAssertTrue(text.contains("MiniCPM-o 4.5"), text)
+    XCTAssertTrue(text.contains("Lightweight"), text)
     XCTAssertTrue(text.contains("Best choices for this Mac"), text)
     XCTAssertFalse(text.contains("SmolVLM"), text)
     XCTAssertTrue(text.contains("Install"), text)
@@ -484,7 +485,7 @@ final class LocalVisionTests: XCTestCase {
     let directory = try temporaryDirectory()
     defer { try? FileManager.default.removeItem(at: directory) }
     let source = try fixture(in: directory)
-    let descriptor = LocalVisionModelDescriptor.bundled[1]
+    let descriptor = try XCTUnwrap(LocalVisionModelDescriptor.bundled.first { $0.id == "qwen3.5-4b-q5_k_m" })
     let store = LocalModelInstallationStore(modelsDirectory: directory.appending(path: "library"))
     _ = try store.install(LocalModel(id: descriptor.id, displayName: "SmolVLM 2.2B", fileURL: source.fileURL,
       visionConfiguration: source.visionConfiguration))

@@ -18,6 +18,6 @@ jobs:
         run: >-
           xcodebuild test
           -project AI-Spotlight.xcodeproj
-          -scheme AI-Spotlight
+          -scheme Enigma
           -destination 'platform=macOS'
           CODE_SIGNING_ALLOWED=NO

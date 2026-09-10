@@ -2,7 +2,7 @@ import AppKit
 import Combine
 import SwiftUI
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 /// Opt-in hardware smoke test. Never downloads models or changes the user's installed library.
 @MainActor

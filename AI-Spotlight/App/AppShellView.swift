@@ -584,7 +584,7 @@ struct AppShellView: View {
           HStack(spacing: compact ? 4 : 12) {
             Image("SpotlightLogo").renderingMode(.template).resizable().scaledToFit()
               .foregroundStyle(NatureGlass.accent).frame(width: compact ? 28 : 40, height: compact ? 28 : 40).accessibilityHidden(true)
-            Text("engima").font(.system(size: compact ? 15 : 19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            Text("Enigma").font(.system(size: compact ? 15 : 19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
             Spacer(minLength: 0)
             Button { isSidebarVisible = false } label: {
               Image(systemName: "sidebar.left").font(.system(size: 14)).frame(width: 24, height: 32)
@@ -1397,7 +1397,7 @@ private struct KeyboardShortcutsHelpView: View {
           Text("System Settings → Privacy & Security → Accessibility. Enable \(SelectionAccessibilityAccess.appName) (Enigma). If it is missing, use + to add the app you are running.")
             .font(.caption).foregroundStyle(.secondary)
           Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
-          shortcut("Show or hide engima", keys: "⌥ Space")
+          shortcut("Show or hide Enigma", keys: "⌥ Space")
           shortcut("Open Advanced Settings", keys: "⌥ S")
 
           Divider()
@@ -1609,7 +1609,7 @@ struct SettingsView: View {
           }
         }
         Spacer()
-        Text("engima").font(.caption).foregroundStyle(NatureGlass.secondary).padding(16)
+        Text("Enigma").font(.caption).foregroundStyle(NatureGlass.secondary).padding(16)
       }
       .padding(12).frame(width: 208)
       .natureSurface(navigation: true).padding(12)
@@ -1836,7 +1836,7 @@ struct SettingsView: View {
       }
     }
     .formStyle(.grouped)
-    .navigationTitle("engima Settings")
+    .navigationTitle("Enigma Settings")
     .task {
       await settings.refreshChatGPTAccount()
       await settings.loadCachedModels()
@@ -1956,7 +1956,7 @@ private struct EnigmaCoalescenceView: NSViewRepresentable {
     configuration.websiteDataStore = .nonPersistent()
     let view = WKWebView(frame: .zero, configuration: configuration)
     view.setValue(false, forKey: "drawsBackground")
-    view.setAccessibilityLabel("engima is thinking")
+    view.setAccessibilityLabel("Enigma is thinking")
     return view
   }
 

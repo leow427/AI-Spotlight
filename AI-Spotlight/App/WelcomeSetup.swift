@@ -55,7 +55,10 @@ final class WelcomeSetup: ObservableObject {
 
   static func choices(_ recommendations: LocalModelRecommendations, preserving selectedID: String? = nil) -> [LocalModelAssessment] {
     let first = recommendations.recommended.map { [$0] } ?? []
-    var choices = Array((first + recommendations.rankedChoices.filter { $0.id != first.first?.id }).prefix(3))
+    let alternatives = recommendations.tierGroups.flatMap { $0.models }
+      .filter { $0.fit.canRun && $0.id != first.first?.id }
+      .sorted(by: LocalModelSelector.hardwareOrder)
+    var choices = Array((first + alternatives).prefix(3))
     // A benchmark can reorder recommendations; do not require a second download.
     if let selectedID, !choices.contains(where: { $0.id == selectedID }),
        let chosen = recommendations.assessments.first(where: { $0.id == selectedID && $0.fit.canRun }) {

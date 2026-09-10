@@ -17,9 +17,9 @@ enum ScreenCaptureError: LocalizedError, Equatable {
   var errorDescription: String? {
     switch self {
     case .permissionDenied:
-      "macOS is not granting Screen Recording to this copy of AI Spotlight. If PrimaryAgent is already enabled in System Settings, remove that stale entry, add the currently running app, then quit and reopen AI Spotlight. Your draft has been kept."
+      "macOS is not granting Screen Recording to this copy of Enigma. If Enigma is already enabled in System Settings, remove that stale entry, add the currently running app, then quit and reopen Enigma. Your draft has been kept."
     case .restartRequired:
-      "Screen Recording permission was granted. Quit and reopen AI Spotlight to make screenshot pixels available, then try again. Your draft has been kept."
+      "Screen Recording permission was granted. Quit and reopen Enigma to make screenshot pixels available, then try again. Your draft has been kept."
     case .invalidImage: "The screenshot could not be read. Please retake it."
     case .alreadyCapturing: "Finish the current screen selection first."
     }
@@ -62,7 +62,7 @@ final class ScreenCaptureService: ScreenCapturing {
     try await environment.waitForPanel()
     try Task.checkCancellation()
     if fullDesktop { return try await environment.desktop() }
-    let url = environment.temporaryDirectory.appendingPathComponent("ai-spotlight-screen-\(UUID().uuidString).png")
+    let url = environment.temporaryDirectory.appendingPathComponent("enigma-screen-\(UUID().uuidString).png")
     defer { try? FileManager.default.removeItem(at: url) }
     try await environment.run(url)
     try Task.checkCancellation()
@@ -85,7 +85,7 @@ final class ScreenCaptureService: ScreenCapturing {
   private static func runDesktop() async throws -> NSImage? {
     let screens = NSScreen.screens
     guard !screens.isEmpty else { throw ScreenCaptureError.invalidImage }
-    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("ai-spotlight-desktop-" + UUID().uuidString)
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("enigma-desktop-" + UUID().uuidString)
     try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: directory) }
     let urls = screens.indices.map { directory.appendingPathComponent("display-\($0).png") }

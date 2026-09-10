@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class ChatContextTests: XCTestCase {
   private let budget = ContextBudget(contextWindow: 100, outputTokens: 20, overheadTokens: 10)

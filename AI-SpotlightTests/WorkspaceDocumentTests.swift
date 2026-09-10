@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class WorkspaceDocumentTests: XCTestCase {
   private let original = Data(#"{\rtf1\ansi\deff0{\fonttbl{\f0 Helvetica;}}{\colortbl;\red255\green0\blue0;}\paperw12240\paperh15840\margl1440\margr1440\f0\fs24 Heading\par \b before\b0  and \cf1 coloured\cf0  text.}"#.utf8)

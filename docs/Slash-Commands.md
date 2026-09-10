@@ -18,7 +18,7 @@ select, Tab or Return to complete, or click a suggestion. Escape dismisses the
 list before hiding the panel. Shift-Return inserts a newline. Completion edits
 only the command at the caret and supports Undo.
 
-The menu floats above the latest engima composer without moving its attachment,
+The menu floats above the latest Enigma composer without moving its attachment,
 model, or send controls. Search uses blue, Screen purple, Snapshot orange, and
 Think pink; each menu icon and its command label share the same color. Draft
 commands retain their blue highlighting. Compact and wide layouts use the

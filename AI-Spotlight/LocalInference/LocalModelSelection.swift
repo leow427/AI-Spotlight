@@ -8,7 +8,7 @@ enum LocalModelCompatibility {
 
   static func supports(_ model: LocalModelDescriptor) -> Bool {
     if model.supportsVision {
-      guard let profile = model.resolvedProfile else { return false }
+      guard let profile = model.resolvedProfile, profile != .miniCPMO45 else { return false }
       return model.runtimeBuild == LocalVisionRuntime.build && model.minimumLlamaBuild <= LocalVisionRuntime.build
         && model.architecture == profile.architecture && model.chatTemplate == profile.chatTemplate
         && model.parameterBillions == profile.parameters
@@ -60,6 +60,18 @@ struct LocalModelRecommendations: Sendable {
   let recommended: LocalModelAssessment?
   let faster: LocalModelAssessment?
   let smarter: LocalModelAssessment?
+  var physicalMemory: Int64 = 0
+
+  var tierGroups: [(weight: LocalModelWeight, models: [LocalModelAssessment])] {
+    LocalModelTiers.choices(memory: physicalMemory).map { weight, ids in
+      (weight, ids.compactMap { id in assessments.first { $0.id == id } })
+    }
+  }
+
+  var otherTierAssessments: [LocalModelAssessment] {
+    let ids = Set(tierGroups.flatMap { $0.models.map(\.id) })
+    return assessments.filter { !ids.contains($0.id) }.sorted(by: LocalModelSelector.hardwareOrder)
+  }
 
   /// Best suitable choices only; unavailable entries never fill the top ten.
   var rankedChoices: [LocalModelAssessment] {
@@ -86,11 +98,12 @@ enum LocalModelSelector {
     manifest: LocalModelManifest, hardware: LocalHardwareProfile,
     measurements: [LocalModelBenchmark] = [], installedIDs: Set<String> = []
   ) -> LocalModelRecommendations {
+    let tierIDs = Set(LocalModelTiers.choices(memory: hardware.physicalMemory).flatMap { $0.1 })
     let assessments = manifest.models.map {
       assess($0, hardware: hardware, measurements: measurements, installed: installedIDs.contains($0.id))
     }
     // Safety is a gate, not a term in a score that quality can outweigh.
-    let responsive = assessments.filter(\.isResponsive).sorted(by: qualityOrder)
+    let responsive = assessments.filter { $0.isResponsive && tierIDs.contains($0.id) }.sorted(by: qualityOrder)
     let recommended = responsive.first
     let faster = recommended.flatMap { current in
       responsive.filter {
@@ -105,7 +118,7 @@ enum LocalModelSelector {
       }.sorted(by: qualityOrder).first
     }
     return LocalModelRecommendations(assessments: assessments, recommended: recommended,
-                                     faster: faster, smarter: smarter)
+                                     faster: faster, smarter: smarter, physicalMemory: hardware.physicalMemory)
   }
 
   static func hardwareOrder(_ lhs: LocalModelAssessment, _ rhs: LocalModelAssessment) -> Bool {
@@ -135,6 +148,9 @@ enum LocalModelSelector {
     func result(_ fit: LocalModelFit, _ reason: String) -> LocalModelAssessment {
       LocalModelAssessment(model: model, fit: fit, reason: reason, tokensPerSecond: speed,
                            timeToFirstToken: ttft, isMeasured: exact != nil)
+    }
+    if model.resolvedProfile == .miniCPMO45 {
+      return result(.unsupported, "MiniCPM-o 4.5 requires its dedicated runtime; installation is not available in this version of Enigma.")
     }
     guard model.supportsVision, (try? model.validate()) != nil, LocalModelCompatibility.supports(model) else {
       return result(.unsupported, "Requires an unsupported architecture, chat format, context, or llama.cpp build.")

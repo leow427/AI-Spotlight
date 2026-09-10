@@ -1,5 +1,5 @@
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class WorkspaceWritePolicyTests: XCTestCase {
   private var root: URL!

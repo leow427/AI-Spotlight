@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @main
-struct AISpotlightApp: App {
+struct EnigmaApp: App {
   @NSApplicationDelegateAdaptor(ApplicationDelegate.self) private var applicationDelegate
 
   var body: some Scene {
@@ -33,7 +33,7 @@ final class SettingsWindowController: NSWindowController {
       backing: .buffered,
       defer: false
     )
-    window.title = "engima Settings"
+    window.title = "Enigma Settings"
     window.appearance = NSAppearance(named: .darkAqua)
     window.titlebarAppearsTransparent = true
     window.backgroundColor = NSColor(NatureGlass.forestTop)

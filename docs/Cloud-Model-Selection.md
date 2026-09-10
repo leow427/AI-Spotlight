@@ -1,6 +1,6 @@
 # Cloud model selection (Group E)
 
-AI Spotlight's OpenAI client implements streaming text conversations with
+Enigma's OpenAI client implements streaming text conversations with
 `POST /v1/responses`, string user/assistant messages, `store: false`, and a bounded
 `max_output_tokens`. The general [OpenAI Models API](https://developers.openai.com/api/reference/resources/models)
 is an account model listing, not a certification that each entry accepts this

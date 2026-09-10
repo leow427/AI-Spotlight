@@ -1,7 +1,7 @@
 import XCTest
 import AppKit
 import CryptoKit
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class FileModeRuntimeTests: XCTestCase {
   /// Opt-in integration uses the production local permission policy in a disposable workspace.

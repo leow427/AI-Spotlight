@@ -1,7 +1,7 @@
 import Combine
 import Foundation
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 @MainActor
 final class RequestLifecycleTests: XCTestCase {

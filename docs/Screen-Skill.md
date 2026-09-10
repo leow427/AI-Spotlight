@@ -95,7 +95,7 @@ For an optional real model check, create `/tmp/AI-Spotlight-Vision-Smoke.json`:
 }
 ```
 
-Run `scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/ScreenNativeSmokeTests'`.
+Run `scripts/verify-xcode.sh test '-only-testing:EnigmaTests/ScreenNativeSmokeTests'`.
 The test copies into an isolated temporary library, uses synthetic shapes, checks
 ordinary text arithmetic, and verifies the model stays resident across requests.
 
@@ -110,7 +110,7 @@ Create `/tmp/AI-Spotlight-Screen-Search-Smoke.json`:
 }
 ```
 
-Run `scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/ScreenSearchNativeSmokeTests'`.
+Run `scripts/verify-xcode.sh test '-only-testing:EnigmaTests/ScreenSearchNativeSmokeTests'`.
 Fixed public evidence is the default. `liveSearch: true` explicitly authorizes using
 the configured Brave credential and normal API usage; routine verification does
 not need it. Both tests are skipped in CI unless the explicit fixtures exist.

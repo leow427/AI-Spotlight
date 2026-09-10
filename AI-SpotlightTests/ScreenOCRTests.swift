@@ -1,6 +1,6 @@
 import AppKit
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class ScreenOCRTests: XCTestCase {
   func testOrdersRowsTopToBottomThenLeftToRight() {

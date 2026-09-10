@@ -3,20 +3,70 @@ import CryptoKit
 import Foundation
 import SwiftUI
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class LocalModelSelectionTests: XCTestCase {
   private let gib = LocalHardwareProfile.gib
   private var catalog: LocalModelManifest { .bundled }
 
+  func testRequestedHardwareTiersContainExactPackagesAndQuantizations() throws {
+    let expected: [Int: [[String]]] = [
+      16: [["smolvlm2-2.2b-q8_0"], ["qwen3.5-4b-q4_k_m", "gemma-4-e4b-q4_k_m"],
+           ["ministral-3-8b-q4_k_m", "minicpm-o-4.5-q4_k_m"]],
+      24: [["qwen3.5-4b-q5_k_m"], ["qwen3.5-9b-q5_k_m", "minicpm-o-4.5-q5_k_m"],
+           ["gemma-4-12b-q5_k_m", "ministral-3-14b-q5_k_m"]],
+      32: [["qwen3.5-4b-q8_0"], ["minicpm-o-4.5-q5_k_m", "gemma-4-12b-q5_k_m"],
+           ["ministral-3-14b-q8_0", "gemma-4-26b-a4b-q4_k_m"]]
+    ]
+    for memory in [16, 18, 24, 32] {
+      let recommendations = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: memory))
+      XCTAssertEqual(recommendations.tierGroups.map(\.weight), LocalModelWeight.allCases)
+      XCTAssertEqual(recommendations.tierGroups.map { $0.models.map(\.id) }, expected[memory == 18 ? 16 : memory])
+      XCTAssertEqual(recommendations.tierGroups.flatMap { $0.models }.count, 5)
+      let tierIDs = Set(recommendations.tierGroups.flatMap { $0.models.map(\.id) })
+      XCTAssertEqual(tierIDs.union(recommendations.otherTierAssessments.map(\.id)), Set(catalog.models.map(\.id)))
+      if let recommended = recommendations.recommended {
+        XCTAssertTrue(tierIDs.contains(recommended.id))
+        XCTAssertTrue(recommended.isResponsive)
+      }
+    }
+  }
+
+  func testNewCatalogueDoesNotMisrepresentUnavailableRuntimeOrAudio() throws {
+    let mini = catalog.models.filter { $0.inferenceProfile == .miniCPMO45 }
+    XCTAssertEqual(mini.count, 2)
+    for model in mini {
+      try model.validate()
+      let assessment = LocalModelSelector.assess(model, hardware: hardware(memory: 128))
+      XCTAssertEqual(assessment.fit, .unsupported)
+      XCTAssertFalse(assessment.canInstall)
+      XCTAssertTrue(assessment.reason.contains("dedicated runtime"))
+      XCTAssertEqual(model.modelSupportsAudio, true)
+    }
+    for model in catalog.models {
+      XCTAssertNotNil(model.advertisedMemoryRange)
+      XCTAssertTrue(model.downloadURL.lastPathComponent.contains(model.quantization))
+      if model.modelSupportsAudio == true {
+        XCTAssertTrue(model.performanceClass.contains("Text and images in Enigma"))
+      }
+    }
+    XCTAssertFalse(catalog.models.contains { $0.id.contains("qwen3-vl") || $0.id.contains("minicpm-v") })
+  }
+
+  func testEnigmaProductKeepsExistingUserDataIdentity() {
+    XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleDisplayName") as? String, "Enigma")
+    XCTAssertEqual(Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String, "Enigma")
+    XCTAssertEqual(Bundle.main.bundleIdentifier, "com.leow427.AISpotlight")
+  }
+
   func testCatalogPinsEveryQuantizationAndMatchesEmbeddedBuild() throws {
     try catalog.validate()
     XCTAssertEqual(catalog.models.count, 13)
-    XCTAssertEqual(Set(catalog.models.map(\.quantization)), ["Q4_K_M", "Q4_0"])
-    XCTAssertEqual(Set(catalog.models.map(\.maker)), ["Alibaba / Qwen", "Google", "Mistral AI", "OpenBMB"])
-    XCTAssertEqual(Set(catalog.models.compactMap(\.resolvedProfile)), Set(LocalMultimodalProfile.allCases))
+    XCTAssertEqual(Set(catalog.models.map(\.quantization)), ["Q4_K_M", "Q5_K_M", "Q8_0"])
+    XCTAssertEqual(Set(catalog.models.map(\.maker)), ["Alibaba / Qwen", "Google", "Mistral AI", "OpenBMB", "Hugging Face"])
+    XCTAssertEqual(Set(catalog.models.compactMap(\.resolvedProfile)), Set([.smolVLM2, .qwen35_4B, .qwen35_9B, .gemma4E4B, .gemma4_12B, .gemma4A4B, .ministral8B, .ministral14B, .miniCPMO45]))
     for model in catalog.models {
-      XCTAssertTrue(LocalModelCompatibility.supports(model))
+      XCTAssertEqual(LocalModelCompatibility.supports(model), model.inferenceProfile != .miniCPMO45)
       XCTAssertTrue(model.supportsVision)
       XCTAssertNotNil(model.modelSummary)
       XCTAssertLessThanOrEqual(model.summary.count, 300)
@@ -32,7 +82,7 @@ final class LocalModelSelectionTests: XCTestCase {
   }
 
   func testGemmaTwelveBUsesPinnedOfficialQuantizedPackage() throws {
-    let model = try XCTUnwrap(catalog.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
+    let model = try XCTUnwrap(LegacyModelFixtures.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
     XCTAssertEqual(model.displayName, "Google Gemma 4 12B")
     XCTAssertEqual(model.revision, "29d097773436b69ff9feafd636ab4cf873786537")
     XCTAssertEqual(model.expectedByteCount, 6_975_879_296)
@@ -41,11 +91,11 @@ final class LocalModelSelectionTests: XCTestCase {
     XCTAssertEqual(model.projector?.checksumSHA256, "cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7")
     XCTAssertEqual(model.inferenceProfile, .gemma4_12B)
     XCTAssertEqual(model.quantization, "Q4_0")
-    XCTAssertTrue(LocalModelCompatibility.supports(model))
+    XCTAssertEqual(LocalModelCompatibility.supports(model), model.inferenceProfile != .miniCPMO45)
   }
 
   func testGemmaTwelveBCanBeInstalledAndLoadedWithAnExplicitMemoryOverride() throws {
-    let gemma = try XCTUnwrap(catalog.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
+    let gemma = try XCTUnwrap(LegacyModelFixtures.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
     let insufficientMemory = LocalModelSelector.assess(gemma, hardware: hardware(memory: 24))
     XCTAssertEqual(insufficientMemory.fit, .memory)
     XCTAssertTrue(insufficientMemory.permitsMemoryOverride)
@@ -63,7 +113,7 @@ final class LocalModelSelectionTests: XCTestCase {
     mac.performanceCPUCount = 16
     let choices = LocalModelSelector.select(manifest: catalog, hardware: mac)
     XCTAssertEqual(choices.rankedChoices.count, 10)
-    XCTAssertEqual(choices.rankedChoices.first?.id, choices.recommended?.id)
+    XCTAssertTrue(choices.tierGroups.flatMap { $0.models }.contains { $0.id == choices.recommended?.id })
     XCTAssertEqual(Set(choices.rankedChoices.map(\.id)).count, 10)
     XCTAssertTrue(choices.rankedChoices.allSatisfy { $0.fit.canRun })
     XCTAssertGreaterThanOrEqual(Set(choices.rankedChoices.map(\.model.maker)).count, 3)
@@ -80,7 +130,7 @@ final class LocalModelSelectionTests: XCTestCase {
     XCTAssertEqual(small.otherAssessments.count, catalog.models.count)
     let ordinary = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 24))
     XCTAssertLessThan(ordinary.rankedChoices.count, 10)
-    XCTAssertGreaterThanOrEqual(Set(ordinary.rankedChoices.map(\.model.maker)).count, 4)
+    XCTAssertGreaterThanOrEqual(Set(ordinary.rankedChoices.map(\.model.maker)).count, 3)
     XCTAssertTrue(ordinary.rankedChoices.allSatisfy { $0.model.minimumMemory <= 24 * gib })
     mac.availableDiskBytes = 0
     XCTAssertTrue(LocalModelSelector.select(manifest: catalog, hardware: mac).rankedChoices.isEmpty)
@@ -109,7 +159,7 @@ final class LocalModelSelectionTests: XCTestCase {
   }
 
   func testOldInstalledDescriptorDecodesWithoutDescriptionsOrProfilesAndKeepsPackageIdentity() throws {
-    let model = catalog.models[0]
+    let model = LegacyModelFixtures.models[0]
     var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(model)) as? [String: Any])
     for key in ["publisher", "modelSummary", "inferenceProfile"] { json.removeValue(forKey: key) }
     let restored = try JSONDecoder().decode(LocalModelDescriptor.self, from: JSONSerialization.data(withJSONObject: json))
@@ -147,7 +197,7 @@ final class LocalModelSelectionTests: XCTestCase {
         if let recommended = results.recommended {
           XCTAssertTrue(recommended.isResponsive)
           XCTAssertEqual(recommended.model.qualityScore,
-                         results.assessments.filter(\.isResponsive).map(\.model.qualityScore).max())
+                         results.tierGroups.flatMap { $0.models }.filter(\.isResponsive).map(\.model.qualityScore).max())
         }
       }
     }
@@ -224,7 +274,8 @@ final class LocalModelSelectionTests: XCTestCase {
     XCTAssertEqual(current.tokensPerSecond, 4)
     XCTAssertEqual(current.fit, .slow)
     XCTAssertNotNil(measured.fasterAlternative(to: recommended.id))
-    XCTAssertEqual(measured.assessments.first { $0.id == original.faster?.id }?.isMeasured, false)
+    let alternative = try XCTUnwrap(measured.fasterAlternative(to: recommended.id))
+    XCTAssertFalse(alternative.isMeasured)
   }
 
   func testMeasurementsAreScopedToMacRuntimeContextChecksumAgeAndPowerMode() throws {
@@ -438,15 +489,18 @@ final class LocalModelSelectionTests: XCTestCase {
   }
 
   @MainActor
-  func testGemmaTwelveBDownloadConfirmationAllowsTheMemoryOverride() async throws {
+  func testRetiredGemmaPackageIsNotOfferedForNewDownload() async throws {
     let root = try temporaryDirectory()
     let profile = hardware(memory: 24)
     let advisor = LocalModelAdvisor(directory: root, modelsDirectory: root, trust: nil, detect: { _ in profile })
-    let gemma = try XCTUnwrap(catalog.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
+    let gemma = try XCTUnwrap(LegacyModelFixtures.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
 
-    let assessment = try await advisor.confirmDownload(gemma, installedModels: [])
-    XCTAssertEqual(assessment.fit, .memory)
-    XCTAssertTrue(assessment.canInstall)
+    do {
+      _ = try await advisor.confirmDownload(gemma, installedModels: [])
+      XCTFail("Retired packages must not be offered for new installation")
+    } catch {
+      XCTAssertTrue(error.localizedDescription.contains("resources"))
+    }
   }
 
   @MainActor
@@ -735,7 +789,7 @@ extension LocalModelSelectionTests {
     for memory in [4, 8, 16, 32, 128] {
       let recommendations = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: memory))
       let choices = WelcomeSetup.choices(recommendations)
-      XCTAssertEqual(choices.count, min(3, recommendations.rankedChoices.count))
+      XCTAssertEqual(choices.count, min(3, recommendations.tierGroups.flatMap { $0.models }.filter(\.fit.canRun).count))
       XCTAssertEqual(Set(choices.map(\.id)).count, choices.count)
       XCTAssertTrue(choices.allSatisfy { $0.fit.canRun })
       if let recommended = recommendations.recommended { XCTAssertEqual(choices.first?.id, recommended.id) }
@@ -746,7 +800,9 @@ extension LocalModelSelectionTests {
   func testWelcomeKeepsChosenModelVisibleAfterRecommendationChanges() throws {
     let recommendations = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 128))
     let original = WelcomeSetup.choices(recommendations)
-    let chosen = try XCTUnwrap(recommendations.rankedChoices.last)
+    let chosen = try XCTUnwrap(recommendations.rankedChoices.last { candidate in
+      !original.contains { $0.id == candidate.id }
+    })
     XCTAssertFalse(original.contains { $0.id == chosen.id })
     let retained = WelcomeSetup.choices(recommendations, preserving: chosen.id)
     XCTAssertEqual(retained.count, 3)
@@ -849,4 +905,46 @@ private struct WelcomeEmptySearchCredentials: WebSearchCredentialStore {
   func apiKey() throws -> String? { nil }
   func setAPIKey(_ value: String) throws {}
   func removeAPIKey() throws {}
+}
+
+
+// Official publisher GGUF/LFS metadata and llama.cpp b10797 reviewed 2026-09-06.
+// See docs/Local-Model-Selection.md for evidence, memory policy and limitations.
+// Retired packages are fixtures for decoding and memory-override compatibility only.
+private enum LegacyModelFixtures {
+  static let models: [LocalModelDescriptor] = [
+    LocalModelDescriptor(
+      id: "qwen3-vl-4b-instruct-q4-k-m", displayName: "Qwen3-VL 4B Instruct",
+      downloadURL: URL(string: "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/1cd86afb9a95c410a6038ab3b40d8b578c892266/Qwen3VL-4B-Instruct-Q4_K_M.gguf")!,
+      expectedByteCount: 2497281664, license: "Apache-2.0", checksumSHA256: "66358cb18bb6b3b1b6675aa412c7a88ef01d228f481184d13668e5201c730a0a",
+      revision: "1cd86afb9a95c410a6038ab3b40d8b578c892266", quantization: "Q4_K_M", architecture: "qwen3vl",
+      chatTemplate: "qwen3-vl-instruct", minimumLlamaBuild: 10797,
+      estimatedRuntimeMemory: LocalModelDescriptor.multimodalMemory(weights: 2497281664, projector: 836180256, parameters: 4, context: 8192),
+      largestTensorBytes: LocalHardwareProfile.gib, recommendedContextSize: 8192,
+      qualityScore: 76, performanceClass: "General text and visual reasoning", parameterBillions: 4,
+      minimumMemory: 12 * LocalHardwareProfile.gib, recommendedMemory: 16 * LocalHardwareProfile.gib,
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/resolve/1cd86afb9a95c410a6038ab3b40d8b578c892266/mmproj-Qwen3VL-4B-Instruct-F16.gguf")!,
+        expectedByteCount: 836180256, checksumSHA256: "256f3a43bd4205ffef48d6b92715e1e70b5b0e9aef06522584967513a9985331"), runtimeBuild: 10797, publisher: "Alibaba / Qwen", modelSummary: "An efficient Alibaba model for everyday chat, reading screenshots and visual questions."),
+    package(id: "gemma-4-12b-it-qat-q4_0-gguf", name: "Google Gemma 4 12B", publisher: "Google",
+      summary: "A mid-sized Google model for stronger reasoning, writing and image understanding on higher-memory Macs.", profile: .gemma4_12B, quality: 89, minimumGiB: 32, recommendedGiB: 48,
+      revision: "29d097773436b69ff9feafd636ab4cf873786537", model: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/29d097773436b69ff9feafd636ab4cf873786537/gemma-4-12b-it-qat-q4_0.gguf")!,
+        expectedByteCount: 6975879296, checksumSHA256: "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b"),
+      projector: VerifiedModelArtifact(url: URL(string: "https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/resolve/29d097773436b69ff9feafd636ab4cf873786537/mmproj-gemma-4-12b-it-qat-q4_0.gguf")!,
+        expectedByteCount: 175115616, checksumSHA256: "cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7")),
+  ]
+
+  private static func package(id: String, name: String, publisher: String, summary: String,
+    profile: LocalMultimodalProfile, quality: Double, minimumGiB: Int64, recommendedGiB: Int64,
+    revision: String, model: VerifiedModelArtifact, projector: VerifiedModelArtifact) -> LocalModelDescriptor {
+    LocalModelDescriptor(id: id, displayName: name, downloadURL: model.url,
+      expectedByteCount: model.expectedByteCount, license: "Apache-2.0", checksumSHA256: model.checksumSHA256,
+      revision: revision, quantization: profile.quantizations[0], architecture: profile.architecture,
+      chatTemplate: profile.chatTemplate, minimumLlamaBuild: LocalVisionRuntime.build,
+      estimatedRuntimeMemory: profile.memory(weights: model.expectedByteCount, projector: projector.expectedByteCount, context: 8192),
+      largestTensorBytes: (profile.architecture == "gemma4" ? 3 : 1) * LocalHardwareProfile.gib,
+      recommendedContextSize: 8192, qualityScore: quality, performanceClass: "General text and visual reasoning",
+      parameterBillions: profile.parameters, minimumMemory: minimumGiB * LocalHardwareProfile.gib,
+      recommendedMemory: recommendedGiB * LocalHardwareProfile.gib, projector: projector,
+      runtimeBuild: LocalVisionRuntime.build, publisher: publisher, modelSummary: summary, inferenceProfile: profile)
+  }
 }

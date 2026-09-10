@@ -27,7 +27,7 @@ flowchart TD
 - A file attachment authorizes exactly that leaf, not siblings or its parent folder. Multiple attachments have explicit numbered mount names. Redundant selections are normalized.
 - Absolute paths, NULs, `..`, descendant symlinks, hard-linked file contents, special files and writes under `.git`, `.codex` or `.agents` are rejected. Internal descendant symlinks are deliberately rejected too; users can attach their target explicitly.
 - POSIX `realpath`, verified root identities, directory descriptors, `openat`/`O_NOFOLLOW` and `F_GETPATH` checks enforce the boundary and reject case aliases for mutations. Atomic replacements do not follow destination links.
-- No Full Disk Access permission is requested. Existing macOS permissions still apply. AI Spotlight's current app target is not App Sandbox-enabled; security-scoped bookmarks are used for picker-granted locations, and the shared service also enforces scope inside the app. A future App Sandbox distribution must validate individual-file deletion recovery with its entitlement configuration; restoring a deleted leaf never silently grants its parent.
+- No Full Disk Access permission is requested. Existing macOS permissions still apply. Enigma's current app target is not App Sandbox-enabled; security-scoped bookmarks are used for picker-granted locations, and the shared service also enforces scope inside the app. A future App Sandbox distribution must validate individual-file deletion recovery with its entitlement configuration; restoring a deleted leaf never silently grants its parent.
 - File names and file/tool contents are treated as untrusted data. They cannot grant permissions, choose a provider, run commands or register tools.
 - Removing attachments is disabled during a task. Stop revokes the task's authority and cancels pending deletion confirmation; queued operations check cancellation and authority. Completed edits remain reviewable.
 
@@ -65,7 +65,7 @@ Mutation receipts include a bounded read-back and a check of actual journal afte
 
 | Classification | Examples | Local behavior |
 | --- | --- | --- |
-| Safe write | Plain `.md`, `.markdown`, `.txt`, `.text`; extensionless notes, plans, checklists, TODO and README; verified files created by AI Spotlight | Edit directly, with snapshots and Undo. No cloud availability check is made. |
+| Safe write | Plain `.md`, `.markdown`, `.txt`, `.text`; extensionless notes, plans, checklists, TODO and README; verified files created by Enigma | Edit directly, with snapshots and Undo. No cloud availability check is made. |
 | Protected write | Source code, project/configuration files, structured data, unknown formats, hidden settings, instruction files and sensitive credential names | Offer Codex when available. Pause the protected operation until the user approves the cloud disclosure and sends the prepared draft. |
 | Protected write with unavailable cloud | Offline Mac, no installed/signed-in compatible Codex runtime, no compatible model, or failed availability check | Allow a local attempt with a visible “Local fallback” notice explaining lower reliability. The same transactional protections apply. |
 
@@ -93,7 +93,7 @@ Reference: [Apple RTF export](https://developer.apple.com/documentation/foundati
 
 ## Changes and undo
 
-Before the first mutation of each affected path, the service writes a durable before/after journal in `~/Library/Application Support/AI Spotlight/File Changes`. Recovery files have mode `0600` inside a `0700` directory. These local recovery copies can contain sensitive file contents and remain until removed; this version does not prune them automatically. Bookmarks and conversation IDs are included; full attachment contents are not stored in chat messages by default.
+Before the first mutation of each affected path, the service writes a durable before/after journal in `~/Library/Application Support/Enigma/File Changes`. Recovery files have mode `0600` inside a `0700` directory. These local recovery copies can contain sensitive file contents and remain until removed; this version does not prune them automatically. Bookmarks and conversation IDs are included; full attachment contents are not stored in chat messages by default.
 
 Transactions preflight all paths and mutations before writing, preserve the first before-image across subsequent tool calls, and apply files using atomic replacements. Failed multi-file operations roll back completed steps when the files still match the operation's after-images. Undo restores modified/deleted files, removes new files and restores both sides of a move. Ownership, ordinary permission bits, macOS ACLs and writable extended attributes, including Finder metadata, are retained. If ownership or access rules cannot be restored, replacement fails before committing. Temporary copies have their inherited ACLs cleared before content is written. Kernel-generated authorization/provenance records, inode identity and timestamps are not restored as historical metadata.
 
@@ -125,18 +125,18 @@ The optional real llama.cpp smoke test is enabled with:
 
 ```sh
 TEST_RUNNER_AI_SPOTLIGHT_FILE_TEST_MODEL_PATH=/absolute/path/to/model.gguf \
-  scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/FileModeRuntimeTests'
+  scripts/verify-xcode.sh test '-only-testing:EnigmaTests/FileModeRuntimeTests'
 ```
 
 The tests use production local access and per-file policies, read disposable fixtures, write precisely specified edits through the shared tools and verify Undo. They cover a safe text file with no cloud check, plus protected source and RTF fixtures with an explicitly unavailable-cloud fallback. Exact-content assertions remain strict, including the unchanged source-file syntax and final newline. Qwen 2.5 3B Q8 is used for local integration verification. Model output quality still depends on tool-calling support and instructions; Review and Undo remain available for local edits. Cloud integration tests normally use deterministic native transport fixtures and the real app-server probe. Two explicit opt-ins also exercise the app-hosted native CLI check and a real signed-in Codex RTF edit:
 
 ```sh
 TEST_RUNNER_AI_SPOTLIGHT_CODEX_TEST_PATH=/absolute/path/to/codex \
-  scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/CodexSubscriptionTests/testInstalledCodexFileModePreparation'
+  scripts/verify-xcode.sh test '-only-testing:EnigmaTests/CodexSubscriptionTests/testInstalledCodexFileModePreparation'
 TEST_RUNNER_AI_SPOTLIGHT_CODEX_FILE_SMOKE=1 \
-  scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/FileModeRuntimeTests/testRealCodexEditsRichTextAndUndoes'
+  scripts/verify-xcode.sh test '-only-testing:EnigmaTests/FileModeRuntimeTests/testRealCodexEditsRichTextAndUndoes'
 ```
 
-The second opt-in uses AI Spotlight's existing ChatGPT sign-in and Codex allowance. It attaches only a disposable synthetic RTF sentence, confirms a precise edit, checks that it remains valid RTF, and verifies byte-for-byte Undo. It never reads the user's test documents.
+The second opt-in uses Enigma's existing ChatGPT sign-in and Codex allowance. It attaches only a disposable synthetic RTF sentence, confirms a precise edit, checks that it remains valid RTF, and verifies byte-for-byte Undo. It never reads the user's test documents.
 
 The earlier Qwen 2.5 3B Q8 smoke run reported an intermittent completion-length failure on the plain-text fixture. That log alone did not establish its cause or a relationship to file size. The separate [reliability evaluation](File-Mode-Reliability.md) records the controlled baseline, implementation, all development attempts, final comparisons and remaining limitations. Run a fresh measurement with `python3 scripts/evaluate-file-mode.py --output /tmp/new-evaluation.jsonl --runs 20`; use `--matrix` for the broader tasks. The harness checks exact files, RTF attributes and byte-for-byte Undo, records failures before asserting, and refuses to overwrite earlier results. It uses only synthetic disposable attachments and the installed selected model. Ordinary tests do not run model evaluations or download models.

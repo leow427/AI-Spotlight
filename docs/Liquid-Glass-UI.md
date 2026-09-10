@@ -2,7 +2,7 @@
 
 Design source: [AI-Spotlight — Nature UI & Agent Handoff, Liquid Glass alternative](https://www.figma.com/design/0EhvFOJ9c1p6G71ZF77y5U/AI-Spotlight?node-id=16-122).
 
-The 1200 × 780 reference uses a continuous forest backdrop beneath an inset navigation surface, a sage selected state, a large welcome identity, and a capsule composer. The original Forest variant is not used. The app uses the engima bot name and retains its existing logo, thinking animation, capture behavior, routing, sessions, and credentials.
+The 1200 × 780 reference uses a continuous forest backdrop beneath an inset navigation surface, a sage selected state, a large welcome identity, and a capsule composer. The original Forest variant is not used. The app uses the Enigma bot name and retains its existing logo, thinking animation, capture behavior, routing, sessions, and credentials.
 
 ## Implementation
 
@@ -30,9 +30,9 @@ These four curated test previews are intentionally committed as design review do
 
 Local verification: build passed; 396 tests executed, 9 existing opt-in integration tests skipped, 0 failures; static analysis passed. The optional real-model, signed-in Codex, and live screen-capture tests require their documented local configuration.
 
-## Compact engima refinement
+## Compact Enigma refinement
 
-The visible bot identity is `engima`; assistant replies begin directly with their content. Welcome typography is 32 points (23 in compact mode), chat text is 14 points, and the hero mark, routing controls, sidebar rows, and composer controls use smaller dimensions. Settings is 820 × 680.
+The visible bot identity is `Enigma`; assistant replies begin directly with their content. Welcome typography is 32 points (23 in compact mode), chat text is 14 points, and the hero mark, routing controls, sidebar rows, and composer controls use smaller dimensions. Settings is 820 × 680.
 
 While the chat panel is active, tap and release Control twice within 0.4 seconds to toggle chat history. Both Control keys work. Holding Control, adding another modifier, typing a key/chord, clicking, or leaving the panel cancels the sequence. The shortcut also works while editing the draft and does not consume text input. Sidebar visibility lasts for the current app session.
 

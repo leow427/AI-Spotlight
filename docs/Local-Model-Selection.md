@@ -1,155 +1,99 @@
-# One local model for text and images
+# Enigma local model catalogue
 
-AI Spotlight detects the Mac and recommends one complete model package for chat,
-screenshots, reasoning and search answers. Use **Find a Model for This Mac** in the
-normal model picker or **Settings → Local Models**. Both setup and settings show
-up to ten suitable choices in descending order, with a one-sentence description
-under every name. There is no separate image-model selection.
+Enigma offers five choices for each memory class, organized as Lightweight,
+Middleweight and Heavyweight in both setup and Settings → Local Models. The
+16–18 GB group also supplies the starting list below 16 GB (with memory admission
+still enforced); the 32 GB group supplies the starting list above 32 GB. Other
+quantizations remain available under **Models for other memory sizes**.
 
-**Install** downloads the model, its matching vision encoder/projector, and the
-reviewed llama.cpp runtime with its libraries. All components have immutable URLs,
-exact byte counts and SHA-256 checksums. Users never select component files during
-normal setup. The complete package becomes selected only after installation commits.
-The same picker also labels existing text-only models honestly. Every installed
-model has a Delete button with a confirmation step. Deletion unloads the model,
-removes its managed weights, projector and runtime, and selects another installed
-model automatically when one remains.
+## Catalogue version 5 — reviewed September 10, 2026
 
-Google Gemma 4 12B remains honestly labeled when its memory estimate exceeds the
-Mac's inference budget, but it offers **Install Anyway** for users who explicitly
-want to try it. That override applies only to the reviewed, checksum-pinned 12B
-package; disk capacity, architecture, Metal-buffer and integrity checks remain
-enforced. The app also repeats that the model may create memory pressure or fail
-to load.
+These are the requested planning estimates, not measured memory guarantees.
+Each distinct quantization has its own ID, immutable revision, byte count and
+SHA-256 checksum. Repeated choices share the same descriptor and download.
 
-![Local model setup](images/local-model-manager.png)
+| Mac RAM | Weight class | Model | Quantization | Model modalities | Planning RAM |
+|---|---|---|---|---|---|
+| 16–18 GB | Lightweight | SmolVLM2 2.2B | Q8_0 | Vision | ~3.5–4.5 GB |
+| 16–18 GB | Middleweight | Qwen3.5 4B | Q4_K_M | Vision | ~4–6 GB |
+| 16–18 GB | Middleweight | Gemma 4 E4B | Q4_K_M | Vision + Audio | ~7–9 GB |
+| 16–18 GB | Heavyweight | Ministral 3 8B | Q4_K_M | Vision | ~7–10 GB |
+| 16–18 GB | Heavyweight | MiniCPM-o 4.5 | Q4_K_M | Vision + Audio | ~8–11 GB |
+| 24 GB | Lightweight | Qwen3.5 4B | Q5_K_M | Vision | ~4.5–6 GB |
+| 24 GB | Middleweight | Qwen3.5 9B | Q5_K_M | Vision | ~8.5–11 GB |
+| 24 GB | Middleweight | MiniCPM-o 4.5 | Q5_K_M | Vision + Audio | ~9–13 GB |
+| 24 GB | Heavyweight | Gemma 4 12B | Q5_K_M | Vision + Audio | ~10–13 GB |
+| 24 GB | Heavyweight | Ministral 3 14B | Q5_K_M | Vision | ~12–15 GB |
+| 32 GB | Lightweight | Qwen3.5 4B | Q8_0 | Vision | ~6–8 GB |
+| 32 GB | Middleweight | MiniCPM-o 4.5 | Q5_K_M | Vision + Audio | ~9–13 GB |
+| 32 GB | Middleweight | Gemma 4 12B | Q5_K_M | Vision + Audio | ~10–13 GB |
+| 32 GB | Heavyweight | Ministral 3 14B | Q8_0 | Vision | ~17–21 GB |
+| 32 GB | Heavyweight | Gemma 4 26B-A4B | Q4_K_M | Vision | ~21–25 GB |
 
-## Catalog reviewed on 2026-09-06
+There are 13 distinct packages. Qwen3-VL, MiniCPM-V and the earlier QAT Gemma
+recommendations are retired from new downloads. Existing installed packages remain
+in the library and are not deleted or silently replaced.
 
-Catalog version 4 contains **13 multimodal packages from four makers**: Alibaba /
-Qwen, Google, Mistral AI and OpenBMB. Every entry uses the publisher's own GGUF
-repository, a matching projector from the same immutable revision, and the pinned
-llama.cpp b10797 runtime. Google uses its official QAT Q4_0 weights; the others use
-Q4_K_M. Publisher model cards identify all included weights as Apache-2.0. These
-are optional downloads, not weights bundled in the app.
+## Availability and memory
 
-| Package | Maker | Complete download¹ | Runtime memory floor² | Minimum Mac memory | Editorial priority³ |
-|---|---|---:|---:|---:|---:|
-| Qwen3-VL 4B Instruct | Alibaba / Qwen | 3.34 GB | 6.85 GiB | 12 GiB | 76 |
-| Qwen3-VL 8B Instruct | Alibaba / Qwen | 6.20 GB | 10.04 GiB | 24 GiB | 84 |
-| Qwen3-VL 32B Instruct | Alibaba / Qwen | 20.97 GB | 27.42 GiB | 64 GiB | 90 |
-| Google Gemma 4 E2B | Google | 4.35 GB | 7.17 GiB | 16 GiB | 77 |
-| Google Gemma 4 E4B | Google | 6.16 GB | 9.63 GiB | 24 GiB | 86 |
-| Google Gemma 4 12B | Google | 7.16 GB | 12.62 GiB | 32 GiB | 89 |
-| Google Gemma 4 26B A4B | Google | 15.65 GB | 21.19 GiB | 48 GiB | 91 |
-| Google Gemma 4 31B | Google | 18.86 GB | 29.94 GiB | 64 GiB | 93 |
-| Mistral Ministral 3 3B | Mistral AI | 3.00 GB | 6.15 GiB | 12 GiB | 70 |
-| Mistral Ministral 3 8B | Mistral AI | 6.07 GB | 9.83 GiB | 24 GiB | 81 |
-| Mistral Ministral 3 14B | Mistral AI | 9.13 GB | 13.44 GiB | 32 GiB | 85 |
-| OpenBMB MiniCPM-V 4 | OpenBMB | 3.16 GB | 5.77 GiB | 12 GiB | 68 |
-| OpenBMB MiniCPM-V 4.5 | OpenBMB | 6.13 GB | 9.97 GiB | 24 GiB | 83 |
+**MiniCPM-o 4.5 is listed but cannot be installed in this release.** Its publisher
+provides a dedicated runtime and separate vision/audio components. Enigma's pinned
+upstream llama.cpp b10797 integration has not been validated for that package.
+The catalogue keeps its exact metadata and explains the missing runtime instead
+of silently substituting MiniCPM-V or exposing a nonfunctional Install button.
 
-¹ Decimal bytes including the arm64 runtime; the x64 runtime differs by less than
-0.1 MB. ² Capacity estimates, not measurements of free memory. The actual Mac must
-also pass OS/Metal reserves, buffer limits and disk checks. An 8 GB Mac receives an
-explanation. A typical 24 GiB Apple Silicon profile currently offers eight suitable
-choices; the list never inserts unsafe or duplicate quantizations to reach ten.
+**Audio is a model capability, not an Enigma feature yet.** The current app sends
+text and images. Gemma and MiniCPM-o entries explicitly distinguish model audio
+capability from the app's available inputs and outputs. Installation packages do
+not promise speech support or include the MiniCPM audio/TTS pipeline.
 
-³ Priorities are editorial estimates of general text and screenshot usefulness,
-informed by the publishers' text/vision evaluations and intended tasks. They are
-**not benchmark scores, a universal leaderboard, or guarantees that more parameters
-produce better answers**. Google E4B provides a balanced general alternative;
-Qwen3-VL and MiniCPM-V prioritize document/image understanding; Ministral provides
-another general chat/instruction-following family. Small variants trade reasoning
-capacity for footprint; larger variants need both memory and acceptable speed.
-MiniCPM-V 4.5 is an OpenBMB model built on Qwen3 and SigLIP2, disclosed in its row.
+The requested RAM ranges are shown as planning estimates. Actual admission retains
+the existing conservative policy: at most 60% of physical RAM, physical RAM minus
+at least 4 GiB or 25% reserved for macOS, and 80% of Metal's recommended working
+set. Capacity includes 1.2 × weights plus projector, full-context F16 KV cache,
+and 2 GiB runtime/compute reserve. All MoE and Gemma PLE weights count in full.
+Qwen3.5 reserves KV for its eight full-attention layers (4 KV heads × 256 head
+dimension); its recurrent state is covered by the runtime reserve. SmolVLM2 uses
+a conservative 24 × 32 × 64 full-context cache bound. Context remains 8,192 tokens.
 
-The ranking applies resource safety first, puts responsive choices ahead of slower
-ones, then orders by editorial priority, speed and stable model ID. The first
-responsive choice receives Recommended. Only the first ten runnable choices appear
-in the main list; **Other models and hardware limits** preserves access to the rest,
-including reasons and disabled Install buttons for incompatible packages. Slow
-choices explicitly say “May be slow” and never receive the Recommended badge.
+Consequently some requested heavyweight entries can be unavailable on their named
+memory class, including Gemma 26B on 32 GB, when Enigma's actual budget is lower.
+The UI always shows the tier entry and reason. A planning range cannot bypass
+memory, disk, Metal-buffer, checksum or architecture checks. The old pinned Gemma
+12B QAT override still applies to that legacy installation only; it does not
+silently extend to the new Q5_K_M package.
 
-New families were reviewed against publisher configurations, embedded GGUF
-architecture/template metadata and the pinned runtime's implementations. Gemma's
-PLE weights and all MoE experts count in full. Publisher instructions flag extreme image
-aspect ratios as a Ministral quality limitation. Response-quality testing for the
-new families is left to the owner as requested; no new-family response results are
-claimed. The existing Qwen 4B fixtures remain documented in
-[verification](Screen-Search-Verification.md).
+Recommended is selected from the current RAM tier's responsive candidates; it
+requires at least an estimated/measured 8 tokens/s and first token within five
+seconds. Editorial priorities are not benchmark scores. Check Performance records
+actual speed after installation; no response-quality or real-model inference
+results are claimed for this catalogue update.
 
-Primary sources:
+## Download provenance
 
-- [Google Gemma 4 capabilities, memory and QAT guidance](https://ai.google.dev/gemma/docs/core)
-- [Mistral Ministral 3 model card](https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512)
-- [OpenBMB MiniCPM-V 4](https://huggingface.co/openbmb/MiniCPM-V-4), [4.5](https://huggingface.co/openbmb/MiniCPM-V-4_5) and [Apache license](https://github.com/OpenBMB/MiniCPM-V/blob/main/LICENSE)
-- [Qwen 4B official files](https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct-GGUF/tree/1cd86afb9a95c410a6038ab3b40d8b578c892266), [8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct-GGUF/tree/f982a07559d4a2f6c8744d840bf6fccab30eea96), [32B](https://huggingface.co/Qwen/Qwen3-VL-32B-Instruct-GGUF/tree/e3e1fe0c76de7ee58ea65db420c643adfe2e457c)
-- [Google Gemma 4 E2B: official card and pinned files](https://huggingface.co/google/gemma-4-E2B-it-qat-q4_0-gguf/tree/675cff42a74c774d6cb76f76d8eacb49b48c9b93)
-- [Google Gemma 4 E4B: official card and pinned files](https://huggingface.co/google/gemma-4-E4B-it-qat-q4_0-gguf/tree/4b4a2c1d584be7264f87aac328a1bc739ce81b6c)
-- [Google Gemma 4 12B: official card and pinned files](https://huggingface.co/google/gemma-4-12B-it-qat-q4_0-gguf/tree/29d097773436b69ff9feafd636ab4cf873786537)
-- [Google Gemma 4 26B A4B: official card and pinned files](https://huggingface.co/google/gemma-4-26B-A4B-it-qat-q4_0-gguf/tree/d1c082be9cf3c8a514acf63b8761f4b41935842e)
-- [Google Gemma 4 31B: official card and pinned files](https://huggingface.co/google/gemma-4-31B-it-qat-q4_0-gguf/tree/59dde24573e7e61570dba08b18a2e1fe246955ed)
-- [Mistral Ministral 3 3B: official card and pinned files](https://huggingface.co/mistralai/Ministral-3-3B-Instruct-2512-GGUF/tree/eb599d408350ea2bb60452cb86be7c7b2fc28227)
-- [Mistral Ministral 3 8B: official card and pinned files](https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF/tree/0102285ad796bd99af90f58de616092e5630e970)
-- [Mistral Ministral 3 14B: official card and pinned files](https://huggingface.co/mistralai/Ministral-3-14B-Instruct-2512-GGUF/tree/74fac473c43357d7fb2671713608183cc72496d0)
-- [OpenBMB MiniCPM-V 4: official card and pinned files](https://huggingface.co/openbmb/MiniCPM-V-4-gguf/tree/c548a86e76648fe1cef8250ba60d7f2d9ba0996e)
-- [OpenBMB MiniCPM-V 4.5: official card and pinned files](https://huggingface.co/openbmb/MiniCPM-V-4_5-gguf/tree/8bfaecb5b1a65f068b86c32b997a3d5d8902eb36)
-- [Pinned Gemma implementation](https://github.com/ggml-org/llama.cpp/blob/b10797/src/models/gemma4.cpp), [Ministral](https://github.com/ggml-org/llama.cpp/blob/b10797/src/models/mistral3.cpp), [MiniCPM 4](https://github.com/ggml-org/llama.cpp/blob/b10797/docs/multimodal/minicpmv4.0.md), [MiniCPM 4.5](https://github.com/ggml-org/llama.cpp/blob/b10797/docs/multimodal/minicpmv4.5.md)
-- [Runtime release and checksums](https://github.com/ggml-org/llama.cpp/releases/tag/b10797), [server protocol](https://github.com/ggml-org/llama.cpp/blob/b10797/tools/server/README.md)
+Model weights and projector pairs come from the same repository and immutable
+revision. Mistral and OpenBMB use publisher repositories; SmolVLM2 uses ggml-org's
+conversion. The requested Qwen and smaller Gemma quantizations use Unsloth;
+Gemma 26B uses Bartowski's exact Q4_K_M, not Unsloth's UD-Q4_K_M variant.
+The pinned runtime remains llama.cpp b10797; no dependency upgrade was introduced.
 
-## Hardware policy
+- [SmolVLM2 conversion](https://huggingface.co/ggml-org/SmolVLM2-2.2B-Instruct-GGUF)
+- [Qwen3.5 4B quantizations](https://huggingface.co/unsloth/Qwen3.5-4B-GGUF), [9B](https://huggingface.co/unsloth/Qwen3.5-9B-GGUF)
+- [Gemma E4B quantizations](https://huggingface.co/unsloth/gemma-4-E4B-it-GGUF), [12B](https://huggingface.co/unsloth/gemma-4-12b-it-GGUF), [26B](https://huggingface.co/bartowski/google_gemma-4-26B-A4B-it-GGUF)
+- [Ministral 8B](https://huggingface.co/mistralai/Ministral-3-8B-Instruct-2512-GGUF), [14B](https://huggingface.co/mistralai/Ministral-3-14B-Instruct-2512-GGUF)
+- [MiniCPM-o 4.5 publisher package and runtime instructions](https://huggingface.co/openbmb/MiniCPM-o-4_5-gguf)
+- [Pinned runtime multimodal support](https://github.com/ggml-org/llama.cpp/blob/b10797/tools/mtmd/README.md), [Qwen3.5 implementation](https://github.com/ggml-org/llama.cpp/blob/b10797/src/models/qwen35.cpp)
 
-Detection reads physical memory, Apple Silicon, Metal/unified memory, CPU resources,
-non-purgeable free disk, low-power mode and Metal working-set/buffer limits. No
-serial number is collected. The inference budget remains the smallest of:
+## Enigma name and upgrade identity
 
-- 60% of physical memory;
-- physical memory minus the larger of 4 GiB or 25% for macOS and other apps;
-- 80% of Metal's recommended working set, when present.
+The app, executable, Xcode targets/shared scheme, menu-bar label, settings titles,
+assistant identity, permission guidance and Codex client service metadata now use
+Enigma. The repository and source folder retain AI-Spotlight names. The existing
+bundle identifier, Keychain service identifier and Application Support paths stay
+stable to preserve credentials, chats, model files, preferences and macOS consent.
+These are compatibility identifiers, not visible product branding.
 
-For these packages, estimated memory is `1.2 × (language weights + vision weights)
-+ full F16 KV cache + 2 GiB`. The cache uses the actual 8,192-token allocation:
-`sum(layer KV heads × head dimension) × 4 bytes for K+V × context`.
-Qwen 4B/8B and MiniCPM 4.5 use 36×8×128; Qwen 32B uses 64×8×128;
-Ministral 3B/8B/14B use 26/34/40×8×128; MiniCPM 4 uses 32×2×128.
-Gemma uses per-layer sums for its different global/sliding dimensions and heads:
-E2B `(28×1×256 + 7×1×512)`, E4B `(35×2×256 + 7×2×512)`,
-12B `(40×8×256 + 8×1×512)`,
-26B `(25×8×256 + 5×2×512)`, 31B `(50×16×256 + 10×4×512)`.
-We conservatively reserve full context even on shared/sliding layers. Actual GGUF
-weight bytes include Gemma PLE tables and all MoE experts; active parameter counts
-never determine capacity. The additional reserve covers vision activations,
-compute buffers, runtime and application overhead. Image input is bounded to
-4,096 tokens and the preprocessor's existing 1,568-pixel longest edge. The runtime
-cannot silently increase context or allocate a separate 8 GiB prompt cache.
-
-Weights, encoder and runtime all count toward disk admission:
-`2 × complete download + 2 GiB`. Free disk is checked again before installation.
-Installed candidates avoid a new-download disk gate for selection, while an actual
-update still checks the full required space. Apple unified-memory Metal and CPU
-execution are supported; discrete Metal remains excluded from recommendations.
-Metal buffer limits apply to a conservative largest-tensor bound.
-
-Safety gates precede ranking. Recommended requires an estimated/measured 8 tokens/s
-and a first token within 5 seconds. The existing faster-alternative suggestion for
-underperforming benchmarks still requires less memory and at least 20% more speed.
-The speed estimate is a conservative CPU/acceleration/weight-size heuristic for a
-reference text prompt. Image encoding and cold model loading add latency.
-
-After installation, **Check Performance** measures a fixed public text prompt on
-the selected runtime with 64 generated tokens and a 60-second generation deadline.
-The multimodal runtime reports actual prompt/generation token counts and speeds;
-first-token timing starts after loading. Combined application/server resident
-memory is sampled every 20 ms and after completion. This conservative RSS sum can
-double-count shared library pages; it is not a continuous OS high-water mark or a
-measurement of every possible image. The image/cache memory floor still applies.
-
-Benchmark failures/cancellation keep the verified installation. Measurements are
-stored locally and scoped to runtime build, hardware, power mode, checksum and
-context; they expire after 90 days. Exact measurements override speed estimates and
-can increase the memory requirement. Same-architecture calibration is bounded to
-twice the resource prior. The embedded engine remains for legacy text models only.
+![Enigma local model setup](images/local-model-manager.png)
 
 ## Installation, upgrades and migration
 
@@ -178,8 +122,8 @@ The known incompatible original SmolVLM 2.2B image package gets explicit replace
 guidance; its text/OCR use and files are retained. No migration downloads anything.
 
 Signed remote updates retain signature verification, bounded responses, monthly
-checks, anti-rollback caching and offline fallback. Bundled catalog version 2
-replaces the old text recommendations. Older text descriptors still decode but
+checks, anti-rollback caching and offline fallback. Bundled catalog version 5
+replaces the previous recommendations. Older text descriptors still decode but
 cannot become new recommendations/downloads. A signed catalog cannot expand the
 reviewed architecture, context, runtime or artifact validation. Remote publishing
 is still unconfigured; activation requires `LocalModelCatalogURL` and the base64

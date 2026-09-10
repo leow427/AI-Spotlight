@@ -11,7 +11,7 @@ solo double tap, an enable switch, and Fast/Normal/Relaxed timing.
 When Accessibility is missing, the composer asks to enable Selection Context and
 provides **Open Accessibility Settings…**. This requests system trust and opens the
 Accessibility page directly even if macOS suppresses a repeated popup. Enable
-**AI Spotlight** (the current macOS display name for Enigma). Permission status and shortcut
+**Enigma** (the current macOS display name for Enigma). Permission status and shortcut
 monitors refresh when switching apps, so granting access does not require a restart.
 
 The source is captured before the panel becomes key. The small “Selected text ·
@@ -160,5 +160,5 @@ The September 10 recovery fix was exercised against the installed Google Gemma 4
 produced a revision card. The real model also converted a deliberately unformatted
 options response into a valid single revision. Neither check pasted into a source
 application. Run this opt-in check with `TEST_RUNNER_ENIGMA_SELECTION_MODEL_SMOKE=1`
-and `scripts/verify-xcode.sh test '-only-testing:AI SpotlightTests/SelectionContextTests/testInstalledGemmaAutoProducesRevisionCard'`
+and `scripts/verify-xcode.sh test '-only-testing:EnigmaTests/SelectionContextTests/testInstalledGemmaAutoProducesRevisionCard'`
 when that model is selected locally.

@@ -1,7 +1,7 @@
 import AppKit
 import Combine
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 @MainActor
 final class ScreenPipelineTests: XCTestCase {

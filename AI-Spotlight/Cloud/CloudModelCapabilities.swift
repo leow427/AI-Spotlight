@@ -17,7 +17,7 @@ enum CloudModelCompatibility: Equatable, Sendable {
     case .compatible:
       "Compatible with text chat. Account access and billing are checked when you send."
     case .unsupported:
-      "This model cannot be used for text chat in AI Spotlight. Choose a compatible model."
+      "This model cannot be used for text chat in Enigma. Choose a compatible model."
     case .unverified:
       "Unverified model. You can try this ID, but text-chat support and account access are not confirmed."
     }

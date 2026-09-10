@@ -20,6 +20,7 @@ struct LocalModelChoiceCard: View {
           Text("\(assessment.model.downloadByteCount, format: .byteCount(style: .file)) download · \(assessment.fit.rawValue)")
             .font(.subheadline)
           Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
+          Text("\(assessment.model.quantization) · \(assessment.model.performanceClass)").font(.caption).foregroundStyle(.secondary)
           Text(assessment.model.license).font(.caption2).foregroundStyle(.secondary)
         }
         Spacer(minLength: 0)
@@ -58,14 +59,18 @@ struct LocalModelOnboardingView: View {
             .font(.caption).foregroundStyle(.secondary)
         }
       }
-      Text("Up to 10 choices, best suited to this Mac first; fewer appear when resources are limited.")
+      Text("Lightweight, middleweight and heavyweight choices for your Mac’s memory.")
         .font(.caption).foregroundStyle(.secondary)
       ScrollView {
         VStack(spacing: 10) {
-          ForEach(Array(recommendations.rankedChoices.enumerated()), id: \.element.id) { index, assessment in
-            LocalModelChoiceCard(assessment: assessment,
-              role: "\(index + 1). \(assessment.id == recommendations.recommended?.id ? "Recommended" : "Alternative")",
-              isSelected: selected?.id == assessment.id) { selectedID = assessment.id }
+          ForEach(recommendations.tierGroups, id: \.weight) { group in
+            Text(group.weight.rawValue).font(.headline).frame(maxWidth: .infinity, alignment: .leading)
+            ForEach(group.models) { assessment in
+              LocalModelChoiceCard(assessment: assessment,
+                role: assessment.id == recommendations.recommended?.id ? "Recommended" : group.weight.rawValue,
+                isSelected: selected?.id == assessment.id) { selectedID = assessment.id }
+                .disabled(!assessment.fit.canRun)
+            }
           }
           if recommendations.rankedChoices.isEmpty {
             ContentUnavailableView("No suitable model found", systemImage: "memorychip",
@@ -186,20 +191,19 @@ struct LocalModelManagerSection: View {
       .disabled(chat.isBusy || advisor.isDetecting)
       Text("Best choices for this Mac")
         .font(.headline)
-      Text("Up to 10 compatible models, ranked by responsiveness and reviewed text/image capability. Check Performance can refine the order for your Mac.")
+      Text("Five choices across three weight classes. Check Performance measures a downloaded model on your Mac.")
         .font(.caption).foregroundStyle(.secondary)
-      if recommendations.rankedChoices.count < 10 {
-        Text("\(recommendations.rankedChoices.count) compatible choices are available on this Mac; up to 10 are shown.")
-          .font(.caption).foregroundStyle(.secondary)
+      Text("Choose a weight class for this Mac. Availability reflects memory, disk space and runtime support.")
+        .font(.caption).foregroundStyle(.secondary)
+      ForEach(recommendations.tierGroups, id: \.weight) { group in
+        Text(group.weight.rawValue).font(.headline)
+        ForEach(group.models) { assessment in
+          modelRow(assessment, isRecommended: assessment.id == recommendations.recommended?.id)
+        }
       }
-      ForEach(Array(recommendations.rankedChoices.enumerated()), id: \.element.id) { index, assessment in
-        modelRow(assessment, rank: index + 1, isRecommended: assessment.id == recommendations.recommended?.id)
-      }
-      if !recommendations.otherAssessments.isEmpty {
-        DisclosureGroup("Other models and hardware limits") {
-          ForEach(recommendations.otherAssessments) { assessment in
-            modelRow(assessment)
-          }
+      if !recommendations.otherTierAssessments.isEmpty {
+        DisclosureGroup("Models for other memory sizes") {
+          ForEach(recommendations.otherTierAssessments) { assessment in modelRow(assessment) }
         }
       }
       let imported = chat.installedModels.filter { model in !advisor.manifest.models.contains { $0.id == model.id } }
@@ -270,6 +274,14 @@ struct LocalModelManagerSection: View {
       if assessment.permitsMemoryOverride {
         Text("Install anyway is enabled. This model may put this Mac under memory pressure or fail to load.")
           .font(.caption).foregroundStyle(.orange)
+      }
+      if let range = assessment.model.advertisedMemoryRange {
+        Text("~\(range) GB RAM planning estimate · \(assessment.model.quantization)")
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      if assessment.model.modelSupportsAudio == true {
+        Text("Vision + Audio model · Audio is not yet available in Enigma.")
+          .font(.caption).foregroundStyle(.secondary)
       }
       DisclosureGroup("Model details") {
         Text("\(assessment.model.quantization) · \(assessment.model.recommendedContextSize) token context · \(assessment.model.performanceClass)")

@@ -1,6 +1,6 @@
 import Foundation
 import XCTest
-@testable import PrimaryAgent
+@testable import Enigma
 
 final class ChatPersistenceTests: XCTestCase {
   func testStoreKeepsFiveMostRecentlyActiveChatsInDescendingOrder() throws {
