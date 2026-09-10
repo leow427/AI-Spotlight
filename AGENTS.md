@@ -1,22 +1,36 @@
 # Repository Guidelines
 
-## Project Structure & Module Organization
+## Project Structure & Architecture
 
-This repository is currently an empty scaffold. Keep the root limited to project
-configuration and top-level documentation. As code is introduced, use a clear
-and conventional layout:
+AI Spotlight is a native macOS app written in Swift 6. The Xcode project is
+`AI-Spotlight.xcodeproj`; its shared `AI-Spotlight` scheme builds the app and
+the `AI SpotlightTests` XCTest target. The app currently targets macOS 26.0.
 
-- `src/` for production source code, organized by feature or module.
-- `tests/` for automated tests, mirroring paths beneath `src/` where practical.
-- `assets/` for static, non-generated resources such as images or fixtures.
-- `docs/` for design notes, setup instructions, and architecture decisions.
+- `AI-Spotlight/App/` contains application lifecycle, menu-bar/panel, shortcuts,
+  settings, and top-level SwiftUI composition.
+- `AI-Spotlight/Chat/` contains chat state, presentation, Markdown, streaming,
+  and request lifecycle code.
+- `AI-Spotlight/Cloud/`, `LocalInference/`, `Search/`, `Screen/`, and `Files/`
+  implement the corresponding product capabilities. Keep feature-specific code
+  with its capability; share only genuinely cross-cutting types.
+- `AI-Spotlight/Resources/` contains `Info.plist`, asset catalogs, and bundled
+  notices. Add app resources here and update the Xcode project when needed.
+- `AI-SpotlightTests/` contains the XCTest suite. Name tests after the behavior
+  or subsystem they cover and use existing test support before adding helpers.
+- `Packages/LlamaBridge/` is a local Swift package that wraps the pinned
+  llama.cpp XCFramework. Its C++ bridge and public header are deliberately
+  isolated from the Swift app target.
+- `scripts/` contains verification and file-mode evaluation helpers.
+- `docs/` records feature design, verification, and operational notes;
+  `UI-Style.md` is the visual-design reference.
 
-Avoid committing generated output, local caches, credentials, or dependency
-directories. Document any intentional deviation in `Plan.md` or `docs/`.
+Do not commit `DerivedData`, `xcuserdata`, `.DS_Store`, credentials, generated
+artifacts, or local model/runtime caches. Preserve the existing `.gitignore`
+rules when adding tools or local state.
 
 ## Build, Test, and Development Commands
 
-Use the shared `AI-Spotlight` scheme so local verification matches CI:
+Use the shared scheme and the verification helper for local checks:
 
 ```sh
 scripts/verify-xcode.sh build
@@ -24,83 +38,60 @@ scripts/verify-xcode.sh test
 scripts/verify-xcode.sh analyze
 ```
 
-Keep unsigned verification products in this isolated DerivedData path and out of
-Launch Services. The helper also unregisters the temporary app after app-hosted
-tests. Never launch its app product for interactive Screen testing: an unsigned
-or ad-hoc rebuild has a changing code identity and invalidates macOS Screen
-Recording consent. Build and run the interactive app from Xcode with a stable
-Apple Development signing identity and team selected. Pass targeted-test options
-after the action; `-only-testing` works as it does with `xcodebuild`.
+The helper uses `/tmp/AI-Spotlight-Verification`, disables signing, avoids
+Launch Services registration, and unregisters any temporary test host before
+and after each action. Pass normal `xcodebuild` options after the action; for
+example, `scripts/verify-xcode.sh test -only-testing:AI\ SpotlightTests/ScreenViewTests`.
 
-Run the build, test suite, and static analyzer before requesting review.
+Do not use the helper's unsigned product for interactive Screen Recording or
+accessibility testing: its changing code identity can invalidate macOS consent.
+Run the interactive app from Xcode using a stable Apple Development signing
+identity and selected team instead.
+
+GitHub Actions currently runs `xcodebuild test` on `macos-26` for pushes to
+`main` and pull requests. It does not run the helper's separate `build` or
+`analyze` actions, so run those locally when they are relevant to the change.
+
+## Implementation and Test Expectations
+
+- Follow the existing Swift style and local patterns; use clear, feature-based
+  names and comments only for non-obvious intent.
+- Keep SwiftUI UI changes consistent with `UI-Style.md`, and update related
+  screenshots or documentation when the visible behavior materially changes.
+- Keep native llama.cpp integration within `Packages/LlamaBridge`; do not add
+  C++ or binary-framework details to app feature code without a clear boundary.
+- Start with the smallest relevant XCTest target while developing. Before
+  publishing, run the affected tests and the appropriate build/test/analyze
+  checks above.
+- Do not delete, disable, or weaken tests to make a check pass. Add regression
+  coverage for fixes where practical, keeping tests deterministic and offline.
+- For permission-sensitive Screen, Files, selection, or cloud behavior, retain
+  the existing privacy and fallback behavior and exercise failure paths.
 
 ## Definition of Done
 
-A change is complete when:
+A change is complete when the requested behavior is implemented, its relevant
+tests pass, the final diff contains no unrelated changes, and any limitation is
+explicitly reported. For a completed feature, also run the applicable local
+verification commands, publish the focused commit to `main` when repository
+rules permit it, and confirm the required GitHub Actions check passes on that
+commit. Do not claim completion while a change-caused required check is failing.
 
-1. The requested behavior is implemented.
-2. Relevant tests exist and pass.
-3. Lint, type, and build checks pass where applicable.
-4. Required GitHub CI checks pass.
-5. The final diff contains no unrelated changes.
-6. No known regression or security issue was introduced.
-7. Any remaining limitation is explicitly reported.
-8. The completed feature is committed and published to the GitHub repository’s `main` branch, and required CI checks on `main` pass.
+## Commit, Pull Request, and Repository Safety
 
-## Coding Style & Naming Conventions
-
-Follow the formatter and linter configured for the chosen language; do not
-hand-format around their output. Use two spaces for JSON, YAML, and Markdown
-nested lists unless a tool dictates otherwise. Prefer descriptive names:
-`user-profile.ts`, `parse_config`, and `UserProfile`. Keep modules focused,
-avoid unexplained abbreviations, and add comments only for non-obvious intent.
-
-## Testing Guidelines
-
-- Run the smallest relevant test suite while developing.
-- Before completion, run all tests reasonably affected by the change.
-- Never delete, disable, skip, or weaken an existing test just to make CI pass.
-- If an existing test appears incorrect, explain why before modifying it.
-- Add a regression test for bug fixes whenever practical.
-- Test expected behavior, important edge cases, and relevant failures.
-- Keep tests deterministic; avoid arbitrary sleeps, timing assumptions, and network dependencies where possible.
-
-## Commit & Pull Request Guidelines
-
-- The owner has given standing authorization to publish completed features to `main`. Do not stop at a feature branch or an open PR, and do not request merge or push permission again unless the owner changes this instruction.
-- Finish implementation, inspect the final diff, and pass the required build, tests, and analyzer before publishing. Feature branches and PRs may be used for development and CI; merge them into `main` once required checks and reviews pass. Direct pushes to `main` are allowed when repository rules permit them.
-- After publishing, verify the commit is on `origin/main`, check required CI on `main`, and leave the local checkout on the updated `main` branch. Report any blocked check or required review instead of claiming completion.
-
-- Keep commits focused on one logical change with short, imperative subjects such as `Add configuration parser`.
-- Keep pull requests narrowly scoped. Before opening or updating one, inspect the diff, remove accidental changes, and run relevant checks.
-- PR descriptions should summarize what changed, why, important implementation decisions, tests performed, and known limitations or follow-up work.
-- Link relevant issues and include screenshots for visible UI changes.
-- Never hide failing tests or unresolved issues; address review comments by fixing the underlying issue.
-
-## CI and GitHub Actions
-
-- Treat required CI checks as part of the definition of done; never claim completion while required checks fail.
-- If CI fails, determine whether the current change caused it, fix failures caused by the change, and report unrelated failures separately.
-- Reproduce CI commands locally whenever practical before pushing another fix.
-- Prefer existing workflows over duplicate workflows. Pin or constrain third-party actions and keep permissions as restrictive as practical.
-- Never expose secrets in logs or workflow YAML, and do not reduce linting, type-checking, coverage, or compiler strictness without an explicit reason.
-
-## Issues
-
-- Do not close an issue merely because code was written.
-- Verify acceptance criteria before resolving an issue.
-- Reference relevant issues from commits or PRs when appropriate.
-- Document additional out-of-scope work instead of silently expanding the task.
-
-## Dependencies
-
-- Do not add a dependency if the existing stack can reasonably solve the problem.
-- Before adding one, consider maintenance status, license, bundle/runtime impact, security implications, and necessity.
-- Do not perform broad dependency upgrades as part of an unrelated change.
-
-## Repository Safety
-
-- Never commit API keys, tokens, passwords, certificates, `.env` contents, build artifacts, or local secrets.
-- Do not use force-push, destructive resets, or history rewriting unless explicitly requested.
-- Do not alter branch protection, required checks, repository permissions, or GitHub secrets unless explicitly requested.
-- Publishing completed features to `main` is authorized by the standing instruction above. Never bypass required reviews, branch protection, or required CI checks.
+- The owner has authorized publishing completed work to `main`. Work may use a
+  feature branch and pull request when repository rules require it; do not
+  bypass required review or branch protection.
+- Keep commits focused and imperative, for example `Add selection revision card`.
+  Inspect `git status` and the final diff before committing so untracked local
+  design assets or generated output are not included accidentally.
+- In pull requests, explain the behavior change, implementation decisions,
+  verification performed, and any known limitation. Include screenshots for
+  visible UI changes and link relevant issues where applicable.
+- After publishing, verify the commit is on `origin/main`, review the required
+  CI result, and leave the checkout on the updated `main` branch.
+- Never commit secrets, certificates, tokens, or `.env` contents. Do not
+  force-push, rewrite history, modify repository protections, or change GitHub
+  secrets without explicit authorization.
+- Avoid unrelated dependency upgrades. Before adding a dependency, assess its
+  maintenance, license, security, and app bundle/runtime impact.
