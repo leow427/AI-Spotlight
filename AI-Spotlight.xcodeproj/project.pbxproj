@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		EF1200000000000000000001 /* WelcomeSetup.swift in Sources */ = {isa = PBXBuildFile; fileRef = EF1100000000000000000001; };
 		ED2000000000000000000001 = {isa = PBXBuildFile; fileRef = ED1000000000000000000001; };
 		ED2000000000000000000000 = {isa = PBXBuildFile; fileRef = ED1000000000000000000000; };
 		CC5400000000000000000001 = {isa = PBXBuildFile; fileRef = CC5300000000000000000001; };
@@ -127,6 +128,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		EF1100000000000000000001 /* WelcomeSetup.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WelcomeSetup.swift; sourceTree = "<group>"; };
 		ED1000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Search/LocationService.swift"; sourceTree = SOURCE_ROOT; };
 		ED1000000000000000000000 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/StartPreferences.swift"; sourceTree = SOURCE_ROOT; };
 		CC5300000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/SelectionContextTests.swift"; sourceTree = SOURCE_ROOT; };
@@ -337,6 +339,7 @@
 				A20000000000000000000003 /* AppCommand.swift */,
 				A20000000000000000000004 /* MenuBarController.swift */,
 				A20000000000000000000005 /* AppShellView.swift */,
+				EF1100000000000000000001 /* WelcomeSetup.swift */,
 				A20000000000000000000010 /* GlassAppearanceSettings.swift */,
 				A20000000000000000000011 /* GlobalHotKeyMonitor.swift */,
 				A20000000000000000000012 /* PanelShortcut.swift */,
@@ -587,6 +590,7 @@
 				A10000000000000000000003 /* AppCommand.swift in Sources */,
 				A10000000000000000000004 /* MenuBarController.swift in Sources */,
 				A10000000000000000000005 /* AppShellView.swift in Sources */,
+				EF1200000000000000000001 /* WelcomeSetup.swift in Sources */,
 				A10000000000000000000007 /* GlassAppearanceSettings.swift in Sources */,
 				A10000000000000000000008 /* GlobalHotKeyMonitor.swift in Sources */,
 				A10000000000000000000009 /* PanelShortcut.swift in Sources */,

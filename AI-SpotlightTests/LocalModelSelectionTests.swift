@@ -667,3 +667,175 @@ private final class ModelTransportProtocol: URLProtocol, @unchecked Sendable {
   }
   override func stopLoading() {}
 }
+
+extension LocalModelSelectionTests {
+  @MainActor
+  private func welcomeDefaults() throws -> UserDefaults {
+    let name = "WelcomeSetupTests-\(UUID())"
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: name))
+    addTeardownBlock { UserDefaults(suiteName: name)?.removePersistentDomain(forName: name) }
+    return defaults
+  }
+
+  @MainActor
+  func testWelcomeResumesIncompleteSetupAndCompletionPersists() throws {
+    let defaults = try welcomeDefaults()
+    let setup = WelcomeSetup(defaults: defaults)
+    setup.start(hasInstalledModels: false)
+    XCTAssertTrue(setup.isPresented)
+    XCTAssertEqual(setup.step, .welcome)
+    setup.step = .connections
+    let resumed = WelcomeSetup(defaults: defaults)
+    resumed.start(hasInstalledModels: true)
+    XCTAssertTrue(resumed.isPresented)
+    XCTAssertEqual(resumed.step, .connections)
+    resumed.finish(takeTour: false)
+    XCTAssertFalse(resumed.isPresented)
+    XCTAssertNil(resumed.tour)
+    XCTAssertNil(defaults.object(forKey: WelcomeSetup.progressKey))
+    let completed = WelcomeSetup(defaults: defaults)
+    completed.start(hasInstalledModels: false)
+    XCTAssertFalse(completed.isPresented)
+  }
+
+  @MainActor
+  func testWelcomeMigrationAndReplayPreserveExistingPreferences() throws {
+    for hasModel in [false, true] {
+      let defaults = try welcomeDefaults()
+      defaults.set(!hasModel, forKey: "localModelOnboardingDismissed")
+      defaults.set("cloud", forKey: StartPreferences.modeKey)
+      let setup = WelcomeSetup(defaults: defaults)
+      setup.start(hasInstalledModels: hasModel)
+      XCTAssertFalse(setup.isPresented)
+      setup.replay()
+      XCTAssertTrue(setup.isPresented)
+      XCTAssertEqual(setup.step, .welcome)
+      XCTAssertEqual(defaults.string(forKey: StartPreferences.modeKey), "cloud")
+      setup.finish(takeTour: true)
+      for step in WelcomeTourStep.allCases {
+        XCTAssertEqual(setup.tour, step)
+        setup.nextTourStep()
+      }
+      XCTAssertNil(setup.tour)
+      setup.replay()
+      setup.finish(takeTour: true)
+      setup.endTour()
+      XCTAssertNil(setup.tour)
+    }
+  }
+
+  @MainActor
+  func testWelcomeShowsAtMostThreeSafeUniqueChoicesWithRecommendationFirst() {
+    for memory in [4, 8, 16, 32, 128] {
+      let recommendations = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: memory))
+      let choices = WelcomeSetup.choices(recommendations)
+      XCTAssertEqual(choices.count, min(3, recommendations.rankedChoices.count))
+      XCTAssertEqual(Set(choices.map(\.id)).count, choices.count)
+      XCTAssertTrue(choices.allSatisfy { $0.fit.canRun })
+      if let recommended = recommendations.recommended { XCTAssertEqual(choices.first?.id, recommended.id) }
+    }
+  }
+
+  @MainActor
+  func testWelcomeKeepsChosenModelVisibleAfterRecommendationChanges() throws {
+    let recommendations = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 128))
+    let original = WelcomeSetup.choices(recommendations)
+    let chosen = try XCTUnwrap(recommendations.rankedChoices.last)
+    XCTAssertFalse(original.contains { $0.id == chosen.id })
+    let retained = WelcomeSetup.choices(recommendations, preserving: chosen.id)
+    XCTAssertEqual(retained.count, 3)
+    XCTAssertEqual(retained.first?.id, recommendations.recommended?.id)
+    XCTAssertTrue(retained.contains { $0.id == chosen.id })
+    let limited = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 4))
+    XCTAssertTrue(WelcomeSetup.choices(limited, preserving: chosen.id).allSatisfy { $0.fit.canRun })
+  }
+
+  @MainActor
+  func testWelcomeNextRequiresVerifiedSelectedInstallationOrExplicitSkip() throws {
+    let recommendations = LocalModelSelector.select(manifest: catalog, hardware: hardware(memory: 32))
+    let selected = try XCTUnwrap(WelcomeSetup.choices(recommendations).first)
+    let descriptor = selected.model
+    let file = URL(fileURLWithPath: "/tmp/welcome-fixture.gguf")
+    let installed = LocalModel(id: selected.id, displayName: descriptor.displayName, fileURL: file,
+      catalogDescriptor: descriptor, visionConfiguration: LocalVisionConfiguration(projectorURL: file,
+        serverExecutableURL: URL(fileURLWithPath: "/bin/echo"), contextWindow: descriptor.recommendedContextSize,
+        packageRevision: descriptor.packageRevision))
+    XCTAssertTrue(WelcomeSetup.canContinue(selected: selected, installed: [installed], activeID: selected.id, skipLocal: false, busy: false))
+    XCTAssertFalse(WelcomeSetup.canContinue(selected: selected, installed: [installed], activeID: "other", skipLocal: false, busy: false))
+    XCTAssertFalse(WelcomeSetup.canContinue(selected: selected, installed: [], activeID: selected.id, skipLocal: false, busy: false))
+    var stale = installed
+    stale.visionConfiguration?.packageRevision = "old"
+    XCTAssertFalse(WelcomeSetup.canContinue(selected: selected, installed: [stale], activeID: selected.id, skipLocal: false, busy: false))
+    for busy in [false, true] {
+      XCTAssertEqual(WelcomeSetup.canContinue(selected: nil, installed: [], activeID: nil, skipLocal: true, busy: busy), !busy)
+    }
+    XCTAssertFalse(WelcomeSetup.canContinue(selected: selected, installed: [installed], activeID: selected.id, skipLocal: false, busy: true))
+    XCTAssertFalse(WelcomeSetup.canContinue(selected: nil, installed: [], activeID: nil, skipLocal: false, busy: false))
+  }
+
+  @MainActor
+  func testWelcomeSuppressesLegacyAutomaticModelSheet() async throws {
+    let root = try temporaryDirectory()
+    let defaults = try welcomeDefaults()
+    let mac = hardware()
+    let advisor = LocalModelAdvisor(directory: root, modelsDirectory: root, defaults: defaults, trust: nil, detect: { _ in mac })
+    await advisor.start(installedModels: [], presentOnboarding: false)
+    XCTAssertNotNil(advisor.hardware)
+    XCTAssertFalse(advisor.isOnboardingPresented)
+    await advisor.replayOnboarding()
+    XCTAssertTrue(advisor.isOnboardingPresented)
+  }
+
+  @MainActor
+  func testWelcomeAnimationIncludesAllFiveOriginalLetters() throws {
+    XCTAssertEqual(EnigmaHelloLetter.all.count, 5)
+    XCTAssertGreaterThan(EnigmaHelloLetter.all.flatMap(\.cols).flatMap(\.rows).count, 1000)
+    XCTAssertTrue(EnigmaHelloLetter.all.flatMap(\.cols).flatMap(\.rows).allSatisfy {
+      $0.char.count == 1 && $0.opacity > 0 && $0.opacity <= 1 && $0.y.isFinite
+    })
+  }
+
+  @MainActor
+  func testWelcomeScreensRenderAtMinimumAndDefaultPanelSizes() async throws {
+    let root = try temporaryDirectory()
+    let defaults = try welcomeDefaults()
+    let profile = hardware(memory: 32)
+    let advisor = LocalModelAdvisor(directory: root, modelsDirectory: root, defaults: defaults, trust: nil, detect: { _ in profile })
+    await advisor.detectHardware()
+    let chat = LocalChatViewModel(engine: SelectionTestEngine(), sessionStore: ChatSessionStore(applicationSupportDirectory: root))
+    let credentials = ScreenTestCredentialStore()
+    let cloud = CloudSettingsModel(credentialStore: credentials,
+      catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport(), cacheDirectory: root),
+      preferences: CloudPreferencesStore(defaults: defaults), codexAvailable: { false })
+    let search = WebSearchSettings(credentials: WelcomeEmptySearchCredentials(), defaults: defaults)
+    let setup = WelcomeSetup(defaults: defaults)
+    setup.replay()
+    for step in WelcomeSetup.Step.allCases {
+      setup.step = step
+      for size in [NSSize(width: 640, height: 420), NSSize(width: 1000, height: 780)] {
+        try render(WelcomeSetupView(setup: setup, advisor: advisor, chat: chat, cloud: cloud, search: search, chooseMode: { _ in }), size: size, name: "welcome-\(step)-\(Int(size.width))")
+      }
+    }
+    setup.finish(takeTour: true)
+    for sidebar in [false, true] {
+      let preferences = StartPreferences(defaults: defaults)
+      preferences.showsSidebar = sidebar
+      for step in WelcomeTourStep.allCases {
+        // Rewind without changing any chat or account state.
+        setup.replay()
+        setup.finish(takeTour: true)
+        for _ in 0..<step.rawValue { setup.nextTourStep() }
+        let view = AppShellView(glassAppearance: GlassAppearanceSettings(defaults: defaults), cloudSettings: cloud,
+          localChat: chat, modelAdvisor: advisor, searchSettings: search, startPreferences: preferences, welcomeSetup: setup)
+        try render(view, size: NSSize(width: 1000, height: 780), name: "welcome-tour-\(step)-\(sidebar)")
+        try render(view, size: NSSize(width: 640, height: 420), name: "welcome-tour-small-\(step)-\(sidebar)")
+      }
+    }
+  }
+}
+
+private struct WelcomeEmptySearchCredentials: WebSearchCredentialStore {
+  func apiKey() throws -> String? { nil }
+  func setAPIKey(_ value: String) throws {}
+  func removeAPIKey() throws {}
+}

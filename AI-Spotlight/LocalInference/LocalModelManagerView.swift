@@ -11,7 +11,7 @@ struct LocalModelChoiceCard: View {
     Button(action: select) {
       HStack(alignment: .top, spacing: 12) {
         Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-          .foregroundStyle(isSelected ? Color.accentColor : .secondary)
+          .foregroundStyle(isSelected ? NatureGlass.accent : .secondary)
           .font(.title3)
         VStack(alignment: .leading, spacing: 5) {
           Text(role).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
@@ -29,7 +29,7 @@ struct LocalModelChoiceCard: View {
       .natureSurface(radius: 16)
       .overlay {
         RoundedRectangle(cornerRadius: 14)
-          .stroke(isSelected ? Color.accentColor.opacity(0.7) : .secondary.opacity(0.2), lineWidth: 1)
+          .stroke(isSelected ? NatureGlass.accent.opacity(0.7) : .secondary.opacity(0.2), lineWidth: 1)
       }
       .contentShape(RoundedRectangle(cornerRadius: 14))
     }
@@ -223,7 +223,7 @@ struct LocalModelManagerSection: View {
     }
     .task {
       await chat.refreshInstalledModel()
-      await advisor.start(installedModels: chat.installedModels)
+      await advisor.start(installedModels: chat.installedModels, presentOnboarding: false)
     }
     .fileImporter(isPresented: $isImporterPresented,
       allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data], allowsMultipleSelection: false) { result in

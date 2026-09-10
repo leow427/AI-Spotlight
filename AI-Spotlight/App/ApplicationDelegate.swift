@@ -29,6 +29,8 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     if NSClassFromString("XCTestCase") != nil { return }
     #endif
     NSApp.setActivationPolicy(.accessory)
+    NotificationCenter.default.addObserver(self, selector: #selector(replayWelcomeSetup),
+      name: .welcomeSetupRequested, object: nil)
     NotificationCenter.default.addObserver(
       self,
       selector: #selector(openSettings),
@@ -89,6 +91,13 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     selectionShortcut?.stop()
     globalHotKeyMonitors.forEach { $0.stop() }
     globalHotKeyMonitors.removeAll()
+  }
+
+  @objc func replayWelcomeSetup() {
+    guard !LocalChatViewModel.shared.isBusy, panelController?.isCapturingScreen != true else { return }
+    settingsWindowController?.window?.orderOut(nil)
+    WelcomeSetup.shared.replay()
+    panelController?.show()
   }
 
   @objc func openSettings() {

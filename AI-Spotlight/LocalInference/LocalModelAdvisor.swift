@@ -37,11 +37,11 @@ final class LocalModelAdvisor: ObservableObject {
     }
   }
 
-  func start(installedModels: [LocalModel]) async {
+  func start(installedModels: [LocalModel], presentOnboarding: Bool = true) async {
     guard !initialized else { return }
     initialized = true
     await detectHardware()
-    if installedModels.isEmpty && !defaults.bool(forKey: "localModelOnboardingDismissed") {
+    if presentOnboarding && installedModels.isEmpty && !defaults.bool(forKey: "localModelOnboardingDismissed") {
       isOnboardingPresented = true
     }
     await refreshCatalog()

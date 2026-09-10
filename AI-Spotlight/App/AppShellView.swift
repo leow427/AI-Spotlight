@@ -234,6 +234,7 @@ private struct NatureButtonStyle: ButtonStyle {
 }
 
 struct AppShellView: View {
+  @ObservedObject private var welcomeSetup: WelcomeSetup
   @ObservedObject private var selectionAccess = SelectionAccessibilityAccess.shared
   @AppStorage(SelectionShortcutMonitor.enabledKey) private var selectionShortcutEnabled = true
   @ObservedObject private var selectionContext = SelectionContextService.shared
@@ -273,12 +274,14 @@ struct AppShellView: View {
     screen: ScreenComposerCoordinator = ScreenComposerCoordinator(),
     modelAdvisor: LocalModelAdvisor = .shared,
     searchSettings: WebSearchSettings = .shared,
-    startPreferences: StartPreferences = .shared
+    startPreferences: StartPreferences = .shared,
+    welcomeSetup: WelcomeSetup = .shared
   ) {
     self.glassAppearance = glassAppearance
     self.cloudSettings = cloudSettings
     self.modelAdvisor = modelAdvisor
     self.searchSettings = searchSettings
+    self.welcomeSetup = welcomeSetup
     self.startPreferences = startPreferences
     _selectedMode = State(initialValue: startPreferences.mode)
     _isSidebarVisible = State(initialValue: startPreferences.showsSidebar)
@@ -394,13 +397,29 @@ struct AppShellView: View {
 
   private var observedShell: some View {
     shellLayout
+    .disabled(welcomeSetup.isPresented || welcomeSetup.tour != nil)
+    .accessibilityHidden(welcomeSetup.isPresented)
+    .overlayPreferenceValue(WelcomeTourAnchors.self) { anchors in
+      WelcomeTourOverlay(setup: welcomeSetup, anchors: anchors)
+    }
+    .overlay {
+      if welcomeSetup.isPresented {
+        WelcomeSetupView(setup: welcomeSetup, advisor: modelAdvisor, chat: localChat, cloud: cloudSettings, search: searchSettings) { mode in
+          selectedMode = mode
+          startPreferences.mode = mode
+        }
+      }
+    }
     .onReceive(NotificationCenter.default.publisher(for: .sidebarToggleRequested)) { _ in
+      guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
       isSidebarVisible.toggle()
     }
     .onReceive(NotificationCenter.default.publisher(for: .fileModeRequested)) { _ in
+      guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
       activateFileMode(from: .keyboard)
     }
     .onReceive(NotificationCenter.default.publisher(for: .selectionContextRequested)) { notification in
+      guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
       screen.clearDraft()
       isSearchEnabled = false
       isSearchPresented = false
@@ -411,6 +430,7 @@ struct AppShellView: View {
       isComposerFocused = true
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
+      guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
       screen.clearDraft()
       isSearchEnabled = false
       isSearchPresented = false
@@ -420,6 +440,7 @@ struct AppShellView: View {
       isComposerFocused = true
     }
     .onReceive(NotificationCenter.default.publisher(for: .modePaletteRequested)) { _ in
+      guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
       isModePalettePresented.toggle()
     }
     .onReceive(NotificationCenter.default.publisher(for: .settingsRequested)) { _ in
@@ -445,6 +466,7 @@ struct AppShellView: View {
       localChat.stopStreaming()
     }
     .onReceive(NotificationCenter.default.publisher(for: .recentChatCycleRequested)) { _ in
+      guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
       localChat.cycleRecentChat()
     }
   }
@@ -501,7 +523,18 @@ struct AppShellView: View {
     }
     .task {
       await localChat.refreshInstalledModel()
-      await modelAdvisor.start(installedModels: localChat.installedModels)
+      welcomeSetup.start(hasInstalledModels: !localChat.installedModels.isEmpty)
+      await modelAdvisor.start(installedModels: localChat.installedModels, presentOnboarding: false)
+    }
+    .onChange(of: welcomeSetup.isPresented) { _, presented in
+      isComposerFocused = !presented && welcomeSetup.tour == nil
+      if presented {
+        isModePalettePresented = false
+        isHelpPresented = false
+      }
+    }
+    .onChange(of: welcomeSetup.tour) { _, tour in
+      isComposerFocused = tour == nil && !welcomeSetup.isPresented
     }
     .onChange(of: draft) { _, value in
       guard ComposerCommands(value).search else { return }
@@ -530,8 +563,9 @@ struct AppShellView: View {
   private var hiddenSidebarNavigation: some View {
     HStack(spacing: 12) {
       Button { isSidebarVisible = true } label: { Image(systemName: "sidebar.left") }
+        .welcomeTourTarget(.history)
         .accessibilityLabel("Show chat history").help("Show chat history · double-tap Control")
-      Button { isHelpPresented = true } label: { Label("Help", systemImage: "questionmark.circle") }
+      Button { isHelpPresented = true } label: { Label("Help", systemImage: "questionmark.circle") }.welcomeTourTarget(.help)
       Spacer()
       Button(action: openSettings) { Image(systemName: "gearshape") }.accessibilityLabel("Settings")
       Button { NotificationCenter.default.post(name: .newChatRequested, object: nil) } label: {
@@ -544,60 +578,67 @@ struct AppShellView: View {
   }
 
   private func sidebar(compact: Bool) -> some View {
-    ScrollView {
-      VStack(alignment: .leading, spacing: 24) {
-        HStack(spacing: compact ? 4 : 12) {
-          Image("SpotlightLogo").renderingMode(.template).resizable().scaledToFit()
-            .foregroundStyle(NatureGlass.accent).frame(width: compact ? 28 : 40, height: compact ? 28 : 40).accessibilityHidden(true)
-          Text("engima").font(.system(size: compact ? 15 : 19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
-          Spacer(minLength: 0)
-          Button { isSidebarVisible = false } label: {
-            Image(systemName: "sidebar.left").font(.system(size: 14)).frame(width: 24, height: 32)
-          }.buttonStyle(NatureButtonStyle()).accessibilityLabel("Hide chat history")
-            .help("Hide chat history · double-tap Control")
-          Button {
-            NotificationCenter.default.post(name: .newChatRequested, object: nil)
-          } label: {
-            Image(systemName: "square.and.pencil").font(.system(size: 17))
-              .foregroundStyle(NatureGlass.accent).frame(width: 36, height: 36)
-              .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
-              .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.19)) }
-          }.buttonStyle(NatureButtonStyle()).accessibilityLabel("New chat")
-        }
-        .padding(.horizontal, compact ? 0 : 8)
-
-        VStack(spacing: 4) {
-          if localChat.sessions.isEmpty {
-            sidebarRow(title: "New Chat", selected: true, compact: compact) {
+    ScrollViewReader { proxy in
+      ScrollView {
+        VStack(alignment: .leading, spacing: 24) {
+          HStack(spacing: compact ? 4 : 12) {
+            Image("SpotlightLogo").renderingMode(.template).resizable().scaledToFit()
+              .foregroundStyle(NatureGlass.accent).frame(width: compact ? 28 : 40, height: compact ? 28 : 40).accessibilityHidden(true)
+            Text("engima").font(.system(size: compact ? 15 : 19, weight: .semibold)).lineLimit(1).minimumScaleFactor(0.8)
+            Spacer(minLength: 0)
+            Button { isSidebarVisible = false } label: {
+              Image(systemName: "sidebar.left").font(.system(size: 14)).frame(width: 24, height: 32)
+            }.buttonStyle(NatureButtonStyle()).accessibilityLabel("Hide chat history").welcomeTourTarget(.history)
+              .help("Hide chat history · double-tap Control")
+            Button {
               NotificationCenter.default.post(name: .newChatRequested, object: nil)
-            }
+            } label: {
+              Image(systemName: "square.and.pencil").font(.system(size: 17))
+                .foregroundStyle(NatureGlass.accent).frame(width: 36, height: 36)
+                .background(.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12))
+                .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.19)) }
+            }.buttonStyle(NatureButtonStyle()).accessibilityLabel("New chat")
           }
-          ForEach(localChat.sessions.prefix(5)) { session in
-            sidebarRow(title: session.title, date: session.messages.isEmpty ? nil : session.lastActivityAt,
-                       selected: localChat.selectedSessionID == session.id, compact: compact) {
-              localChat.selectSession(id: session.id)
-            }
-          }
-        }
+          .padding(.horizontal, compact ? 0 : 8)
+          .id("welcomeHistory")
 
-        VStack(alignment: .leading, spacing: 0) {
-          Divider().overlay(NatureGlass.secondary.opacity(0.25)).padding(.horizontal, 16)
-          Button { isHelpPresented = true } label: {
-            Label("Help", systemImage: "questionmark.circle")
-              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
-          }.buttonStyle(NatureButtonStyle())
-          Button(action: openSettings) {
-            Label("Settings", systemImage: "gearshape")
-              .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
-          }.buttonStyle(NatureButtonStyle())
-          DeveloperToolsView(glassAppearance: glassAppearance, advisor: modelAdvisor, chat: localChat)
-            .padding(.vertical, 16)
+          VStack(spacing: 4) {
+            if localChat.sessions.isEmpty {
+              sidebarRow(title: "New Chat", selected: true, compact: compact) {
+                NotificationCenter.default.post(name: .newChatRequested, object: nil)
+              }
+            }
+            ForEach(localChat.sessions.prefix(5)) { session in
+              sidebarRow(title: session.title, date: session.messages.isEmpty ? nil : session.lastActivityAt,
+                         selected: localChat.selectedSessionID == session.id, compact: compact) {
+                localChat.selectSession(id: session.id)
+              }
+            }
+          }
+
+          VStack(alignment: .leading, spacing: 0) {
+            Divider().overlay(NatureGlass.secondary.opacity(0.25)).padding(.horizontal, 16)
+            Button { isHelpPresented = true } label: {
+              Label("Help", systemImage: "questionmark.circle")
+                .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
+            }.buttonStyle(NatureButtonStyle()).welcomeTourTarget(.help).id("welcomeHelp")
+            Button(action: openSettings) {
+              Label("Settings", systemImage: "gearshape")
+                .frame(maxWidth: .infinity, alignment: .leading).frame(height: 42).contentShape(Rectangle())
+            }.buttonStyle(NatureButtonStyle())
+            DeveloperToolsView(glassAppearance: glassAppearance, advisor: modelAdvisor, chat: localChat)
+              .padding(.vertical, 16)
+          }
+          .font(.system(size: compact ? 13 : 14))
+          .padding(.horizontal, compact ? 12 : 24)
         }
-        .font(.system(size: compact ? 13 : 14))
-        .padding(.horizontal, compact ? 12 : 24)
+        .padding(.horizontal, 8)
+        .padding(.vertical, 20)
       }
-      .padding(.horizontal, 8)
-      .padding(.vertical, 20)
+      .onChange(of: welcomeSetup.tour, initial: true) { _, step in
+        if step == .history { proxy.scrollTo("welcomeHistory", anchor: .top) }
+        if step == .help { proxy.scrollTo("welcomeHelp", anchor: .center) }
+      }
     }
     .scrollIndicators(.hidden)
     .modifier(NatureGlassSurface(navigation: true, enabled: glassAppearance.isEnabled, clarity: glassAppearance.clarity))
@@ -633,16 +674,19 @@ struct AppShellView: View {
     let isResponding = localChat.activeRequest != nil
     return HStack(spacing: compact ? 8 : 16) {
       FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
+        .welcomeTourTarget(.files)
       Rectangle().fill(NatureGlass.secondary.opacity(0.35)).frame(width: 1, height: 40)
 
       SlashCommandComposer(
         text: Binding(get: { localChat.pendingUserMessage == nil ? screen.draft : "" },
                       set: { screen.draft = $0 }),
-        isFocused: Binding(get: { isComposerFocused }, set: { isComposerFocused = $0 }),
-        isEnabled: !(localChat.isBusy || screen.isBusy || files.isWorking || files.isPicking),
+        isFocused: Binding(get: { isComposerFocused && !welcomeSetup.isPresented && welcomeSetup.tour == nil },
+                           set: { isComposerFocused = $0 }),
+        isEnabled: !(localChat.isBusy || screen.isBusy || files.isWorking || files.isPicking)
+          && !welcomeSetup.isPresented && welcomeSetup.tour == nil,
         fontSize: compact ? 14 : 15,
         submit: submitDraft
-      )
+      ).welcomeTourTarget(.composer)
 
       Button { isModePalettePresented.toggle() } label: {
         HStack(spacing: 8) {
@@ -654,7 +698,7 @@ struct AppShellView: View {
         .padding(.horizontal, compact ? 8 : 12).frame(height: compact ? 32 : 38)
         .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.1)) }
-      }.buttonStyle(NatureButtonStyle()).fixedSize().accessibilityLabel("Mode and model")
+      }.buttonStyle(NatureButtonStyle()).fixedSize().accessibilityLabel("Mode and model").welcomeTourTarget(.model)
 
       Button {
         if isResponding { localChat.stopStreaming() } else { submitDraft() }
@@ -1119,6 +1163,7 @@ struct AppShellView: View {
   }
 
   private func submitDraft() {
+    guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
     guard !localChat.isBusy, !screen.isBusy, !files.isWorking, !files.isPicking else { return }
     let commands = ComposerCommands(draft)
     if files.selection != nil {
@@ -1434,7 +1479,7 @@ private struct DeveloperToolsView: View {
       VStack(alignment: .leading, spacing: 10) {
         Button("Detect Mac Capabilities") { Task { await advisor.detectHardware() } }
           .disabled(advisor.isDetecting || chat.isBusy)
-        Button("Test First-Run Model Selection") { Task { await advisor.replayOnboarding() } }
+        Button("Replay Welcome Setup") { WelcomeSetup.shared.replay() }
           .disabled(advisor.isDetecting || chat.isBusy)
         if let hardware = advisor.hardware {
           Text("\(hardware.chip) · \(hardware.cpuCount) CPUs")
@@ -1576,6 +1621,14 @@ struct SettingsView: View {
           switch destination {
           case .general:
             Form {
+              Section("Welcome") {
+                Button("Replay Welcome Setup") {
+                  NotificationCenter.default.post(name: .welcomeSetupRequested, object: nil)
+                }
+                .disabled(LocalChatViewModel.shared.isBusy)
+                Text("Try setup and the walkthrough again. Your chats, installed models, and credentials are kept.")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
               Section("New chats") {
                 Picker("Prefer Start Mode", selection: $startPreferences.mode) {
                   ForEach(ChatMode.allCases) { mode in Text(mode.displayName).tag(mode) }
