@@ -189,6 +189,8 @@ enum CloudContext {
 /// Shared response style guidance, independent of provider and persisted history.
 enum ChatResponseStyle {
   static let instructions = """
+    Be quick and helpful. Lead with the answer or requested edit. For everyday questions, aim for one short paragraph or 3–5 brief bullets, usually under 150 words. Include the details needed to act, but skip preambles, repeated conclusions, unsolicited follow-up offers, and unnecessary headings. For edits, return the revised text with only essential explanation. Expand when the user asks for depth or when accuracy, safety, or a complete deliverable requires it; never omit essential steps or truncate code to meet a length target.
+    For nearby or local-weather questions, use a place named by the user or approximate location supplied for this request. If neither is available, ask for a city or area; never guess the user's location or invent current weather or opening hours.
     Use clean standard Markdown for responses: headings, lists, emphasis, code, links, blockquotes, and tables when useful. Do not put backslashes before Markdown formatting characters. Preserve literal backslashes in paths and code; put code and paths in code spans or fenced code blocks.
     """
 }

@@ -6,6 +6,106 @@ import XCTest
 
 @MainActor
 final class WebSearchTests: XCTestCase {
+  func testLocationIntentOnlyUsesNearbyQuestions() {
+    for prompt in ["What is the weather forecast today?", "What are some good restaurants around me?",
+      "Weather forecast", "Will it rain tomorrow?", "Do I need an umbrella today?",
+      "Find nearby cafes", "/think What's the temperature today?", "Where am I?"] {
+      XCTAssertTrue(LocationIntent.needsLocation(prompt), prompt)
+      XCTAssertTrue(WebSearchPolicy.needsFreshInformation(prompt), prompt)
+    }
+    for prompt in ["Weather in Copenhagen", "What is the forecast for Paris today?",
+      "Find nearby restaurants in Rome", "Explain how weather forecasting works", "What is weather?",
+      "Rewrite: good restaurants around me", "Translate \"What is the weather forecast today?\"",
+      "Explain `near me`", "Don't search. What's the weather today?",
+      "Don't use my location. What is the forecast today?", "Summarize the attached forecast"] {
+      XCTAssertFalse(LocationIntent.needsLocation(prompt), prompt)
+    }
+  }
+
+  func testLocationIsRoundedAndDisabledServiceDoesNotRequestPermission() async throws {
+    let location = ApproximateLocation(latitude: 41.8781136, longitude: -87.6297982, area: "Chicago")
+    XCTAssertEqual(location.coordinates, "41.88, -87.63")
+    let defaults = makeDefaults()
+    let service = LocationService(defaults: defaults)
+    service.isEnabled = false
+    XCTAssertFalse(LocationService(defaults: defaults).isEnabled)
+    do {
+      _ = try await service.currentLocation()
+      XCTFail("Disabled location must not be requested")
+    } catch {
+      XCTAssertTrue(error is LocationError)
+    }
+  }
+
+  func testNearbySearchUsesLocationAcrossRoutesWithoutPersistingIt() async throws {
+    for route in ["local", "auto", "cloud"] {
+      let location = SearchLocation()
+      let search = SearchSpy(results: fixtureResults)
+      let engine = SearchLocalEngine()
+      let cloud = SearchCloudProvider()
+      let store = makeStore()
+      let model = makeModel(engine: engine, search: search, cloud: cloud, store: store, automatic: true, location: location)
+      await model.refreshInstalledModel()
+      let prompt = "What are some good restaurants around me?"
+      switch route {
+      case "local": model.submit(prompt)
+      case "auto": model.submitAuto(prompt, cloud: nil)
+      default: model.submitCloud(prompt, provider: .chatGPT, modelID: "model")
+      }
+      await finish(model)
+      XCTAssertEqual(model.state, .idle)
+      XCTAssertEqual(location.calls, 1)
+      let queries = await search.queries
+      XCTAssertTrue(try XCTUnwrap(queries.last).contains("Chicago (41.88, -87.63)"))
+      let localRequests = await engine.requests
+      let context = localRequests.last?.prompt ?? cloud.requests.last?.messages.last?.content ?? ""
+      XCTAssertTrue(context.contains("Approximate current location: Chicago"))
+      XCTAssertEqual(model.messages.first?.content, prompt)
+      let saved = String(decoding: try JSONEncoder().encode(store.load()), as: UTF8.self)
+      XCTAssertFalse(saved.contains("41.88"))
+      model.submitCloud("Weather in Copenhagen", provider: .chatGPT, modelID: "model")
+      await finish(model)
+      XCTAssertEqual(location.calls, 1)
+      XCTAssertFalse(cloud.requests.last?.messages.last?.content.contains("Approximate current location") == true)
+    }
+  }
+
+  func testUnavailableLocationPreservesDraftAndDoesNotSearchOrGenerate() async {
+    let location = SearchLocation(error: LocationError.unavailable)
+    let search = SearchSpy(results: fixtureResults)
+    let cloud = SearchCloudProvider()
+    let model = makeModel(search: search, cloud: cloud, automatic: true, location: location)
+    var draft = "What is the weather forecast today?"
+    model.submitCloud(draft, provider: .chatGPT, modelID: "model") { draft = "" }
+    await finish(model)
+    XCTAssertEqual(model.state, .failed(LocationError.unavailable.localizedDescription))
+    XCTAssertFalse(draft.isEmpty)
+    let queries = await search.queries
+    XCTAssertTrue(queries.isEmpty)
+    XCTAssertTrue(cloud.requests.isEmpty)
+  }
+
+  func testCancelledLocationCannotLeakIntoReplacementRequest() async throws {
+    let gate = SearchGate()
+    let location = SearchLocation(gate: gate)
+    let search = SearchSpy(results: fixtureResults)
+    let cloud = SearchCloudProvider()
+    let model = makeModel(search: search, cloud: cloud, automatic: true, location: location)
+    model.submitCloud("Weather forecast today", provider: .chatGPT, modelID: "model")
+    await fulfillment(of: [gate.entered], timeout: 2)
+    let stopped = try XCTUnwrap(model.stopStreaming())
+    await fulfillment(of: [gate.cancelled], timeout: 2)
+    model.newChat()
+    model.submitCloud("Weather in Copenhagen", provider: .chatGPT, modelID: "model")
+    await finish(model)
+    await gate.release()
+    await stopped.value
+    let queries = await search.queries
+    XCTAssertEqual(queries, ["Weather in Copenhagen"])
+    XCTAssertEqual(cloud.requests.count, 1)
+    XCTAssertFalse(cloud.requests[0].messages.last?.content.contains("Chicago") == true)
+  }
+
   func testAutomaticSearchRecognizesFreshFactsWithoutACommand() {
     let date = Date(timeIntervalSince1970: 1_788_825_600) // September 2026
     for prompt in [
@@ -762,13 +862,13 @@ final class WebSearchTests: XCTestCase {
   private func makeModel(
     engine: SearchLocalEngine = SearchLocalEngine(), search: any WebSearchProvider,
     cloud: SearchCloudProvider = SearchCloudProvider(), store: ChatSessionStore? = nil,
-    automatic: Bool = false, settings: WebSearchSettings? = nil
+    automatic: Bool = false, settings: WebSearchSettings? = nil, location: (any LocationProviding)? = nil
   ) -> LocalChatViewModel {
     let searchSettings = settings ?? WebSearchSettings(credentials: SearchCredentials("fixture"), defaults: makeDefaults())
     if settings == nil { searchSettings.automaticallySearch = automatic }
     return LocalChatViewModel(
       engine: engine, cloudProviders: CloudProviderRegistry(openAI: cloud, anthropic: cloud, chatGPT: cloud),
-      webSearch: search, searchSettings: searchSettings, sessionStore: store ?? makeStore()
+      webSearch: search, searchSettings: searchSettings, locationProvider: location, sessionStore: store ?? makeStore()
     )
   }
 
@@ -918,4 +1018,21 @@ private struct ActivityCloudProvider: ChatProvider {
 private actor ActivityRecorder {
   var events: [AssistantActivityEvent] = []
   func record(_ event: AssistantActivityEvent) { events.append(event) }
+}
+
+
+@MainActor
+private final class SearchLocation: LocationProviding {
+  var calls = 0
+  let error: Error?
+  let gate: SearchGate?
+  init(error: Error? = nil, gate: SearchGate? = nil) { self.error = error; self.gate = gate }
+  func currentLocation() async throws -> ApproximateLocation {
+    calls += 1
+    if let error { throw error }
+    if let gate {
+      await withTaskCancellationHandler { await gate.wait() } onCancel: { gate.cancelled.fulfill() }
+    }
+    return ApproximateLocation(latitude: 41.8781136, longitude: -87.6297982, area: "Chicago")
+  }
 }

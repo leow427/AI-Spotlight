@@ -58,6 +58,27 @@ final class AppCommandTests: XCTestCase {
     )
   }
 
+  @MainActor
+  func testStartupPreferencesPersistAndRecoverInvalidValues() {
+    let name = "StartPreferencesTests-\(UUID())"
+    let defaults = UserDefaults(suiteName: name)!
+    defer { defaults.removePersistentDomain(forName: name) }
+    let preferences = StartPreferences(defaults: defaults)
+    XCTAssertEqual(preferences.mode, .auto)
+    XCTAssertFalse(preferences.showsSidebar)
+    for mode in ChatMode.allCases {
+      preferences.mode = mode
+      preferences.showsSidebar = true
+      let restored = StartPreferences(defaults: defaults)
+      XCTAssertEqual(restored.mode, mode)
+      XCTAssertTrue(restored.showsSidebar)
+    }
+    defaults.set("removed-mode", forKey: StartPreferences.modeKey)
+    XCTAssertEqual(StartPreferences(defaults: defaults).mode, .auto)
+    preferences.showsSidebar = false
+    XCTAssertFalse(StartPreferences(defaults: defaults).showsSidebar)
+  }
+
   func testSavedGlassAppearanceIsRestored() {
     let suiteName = "GlassAppearanceSettingsTests.\(UUID().uuidString)"
     let defaults = UserDefaults(suiteName: suiteName)!
@@ -189,6 +210,8 @@ final class AppCommandTests: XCTestCase {
     defer { window.close() }
 
     XCTAssertEqual(window.sharingType, .none)
+    XCTAssertTrue(window.titlebarAppearsTransparent)
+    XCTAssertEqual(window.backgroundColor, NSColor(NatureGlass.forestTop))
     controller.showSettings()
     XCTAssertTrue(window.isVisible)
     XCTAssertTrue(window.isKeyWindow)

@@ -157,6 +157,7 @@ struct ConversationScrollObserver: NSViewRepresentable {
 /// Tokens from Figma's Liquid Glass alternative (16:122).
 enum NatureGlass {
   static let accent = Color("SpotlightAccent")
+  static let forestTop = Color(red: 34/255, green: 51/255, blue: 44/255)
   static let canvas = Color(red: 11/255, green: 18/255, blue: 19/255)
   static let primary = Color(red: 242/255, green: 245/255, blue: 242/255)
   static let secondary = Color(red: 173/255, green: 184/255, blue: 178/255)
@@ -258,8 +259,9 @@ struct AppShellView: View {
   @State private var isModelImporterPresented = false
   @State private var isModePalettePresented = false
   @State private var isHelpPresented = false
-  @State private var isSidebarVisible = false
-  @State private var selectedMode = ChatMode.auto
+  @ObservedObject private var startPreferences: StartPreferences
+  @State private var isSidebarVisible: Bool
+  @State private var selectedMode: ChatMode
   @State private var isComposerFocused = false
 
   init(
@@ -270,12 +272,16 @@ struct AppShellView: View {
     localChat: LocalChatViewModel? = nil,
     screen: ScreenComposerCoordinator = ScreenComposerCoordinator(),
     modelAdvisor: LocalModelAdvisor = .shared,
-    searchSettings: WebSearchSettings = .shared
+    searchSettings: WebSearchSettings = .shared,
+    startPreferences: StartPreferences = .shared
   ) {
     self.glassAppearance = glassAppearance
     self.cloudSettings = cloudSettings
     self.modelAdvisor = modelAdvisor
     self.searchSettings = searchSettings
+    self.startPreferences = startPreferences
+    _selectedMode = State(initialValue: startPreferences.mode)
+    _isSidebarVisible = State(initialValue: startPreferences.showsSidebar)
     _screen = StateObject(wrappedValue: screen)
     let chat = localChat ?? localEngine.map { LocalChatViewModel(engine: $0, cloudProviders: cloudProviders) } ?? .shared
     _localChat = StateObject(wrappedValue: chat)
@@ -400,6 +406,7 @@ struct AppShellView: View {
       isSearchPresented = false
       isModePalettePresented = false
       isHelpPresented = false
+      applyStartPreferences()
       localChat.startTemporaryChat(context: notification.object as? ConversationContext)
       isComposerFocused = true
     }
@@ -407,6 +414,7 @@ struct AppShellView: View {
       screen.clearDraft()
       isSearchEnabled = false
       isSearchPresented = false
+      applyStartPreferences()
       localChat.newChat()
       isModePalettePresented = false
       isComposerFocused = true
@@ -1105,6 +1113,11 @@ struct AppShellView: View {
     }
   }
 
+  private func applyStartPreferences() {
+    selectedMode = startPreferences.mode
+    isSidebarVisible = startPreferences.showsSidebar
+  }
+
   private func submitDraft() {
     guard !localChat.isBusy, !screen.isBusy, !files.isWorking, !files.isPicking else { return }
     let commands = ComposerCommands(draft)
@@ -1505,6 +1518,8 @@ struct SelectionRevisionCard: View {
 }
 
 struct SettingsView: View {
+  @ObservedObject private var location = LocationService.shared
+  @ObservedObject private var startPreferences = StartPreferences.shared
   @ObservedObject private var selectionEditing = SelectionEditingSettings.shared
   @ObservedObject private var settings: CloudSettingsModel
   @State private var openAIAPIKey = ""
@@ -1512,18 +1527,19 @@ struct SettingsView: View {
   @State private var geminiAPIKey = ""
   @State private var formError: String?
 
-  init(settings: CloudSettingsModel = .shared, initialDestination: SettingsDestination = .local) {
+  init(settings: CloudSettingsModel = .shared, initialDestination: SettingsDestination = .general) {
     self.settings = settings
     _destination = State(initialValue: initialDestination)
   }
 
   @State private var destination: SettingsDestination
   enum SettingsDestination: String, CaseIterable, Identifiable {
+    case general = "General"
     case local = "Local Models"
     case cloud = "Cloud & Search"
     case selection = "Selection Context"
     var id: Self { self }
-    var symbol: String { switch self { case .local: "laptopcomputer"; case .cloud: "cloud"; case .selection: "text.cursor" } }
+    var symbol: String { switch self { case .general: "gearshape"; case .local: "laptopcomputer"; case .cloud: "cloud"; case .selection: "text.cursor" } }
   }
 
   var body: some View {
@@ -1554,10 +1570,30 @@ struct SettingsView: View {
       .natureSurface(navigation: true).padding(12)
       VStack(alignment: .leading, spacing: 8) {
         Text(destination.rawValue).font(.system(size: 24, weight: .semibold)).padding(.horizontal, 20).padding(.top, 24)
-        Text(destination == .local ? "Intelligence, right on your Mac." : destination == .selection ? "Choose how your text revisions are applied." : "Connect your models and the web.")
+        Text(destination == .general ? "Make each new chat feel like yours." : destination == .local ? "Intelligence, right on your Mac." : destination == .selection ? "Choose how your text revisions are applied." : "Connect your models and the web.")
           .foregroundStyle(NatureGlass.secondary).padding(.horizontal, 20)
         Group {
           switch destination {
+          case .general:
+            Form {
+              Section("New chats") {
+                Picker("Prefer Start Mode", selection: $startPreferences.mode) {
+                  ForEach(ChatMode.allCases) { mode in Text(mode.displayName).tag(mode) }
+                }
+                Toggle("Show sidebar", isOn: $startPreferences.showsSidebar)
+                Text("Used at launch and for each new chat or Selection Context session.")
+                  .font(.caption).foregroundStyle(.secondary)
+              }
+              Section("Location") {
+                Toggle("Use location for nearby questions", isOn: $location.isEnabled)
+                Text("When you ask about local weather or nearby places, macOS asks for permission. Your approximate area is sent to Brave Search and included with the answer context. Requires Web Search setup in Cloud & Search. No background tracking.")
+                  .font(.caption).foregroundStyle(.secondary)
+                Text(location.status).font(.caption).foregroundStyle(.secondary)
+                Button("Open Location Services Settings") {
+                  NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_LocationServices")!)
+                }
+              }
+            }.formStyle(.grouped)
           case .local:
             Form { LocalModelManagerSection() }.formStyle(.grouped)
           case .cloud:

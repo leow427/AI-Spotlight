@@ -140,7 +140,7 @@ final class ScreenViewTests: XCTestCase {
       let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
       view.cacheDisplay(in: view.bounds, to: bitmap)
       let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
-      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Glass-Settings-\(destination == .local ? "Local" : "Cloud").png"))
+      try png.write(to: URL(fileURLWithPath: "/tmp/AI-Spotlight-Glass-Settings-\(destination.rawValue).png"))
       let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
       attachment.name = "Liquid Glass settings · \(destination.rawValue)"
       attachment.lifetime = .keepAlways

@@ -36,6 +36,7 @@ final class SettingsWindowController: NSWindowController {
     window.title = "engima Settings"
     window.appearance = NSAppearance(named: .darkAqua)
     window.titlebarAppearsTransparent = true
+    window.backgroundColor = NSColor(NatureGlass.forestTop)
     // Apply the same best-effort capture exclusion as the chat panel.
     window.sharingType = .none
     // Match the chat panel's level so Settings can appear in front without hiding it.

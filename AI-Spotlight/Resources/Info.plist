@@ -26,6 +26,8 @@
   <true/>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>NSLocationUsageDescription</key>
+  <string>AI Spotlight uses your approximate location when you ask about local weather or nearby places. Your area is shared with web search and your selected AI provider to answer that question.</string>
   <key>NSPrincipalClass</key>
   <string>NSApplication</string>
 </dict>

@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		ED2000000000000000000001 = {isa = PBXBuildFile; fileRef = ED1000000000000000000001; };
+		ED2000000000000000000000 = {isa = PBXBuildFile; fileRef = ED1000000000000000000000; };
 		CC5400000000000000000001 = {isa = PBXBuildFile; fileRef = CC5300000000000000000001; };
 		CC5200000000000000000002 = {isa = PBXBuildFile; fileRef = CC5100000000000000000002; };
 		CC5200000000000000000001 = {isa = PBXBuildFile; fileRef = CC5100000000000000000001; };
@@ -125,6 +127,8 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		ED1000000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/Search/LocationService.swift"; sourceTree = SOURCE_ROOT; };
+		ED1000000000000000000000 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/StartPreferences.swift"; sourceTree = SOURCE_ROOT; };
 		CC5300000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-SpotlightTests/SelectionContextTests.swift"; sourceTree = SOURCE_ROOT; };
 		CC5100000000000000000002 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SelectionContextService.swift"; sourceTree = SOURCE_ROOT; };
 		CC5100000000000000000001 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "AI-Spotlight/App/SelectionShortcut.swift"; sourceTree = SOURCE_ROOT; };
@@ -257,6 +261,8 @@
 		A70000000000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				ED1000000000000000000001,
+				ED1000000000000000000000,
 				CC5300000000000000000001,
 				CC5100000000000000000002,
 				CC5100000000000000000001,
@@ -538,6 +544,8 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ED2000000000000000000001,
+				ED2000000000000000000000,
 				CC5200000000000000000002,
 				CC5200000000000000000001,
 				CC5200000000000000000000,

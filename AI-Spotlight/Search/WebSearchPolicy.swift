@@ -5,13 +5,26 @@ import Foundation
 /// not get to opt a request into network access.
 enum WebSearchPolicy {
   static func needsFreshInformation(_ prompt: String, now: Date = Date()) -> Bool {
+    let text = questionText(prompt)
+    guard !text.isEmpty, !matches(optOut, text) else { return false }
+    if LocationIntent.needsLocation(prompt) { return true }
+    return needsFreshFacts(text, now: now)
+  }
+
+  static func questionText(_ prompt: String) -> String {
     let question = ThinkCommand.message(prompt).content
-    let text = literalMaterial.stringByReplacingMatches(in: question,
+    return literalMaterial.stringByReplacingMatches(in: question,
       range: NSRange(question.startIndex..., in: question),
       withTemplate: " ")
       .replacingOccurrences(of: "’", with: "'")
       .lowercased().split(whereSeparator: \.isWhitespace).joined(separator: " ")
-    guard !text.isEmpty, !matches(optOut, text) else { return false }
+  }
+
+  static func isOfflineOrTransformation(_ text: String) -> Bool {
+    matches(optOut, text) || matches(transformation, text) || matches(localTask, text)
+  }
+
+  private static func needsFreshFacts(_ text: String, now: Date) -> Bool {
     if matches(explicitLookup, text) { return true }
     guard !matches(transformation, text), !matches(localTask, text) else { return false }
 

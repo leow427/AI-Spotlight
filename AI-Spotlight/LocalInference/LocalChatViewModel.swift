@@ -4,7 +4,7 @@ import Foundation
 
 @MainActor
 final class LocalChatViewModel: ObservableObject {
-  static let shared = LocalChatViewModel(engine: LlamaCPPModelEngine(), modelAdvisor: .shared, searchSettings: .shared)
+  static let shared = LocalChatViewModel(engine: LlamaCPPModelEngine(), modelAdvisor: .shared, searchSettings: .shared, locationProvider: LocationService.shared)
 
   enum State: Equatable {
     case idle
@@ -138,6 +138,8 @@ final class LocalChatViewModel: ObservableObject {
   private let engine: any LocalModelEngine
   private let visionEngine: any LocalVisionServing
   private let searchSettings: WebSearchSettings?
+  private let locationProvider: (any LocationProviding)?
+  private var requestLocationContext: String?
   private let webSearch: any WebSearchProvider
   private let cloudProviders: CloudProviderRegistry
   private let sessionStore: ChatSessionStore
@@ -160,6 +162,7 @@ final class LocalChatViewModel: ObservableObject {
     cloudProviders: CloudProviderRegistry = .live,
     webSearch: any WebSearchProvider = BraveSearchClient(),
     searchSettings: WebSearchSettings? = nil,
+    locationProvider: (any LocationProviding)? = nil,
     sessionStore: ChatSessionStore = ChatSessionStore(),
     idleUnloadDelay: Duration = .seconds(300),
     sleep: @escaping Sleep = { duration in try await Task.sleep(for: duration) }
@@ -179,6 +182,7 @@ final class LocalChatViewModel: ObservableObject {
     self.modelAdvisor = modelAdvisor
     self.webSearch = webSearch
     self.searchSettings = searchSettings
+    self.locationProvider = locationProvider
     self.cloudProviders = cloudProviders
     self.sessionStore = sessionStore
     self.idleUnloadDelay = idleUnloadDelay
@@ -473,7 +477,7 @@ final class LocalChatViewModel: ObservableObject {
           try Task.checkCancellation()
           guard owner.activeRequest?.id == active.id else { return }
           owner.state = .preparing
-          let grounded = try await WebSearchContext.prepare(messages: request.messages, results: results) {
+          let grounded = try await WebSearchContext.prepare(messages: owner.locationGrounded(request.messages), results: results) {
             try await engine.prepare(LocalModelRequest(messages: $0))
           }
           prepared = grounded.prepared
@@ -632,7 +636,7 @@ final class LocalChatViewModel: ObservableObject {
                 owner.state = .searching
                 // Screen queries resolve the user's references with relevant observed facts.
                 // Pixels, raw OCR, and conversation history are never attached to Brave.
-                searchResults = try await owner.search(searchQuery ?? prompt, maximumTokens: BraveSearchClient.evidenceTokens, requestID: active.id)
+                searchResults = try await owner.search(searchQuery ?? prompt, locationPrompt: prompt, maximumTokens: BraveSearchClient.evidenceTokens, requestID: active.id)
               }
               try Task.checkCancellation()
               guard owner.activeRequest?.id == active.id else { return }
@@ -642,7 +646,7 @@ final class LocalChatViewModel: ObservableObject {
                   ocr: attachment.ocrText, preferOCR: preferOCR)
                   + "\n\nSearch query used to retrieve the evidence: " + searchQuery
               }
-              let grounded = try await WebSearchContext.prepare(messages: requestHistory, results: searchResults!) {
+              let grounded = try await WebSearchContext.prepare(messages: owner.locationGrounded(requestHistory), results: searchResults!) {
                 try await prepare($0, requestImage)
               }
               prepared = grounded.prepared
@@ -818,7 +822,7 @@ final class LocalChatViewModel: ObservableObject {
         let results = try await owner.search(userMessage.content, maximumTokens: BraveSearchClient.evidenceTokens, requestID: active.id)
         try Task.checkCancellation()
         guard owner.activeRequest?.id == active.id else { return }
-        let grounded = try await WebSearchContext.prepare(messages: history, results: results) {
+        let grounded = try await WebSearchContext.prepare(messages: owner.locationGrounded(history), results: results) {
           try CloudContext.prepare(ChatRequest(sessionID: UUID(), messages: $0, route: route))
         }
         try Task.checkCancellation()
@@ -1026,7 +1030,7 @@ final class LocalChatViewModel: ObservableObject {
     installationTask = nil
   }
 
-  private func search(_ query: String, maximumTokens: Int, requestID: UUID) async throws -> [WebSearchResult] {
+  private func search(_ query: String, locationPrompt: String? = nil, maximumTokens: Int, requestID: UUID) async throws -> [WebSearchResult] {
     receiveActivity(.phase(.searching), requestID: requestID)
     var contextualQuery = query
     if !attachedContexts.isEmpty, let active = activeRequest, active.id == requestID {
@@ -1063,6 +1067,13 @@ final class LocalChatViewModel: ObservableObject {
       state = .searching
       receiveActivity(.phase(.searching), requestID: requestID)
     }
+    if LocationIntent.needsLocation(locationPrompt ?? query), let locationProvider {
+      let location = try await locationProvider.currentLocation()
+      try Task.checkCancellation()
+      guard activeRequest?.id == requestID else { throw CancellationError() }
+      requestLocationContext = location.searchContext
+      contextualQuery += "\n" + location.searchContext
+    }
     let results = try await webSearch.search(contextualQuery, maximumTokens: maximumTokens) { [weak self] event in
       // Retrieval candidates are not citation sources until context fitting selects them.
       if case .sourcesDiscovered = event {
@@ -1085,7 +1096,15 @@ final class LocalChatViewModel: ObservableObject {
     sessions[sessionIndex].messages[messageIndex].activity = updated
   }
 
+  private func locationGrounded(_ messages: [ChatMessage]) -> [ChatMessage] {
+    guard let context = requestLocationContext, !messages.isEmpty else { return messages }
+    var result = messages
+    result[result.count - 1].content += "\n\n" + context + "\nUse this area for this question only; mention the area in your answer."
+    return result
+  }
+
   private func beginGeneration(route: Route, modelDisplayName: String) -> ActiveRequest {
+    requestLocationContext = nil
     let request = ActiveRequest(id: UUID(), route: route, modelDisplayName: modelDisplayName)
     pendingUserMessage = nil
     hasReceivedResponse = false
