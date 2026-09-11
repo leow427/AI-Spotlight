@@ -6,6 +6,7 @@ struct SlashCommandComposer: View {
   @Binding var isFocused: Bool
   var isEnabled: Bool
   var fontSize: CGFloat = 15
+  var usesPopover = false
   var submit: () -> Void
   @StateObject private var completion = CommandCompletionModel()
 
@@ -20,42 +21,47 @@ struct SlashCommandComposer: View {
         .frame(height: completion.height)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
+    .popover(isPresented: Binding(get: { usesPopover && isFocused && isEnabled && !completion.commands.isEmpty },
+      set: { if !$0 { _ = completion.dismiss() } }), arrowEdge: .top) { suggestions }
     .overlay(alignment: .bottomLeading) {
       if isFocused && isEnabled && !completion.commands.isEmpty {
-        VStack(alignment: .leading, spacing: 2) {
-          ForEach(Array(completion.commands.enumerated()), id: \.element) { index, command in
-            Button { completion.accept(command) } label: {
-              HStack(spacing: 10) {
-                Image(systemName: command.symbol).font(.system(size: 17))
-                  .frame(width: 24).foregroundStyle(command.tint)
-                VStack(alignment: .leading, spacing: 2) {
-                  Text(command.token).font(.system(size: 13, weight: .semibold)).foregroundStyle(command.tint)
-                  Text(command.description).font(.system(size: 11)).foregroundStyle(.secondary)
-                }
-                Spacer(minLength: 0)
-                if index == completion.selected { Text("⇥").foregroundStyle(.secondary) }
-              }
-              .padding(8)
-              .contentShape(Rectangle())
-              .background(index == completion.selected ? command.tint.opacity(0.12) : .clear,
-                          in: RoundedRectangle(cornerRadius: 8))
-            }
-            .buttonStyle(.plain)
-            .focusable(false)
-            .accessibilityLabel(command.token + ", " + command.description)
-            .accessibilityAddTraits(index == completion.selected ? .isSelected : [])
-          }
-        }
-        .padding(4)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("Slash commands")
-        .frame(width: 320)
-        .fixedSize(horizontal: false, vertical: true)
-        .padding(.bottom, completion.height + 18)
+        if !usesPopover { suggestions.padding(.bottom, completion.height + 18) }
       }
     }
   }
+  private var suggestions: some View {
+    VStack(alignment: .leading, spacing: 2) {
+      ForEach(Array(completion.commands.enumerated()), id: \.element) { index, command in
+        Button { completion.accept(command) } label: {
+          HStack(spacing: 10) {
+            Image(systemName: command.symbol).font(.system(size: 17))
+              .frame(width: 24).foregroundStyle(command.tint)
+            VStack(alignment: .leading, spacing: 2) {
+              Text(command.token).font(.system(size: 13, weight: .semibold)).foregroundStyle(command.tint)
+              Text(command.description).font(.system(size: 11)).foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 0)
+            if index == completion.selected { Text("⇥").foregroundStyle(.secondary) }
+          }
+          .padding(8)
+          .contentShape(Rectangle())
+          .background(index == completion.selected ? command.tint.opacity(0.12) : .clear,
+                      in: RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .focusable(false)
+        .accessibilityLabel(command.token + ", " + command.description)
+        .accessibilityAddTraits(index == completion.selected ? .isSelected : [])
+      }
+    }
+    .padding(4)
+    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+    .accessibilityElement(children: .contain)
+    .accessibilityLabel("Slash commands")
+    .frame(width: 320)
+    .fixedSize(horizontal: false, vertical: true)
+  }
+
 }
 
 @MainActor

@@ -49,12 +49,33 @@ struct PanelSizeStore {
   }
 }
 
+enum SelectionPanelExpansion {
+  static let composerSize = NSSize(width: 720, height: 92)
+
+  static func frame(from composer: NSRect, visible: NSRect) -> NSRect {
+    let size = NSSize(width: min(composer.width, visible.width), height: min(600, visible.height))
+    return NSRect(x: min(max(composer.minX, visible.minX), visible.maxX - size.width),
+      y: min(max(composer.minY, visible.minY), visible.maxY - size.height),
+      width: size.width, height: size.height)
+  }
+
+  static func progress(at fraction: Double) -> Double {
+    guard fraction < 1 else { return 1 }
+    return 1 - exp(-7 * fraction) * cos(10 * fraction)
+  }
+}
+
 @MainActor
 final class SpotlightPanelController: NSObject, NSWindowDelegate {
   private let panel: SpotlightPanel
   private let sizeStore: PanelSizeStore
+  private let reduceMotion: @MainActor () -> Bool
   private var welcomeObservation: AnyCancellable?
   private var normalSize: NSSize?
+  private var selectionNormalFrame: NSRect?
+  private(set) var isSelectionComposer = false
+  private var expansionTask: Task<Void, Never>?
+  private var expansionTarget: NSRect?
 
   private(set) var isCapturingScreen = false
   private var captureHiddenWindows: [NSWindow] = []
@@ -64,9 +85,11 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     glassAppearance: GlassAppearanceSettings,
     sizeStore: PanelSizeStore = PanelSizeStore(),
     contentView: NSView? = nil,
-    welcomeSetup: WelcomeSetup? = nil
+    welcomeSetup: WelcomeSetup? = nil,
+    reduceMotion: @escaping @MainActor () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion }
   ) {
     self.sizeStore = sizeStore
+    self.reduceMotion = reduceMotion
     panel = SpotlightPanel(
       contentRect: NSRect(origin: .zero, size: sizeStore.load()),
       styleMask: [.borderless, .nonactivatingPanel, .resizable, .fullSizeContentView],
@@ -99,6 +122,11 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
     NotificationCenter.default.addObserver(self, selector: #selector(beginSelectionReplacement), name: .selectionReplacementBegan, object: nil)
     NotificationCenter.default.addObserver(self, selector: #selector(endSelectionReplacement), name: .selectionReplacementEnded, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(expandSelectionPanel), name: .selectionPanelExpandRequested, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(resizeSelectionComposer(_:)), name: .selectionComposerHeightChanged, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(restoreNormalPanel), name: .newChatRequested, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(restoreNormalPanel), name: .recentChatCycleRequested, object: nil)
+    NotificationCenter.default.addObserver(self, selector: #selector(restoreNormalPanel), name: .selectionPanelResetRequested, object: nil)
     if let welcomeSetup {
       welcomeObservation = welcomeSetup.$isPresented.combineLatest(welcomeSetup.$tour)
         .map { $0 || $1 != nil }.removeDuplicates()
@@ -113,6 +141,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   @objc private func beginSelectionReplacement() {
+    finishExpansion()
     // A nonactivating panel can own keyboard focus while the source is already
     // frontmost. Activating that app alone does not release the panel's focus.
     panel.orderOut(nil)
@@ -136,16 +165,82 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
       guard let self else { return }
       defer { self.selectionInvocation = nil }
       guard !self.isCapturingScreen else { service.discardTarget(); return }
-      // The hosted view is already installed, and handles reset before focus changes.
-      NotificationCenter.default.post(name: .selectionContextRequested, object: context)
-      if let visible {
-        self.panel.setFrame(SelectionPanelPlacement.frame(size: NSSize(width: 720, height: 540),
-          cursor: cursor, selection: service.selectionBounds(), visible: visible), display: true)
-      }
-      self.panel.orderFrontRegardless()
-      self.panel.makeKey()
-      NotificationCenter.default.post(name: .panelPresented, object: nil)
+      self.presentSelectionContext(context, cursor: cursor, selection: service.selectionBounds(), visible: visible)
     }
+  }
+
+  func presentSelectionContext(_ context: ConversationContext?, cursor: NSPoint, selection: NSRect?, visible: NSRect?) {
+    guard normalSize == nil else { return }
+    finishExpansion()
+    if selectionNormalFrame == nil { selectionNormalFrame = panel.frame }
+    isSelectionComposer = true
+    panel.minSize = NSSize(width: 640, height: 72)
+    let visible = visible ?? panel.screen?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1440, height: 900)
+    panel.setFrame(SelectionPanelPlacement.frame(size: SelectionPanelExpansion.composerSize,
+      cursor: cursor, selection: selection, visible: visible), display: true)
+    NotificationCenter.default.post(name: .selectionContextRequested, object: context)
+    panel.orderFrontRegardless()
+    panel.makeKey()
+    NotificationCenter.default.post(name: .panelPresented, object: nil)
+  }
+
+  @objc private func resizeSelectionComposer(_ notification: Notification) {
+    guard isSelectionComposer, let height = notification.object as? CGFloat,
+          height.isFinite, let visible = panel.screen?.visibleFrame else { return }
+    var frame = panel.frame
+    frame.size.height = min(max(72, height), visible.height)
+    frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
+    if abs(frame.height - panel.frame.height) > 1 { panel.setFrame(frame, display: true) }
+  }
+
+  @objc func expandSelectionPanel() {
+    guard isSelectionComposer else { return }
+    isSelectionComposer = false
+    let start = panel.frame
+    let visible = panel.screen?.visibleFrame ?? start
+    let target = SelectionPanelExpansion.frame(from: start, visible: visible)
+    NotificationCenter.default.post(name: .selectionPanelExpanded, object: nil)
+    guard !reduceMotion(), panel.isVisible else {
+      panel.setFrame(target, display: true)
+      panel.minSize = PanelSizeStore.minimumSize
+      return
+    }
+    expansionTarget = target
+    expansionTask = Task { [weak self] in
+      let began = ContinuousClock.now
+      while !Task.isCancelled {
+        guard let self else { return }
+        let elapsed = began.duration(to: .now)
+        let seconds = Double(elapsed.components.seconds) + Double(elapsed.components.attoseconds) / 1e18
+        let fraction = min(1, seconds / 0.46)
+        let progress = SelectionPanelExpansion.progress(at: fraction)
+        let height = min(visible.height, start.height + (target.height - start.height) * progress)
+        let y = min(visible.maxY - height, max(visible.minY, start.minY + (target.minY - start.minY) * min(1, progress)))
+        self.panel.setFrame(NSRect(x: target.minX, y: y, width: target.width, height: height), display: true)
+        if fraction >= 1 { self.finishExpansion(); return }
+        try? await Task.sleep(for: .milliseconds(16))
+      }
+    }
+  }
+
+  private func finishExpansion() {
+    expansionTask?.cancel()
+    expansionTask = nil
+    if let target = expansionTarget {
+      panel.setFrame(target, display: true)
+      panel.minSize = PanelSizeStore.minimumSize
+    }
+    expansionTarget = nil
+  }
+
+  @objc private func restoreNormalPanel() {
+    finishExpansion()
+    guard let frame = selectionNormalFrame else { return }
+    selectionNormalFrame = nil
+    isSelectionComposer = false
+    panel.minSize = PanelSizeStore.minimumSize
+    panel.setFrame(frame, display: true)
+    NotificationCenter.default.post(name: .selectionPanelExpanded, object: nil)
   }
 
   func show() {
@@ -158,6 +253,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
 
   @objc private func beginScreenCapture() {
     guard !isCapturingScreen else { return }
+    finishExpansion()
     isCapturingScreen = true
     captureHiddenWindows = NSApp.windows.filter { $0 !== panel && $0.isVisible }
     captureHiddenWindows.forEach { $0.orderOut(nil) }
@@ -181,6 +277,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func hide() {
+    finishExpansion()
     panel.orderOut(nil)
     NotificationCenter.default.post(name: .panelHidden, object: nil)
   }
@@ -191,7 +288,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   }
 
   func windowDidEndLiveResize(_ notification: Notification) {
-    guard normalSize == nil else { return }
+    guard normalSize == nil, selectionNormalFrame == nil else { return }
     sizeStore.save(panel.frame.size)
   }
 
@@ -229,6 +326,7 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
   private func perform(_ shortcut: PanelShortcut) {
     switch shortcut {
     case .toggleSidebar:
+      expandSelectionPanel()
       NotificationCenter.default.post(name: .sidebarToggleRequested, object: nil)
     case .fileMode:
       NotificationCenter.default.post(name: .fileModeRequested, object: nil)

@@ -3,7 +3,7 @@
 ![Selected text context card](images/selection-context-card.png)
 
 Highlight text in another app and tap **Option twice** to start a new temporary
-Enigma chat close to the pointer. **Shift–Option–Space** is the conventional backup.
+Enigma chat bar close to the pointer. **Shift–Option–Space** is the conventional backup.
 Option–Space still toggles the existing panel. Help contains all shortcuts,
 an Accessibility status and Settings button, a choice of Option/Command/Shift for the
 solo double tap, an enable switch, and Fast/Normal/Relaxed timing.
@@ -186,3 +186,34 @@ how to retry or manually paste, instead of silently opening an empty chat.
 Automated coverage exercises empty-text fallback, UTF-16 boundaries, readiness
 retries, and existing secure selection / clipboard behavior. Interactive capture
 must be checked with the stable development-signed app, not the unsigned test host.
+
+## Compact composer and upward expansion
+
+Selection Context now starts with just the composer. The quote button opens the
+attached selection, removal control, temporary-chat status, and existing routing
+and permission notices in a popover. A warning icon indicates missing capture
+access or a capture notice. Mode/model selection and slash suggestions also use
+popovers so they remain usable outside the short bar. Multi-line drafts resize the
+bar to the measured composer height.
+
+The first accepted prompt grows the same panel upward from the bar with a brief
+spring overshoot. The composer stays at the bottom; the conversation and context
+appear above it. Placement keeps the window within the current display, shifting
+down when there is too little room above. Reduce Motion expands immediately.
+Empty or rejected submissions do not expand, and request failures expose details.
+Follow-up sends retain the expanded panel. A fresh selection returns to the bar;
+New Chat restores the previous ordinary window size. Hiding during the animation
+settles its final frame so reopening cannot leave a partially expanded panel.
+
+The interaction was informed by [Thuki’s input-to-conversation flow](https://github.com/quiet-node/thuki/blob/main/src/App.tsx), implemented here with native AppKit
+window geometry and the existing SwiftUI composer. No dependency was added.
+
+Regression coverage checks first-send acceptance, context delivery, repeat
+invocation, display-edge geometry, Reduce Motion, interruption by hiding, normal
+window restoration, and native renders of both states. These use synthetic text
+and the unsigned test host; live capture and animation feel still require review
+in the stable development-signed app.
+
+![Compact selection composer](images/selection-compact-composer.png)
+
+![Expanded selection conversation](images/selection-expanded-conversation.png)

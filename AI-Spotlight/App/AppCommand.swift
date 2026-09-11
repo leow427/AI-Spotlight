@@ -11,6 +11,10 @@ enum AppCommand: String, CaseIterable {
 extension Notification.Name {
   static let selectionReplacementBegan = Notification.Name("enigma.selectionReplacementBegan")
   static let selectionReplacementEnded = Notification.Name("enigma.selectionReplacementEnded")
+  static let selectionPanelExpandRequested = Notification.Name("enigma.selectionPanelExpandRequested")
+  static let selectionPanelResetRequested = Notification.Name("enigma.selectionPanelResetRequested")
+  static let selectionPanelExpanded = Notification.Name("enigma.selectionPanelExpanded")
+  static let selectionComposerHeightChanged = Notification.Name("enigma.selectionComposerHeightChanged")
   static let selectionContextRequested = Notification.Name("enigma.selectionContextRequested")
   static let sidebarToggleRequested = Notification.Name("aiSpotlight.sidebarToggleRequested")
   static let fileModeRequested = Notification.Name("aiSpotlight.fileModeRequested")

@@ -448,6 +448,135 @@ final class SelectionContextTests: XCTestCase {
     XCTAssertEqual(board.string(forType: .string), "keep")
   }
 
+  func testSelectionExpansionAnchorsToComposerAndFitsDisplays() {
+    let visible = NSRect(x: -1440, y: 40, width: 1440, height: 860)
+    let composer = NSRect(x: -1200, y: 100, width: 720, height: 80)
+    let expanded = SelectionPanelExpansion.frame(from: composer, visible: visible)
+    XCTAssertEqual(expanded.minY, composer.minY)
+    XCTAssertEqual(expanded.minX, composer.minX)
+    XCTAssertEqual(expanded.width, composer.width)
+    XCTAssertTrue(visible.contains(expanded))
+    let edge = SelectionPanelExpansion.frame(from: NSRect(x: -730, y: 820, width: 720, height: 80), visible: visible)
+    XCTAssertEqual(edge.maxY, visible.maxY)
+    XCTAssertTrue(visible.contains(edge))
+    let small = NSRect(x: 0, y: 0, width: 700, height: 500)
+    XCTAssertTrue(small.contains(SelectionPanelExpansion.frame(from: composer, visible: small)))
+    XCTAssertEqual(SelectionPanelExpansion.progress(at: 0), 0)
+    XCTAssertGreaterThan(SelectionPanelExpansion.progress(at: 0.3), 1)
+    XCTAssertEqual(SelectionPanelExpansion.progress(at: 1), 1)
+  }
+
+  func testSelectionPanelHideSettlesExpansionAndNewChatRestoresNormalSize() throws {
+    let field = NSTextField(string: "Draft")
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(field.window)
+    let original = window.frame
+    let visible = try XCTUnwrap(window.screen?.visibleFrame)
+    controller.presentSelectionContext(nil, cursor: NSPoint(x: visible.midX, y: visible.minY + 100), selection: nil, visible: visible)
+    XCTAssertTrue(controller.isSelectionComposer)
+    XCTAssertLessThan(window.frame.height, 150)
+    controller.expandSelectionPanel()
+    controller.hide()
+    XCTAssertFalse(controller.isSelectionComposer)
+    XCTAssertEqual(window.frame.height, min(600, visible.height))
+    NotificationCenter.default.post(name: .newChatRequested, object: nil)
+    XCTAssertEqual(window.frame, original)
+  }
+
+  func testReducedMotionExpandsImmediatelyAndRepeatedSendDoesNotResizeAgain() throws {
+    let field = NSTextField(string: "Draft")
+    let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field, reduceMotion: { true })
+    controller.show()
+    defer { controller.hide() }
+    let window = try XCTUnwrap(field.window)
+    let visible = try XCTUnwrap(window.screen?.visibleFrame)
+    controller.presentSelectionContext(nil, cursor: NSPoint(x: visible.midX, y: visible.minY + 100), selection: nil, visible: visible)
+    let expected = SelectionPanelExpansion.frame(from: window.frame, visible: visible)
+    controller.expandSelectionPanel()
+    XCTAssertEqual(window.frame, expected)
+    XCTAssertFalse(controller.isSelectionComposer)
+    controller.expandSelectionPanel()
+    XCTAssertEqual(window.frame, expected)
+    XCTAssertTrue(window.isVisible)
+  }
+
+  func testSelectionComposerExpandsOnlyAfterAcceptedPromptAndRenders() async throws {
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+    let suite = UUID().uuidString
+    let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+    defaults.set(true, forKey: WelcomeSetup.completedKey)
+    defaults.set(true, forKey: "localModelOnboardingDismissed")
+    defaults.set(ChatMode.local.rawValue, forKey: StartPreferences.modeKey)
+    defer {
+      try? FileManager.default.removeItem(at: directory)
+      UserDefaults().removePersistentDomain(forName: suite)
+    }
+    let engine = SelectionTestEngine(output: "The highlighted passage asks the team to send a report today.", hold: true)
+    let chat = LocalChatViewModel(engine: engine, sessionStore: ChatSessionStore(applicationSupportDirectory: directory))
+    await chat.refreshInstalledModel()
+    let advisor = LocalModelAdvisor(directory: directory, modelsDirectory: directory, defaults: defaults, trust: nil)
+    await advisor.start(installedModels: [try XCTUnwrap(chat.installedModel)], presentOnboarding: false)
+    let screen = ScreenComposerCoordinator()
+    let appearance = GlassAppearanceSettings(defaults: defaults)
+    let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, localChat: chat,
+      screen: screen, modelAdvisor: advisor, startPreferences: StartPreferences(defaults: defaults),
+      welcomeSetup: WelcomeSetup(defaults: defaults)))
+    let controller = SpotlightPanelController(glassAppearance: appearance, contentView: view)
+    controller.show()
+    defer { chat.stopStreaming(); engine.finishHeldStream(); controller.hide() }
+    try await Task.sleep(for: .milliseconds(200))
+    let window = try XCTUnwrap(view.window)
+    let visible = try XCTUnwrap(window.screen?.visibleFrame)
+    controller.presentSelectionContext(ConversationContext(sourceName: "Test editor", text: "Please send the report today."),
+      cursor: NSPoint(x: visible.midX, y: visible.minY + 120), selection: nil, visible: visible)
+    try await Task.sleep(for: .milliseconds(250))
+    view.layoutSubtreeIfNeeded()
+    XCTAssertTrue(controller.isSelectionComposer)
+    XCTAssertLessThan(window.frame.height, 150)
+    XCTAssertTrue(chat.isTemporaryChat)
+    XCTAssertEqual(chat.attachedContexts.count, 1)
+    func descendants(_ node: NSView) -> [NSView] { [node] + node.subviews.flatMap(descendants) }
+    let editor = try XCTUnwrap(descendants(view).compactMap { $0 as? SlashCommandTextView }.first)
+    XCTAssertTrue(view.bounds.contains(view.convert(editor.bounds, from: editor)))
+    func render(_ name: String) throws {
+      view.layoutSubtreeIfNeeded()
+      let bitmap = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+      view.cacheDisplay(in: view.bounds, to: bitmap)
+      let png = try XCTUnwrap(bitmap.representation(using: .png, properties: [:]))
+      try png.write(to: URL(fileURLWithPath: "/tmp/Enigma-selection-\(name).png"))
+      let attachment = XCTAttachment(data: png, uniformTypeIdentifier: "public.png")
+      attachment.name = "Selection \(name)"
+      attachment.lifetime = .keepAlways
+      add(attachment)
+    }
+    try render("composer")
+    // Empty input must not expand or create a request.
+    editor.keyDown(with: try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+      modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,
+      characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)))
+    XCTAssertTrue(controller.isSelectionComposer)
+    XCTAssertNil(chat.activeRequest)
+    screen.draft = "Explain this passage"
+    try await Task.sleep(for: .milliseconds(50))
+    editor.keyDown(with: try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
+      modifierFlags: [], timestamp: 1, windowNumber: window.windowNumber, context: nil,
+      characters: "\r", charactersIgnoringModifiers: "\r", isARepeat: false, keyCode: 36)))
+    try await Task.sleep(for: .milliseconds(700))
+    XCTAssertFalse(controller.isSelectionComposer)
+    XCTAssertGreaterThan(window.frame.height, 420)
+    XCTAssertTrue(visible.contains(window.frame))
+    XCTAssertEqual(screen.draft, "")
+    XCTAssertTrue(engine.lastRequest?.prompt.contains("Please send the report today.") == true)
+    try render("conversation")
+    controller.presentSelectionContext(nil, cursor: NSPoint(x: visible.midX, y: visible.minY + 120), selection: nil, visible: visible)
+    try await Task.sleep(for: .milliseconds(150))
+    XCTAssertTrue(controller.isSelectionComposer)
+    XCTAssertLessThan(window.frame.height, 150)
+    XCTAssertTrue(chat.messages.isEmpty)
+  }
+
   func testReplacementReleasesPanelAndRestoresTheSameChatWindow() throws {
     let field = NSTextField(string: "Keep this draft")
     let controller = SpotlightPanelController(glassAppearance: GlassAppearanceSettings(), contentView: field)

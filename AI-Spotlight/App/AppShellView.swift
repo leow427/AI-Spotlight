@@ -237,6 +237,9 @@ struct AppShellView: View {
   @ObservedObject private var welcomeSetup: WelcomeSetup
   @ObservedObject private var selectionAccess = SelectionAccessibilityAccess.shared
   @ObservedObject private var selectionContext = SelectionContextService.shared
+  @State private var isSelectionComposer = false
+  @State private var isSelectionPresentation = false
+  @State private var isSelectionDetailsPresented = false
   @State private var expandedActivities: Set<UUID> = []
   @ObservedObject var glassAppearance: GlassAppearanceSettings
   @ObservedObject private var cloudSettings: CloudSettingsModel
@@ -290,6 +293,93 @@ struct AppShellView: View {
     self.files = chat.files
   }
 
+  private var composerAccessories: some View {
+    VStack(alignment: .trailing, spacing: 8) {
+      routeStatus
+      if let notice = localChat.contextNotice {
+        Text(notice)
+          .font(.caption)
+          .foregroundStyle(.secondary)
+          .fixedSize(horizontal: false, vertical: true)
+      }
+      if let decision = localChat.screenRouteDecision {
+        Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
+          .font(.caption).foregroundStyle(.secondary)
+      }
+      if isSearchEnabled || (searchSettings.canSearchAutomatically && files.selection == nil) {
+        HStack(spacing: 6) {
+          Text(searchSettings.hasAPIKey
+            ? (isSearchEnabled ? "Web Search · Queries sent to Brave may include attached context."
+              : "Auto search · Current topics may use Brave, including relevant attached context.")
+            : "Add a Brave Search API key to search the web.")
+          if !searchSettings.hasAPIKey {
+            Button("Open Cloud & Search Settings", action: openConnectionSettings).buttonStyle(.bordered)
+          }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
+      }
+
+      if !selectionAccess.isGranted && localChat.isTemporaryChat {
+        VStack(alignment: .leading, spacing: 6) {
+          Label("Action needed: allow Accessibility", systemImage: "exclamationmark.triangle.fill")
+            .font(.headline).foregroundStyle(.orange)
+          Text("Allow \(SelectionAccessibilityAccess.appName) (Enigma) in System Settings → Privacy & Security → Accessibility to use double-Option and attach selected text.")
+            .font(.caption).foregroundStyle(.secondary)
+          Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
+            .buttonStyle(.borderedProminent).controlSize(.small)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(14).natureSurface(radius: 12)
+      }
+      if localChat.isTemporaryChat {
+        Text("Temporary chat · Not saved to history").font(.caption2).foregroundStyle(.secondary)
+      }
+      ForEach(localChat.attachedContexts) { context in
+        SelectionContextCard(context: context, isBusy: localChat.isBusy || selectionContext.isWorking) {
+          localChat.removeContext(id: context.id)
+        }
+      }
+      if let notice = selectionContext.notice, localChat.isTemporaryChat {
+        Text(notice).font(.caption).foregroundStyle(.secondary)
+      }
+      if let attachment = screen.attachment, localChat.pendingUserMessage == nil {
+        ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
+                             isBusy: localChat.isBusy || screen.isBusy,
+                             remove: screen.removeAttachment, retake: captureScreen)
+      }
+      if screen.attachment?.routingDecision == .needsCloudPermission || screen.attachment?.routingDecision == .blocked(ScreenRoutingPolicy.screenshotUploadDisabledMessage) {
+        VStack(alignment: .leading, spacing: 6) {
+          Label("Screenshot uploads are off", systemImage: "hand.raised").font(.caption.weight(.semibold))
+          Text("Cloud image analysis needs your approval. Text can still be read locally.")
+            .font(.caption).foregroundStyle(.secondary)
+          HStack {
+            Button("Review screenshot permission…") { isScreenPermissionPresented = true }
+            Button("Open Screen Settings", action: openConnectionSettings)
+          }
+          .buttonStyle(.bordered).controlSize(.small)
+        }
+      }
+      if let error = screen.error {
+        VStack(alignment: .leading, spacing: 8) {
+          Label(error, systemImage: "exclamationmark.triangle.fill")
+            .font(.caption).foregroundStyle(.orange)
+            .fixedSize(horizontal: false, vertical: true)
+          if screen.needsScreenRecordingSettings {
+            Button("Open Screen Recording Settings…") { MacPermissionControls.openScreenSettings() }
+              .buttonStyle(.borderedProminent).controlSize(.small)
+          }
+        }
+        .padding(12).frame(maxWidth: .infinity, alignment: .leading).natureSurface(radius: 12)
+      }
+      if files.selection != nil || files.error != nil || files.protectedWrite != nil {
+        FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
+          useCodex: { isFileCloudConsentPresented = true })
+      }
+      FileChangeSummaryView(files: files, isBusy: localChat.isBusy)
+    }
+  }
+
   private var shellLayout: some View {
     ZStack {
       welcomeBackground
@@ -297,7 +387,7 @@ struct AppShellView: View {
 
       GeometryReader { geometry in
         HStack(spacing: 0) {
-          if isSidebarVisible {
+          if isSidebarVisible && !isSelectionComposer {
             sidebar(compact: geometry.size.width < 900)
               .frame(width: min(288, max(200, geometry.size.width * 0.27)))
           }
@@ -305,109 +395,38 @@ struct AppShellView: View {
           // composer outside a small panel.
           GeometryReader { _ in
             VStack(spacing: 0) {
-              if !isSidebarVisible { hiddenSidebarNavigation }
-              conversation
+              if !isSelectionComposer {
+                if !isSidebarVisible { hiddenSidebarNavigation }
+                conversation
+              }
+              if isSelectionComposer { Spacer(minLength: 0) }
 
               VStack(alignment: .trailing, spacing: 8) {
-                routeStatus
-                if let notice = localChat.contextNotice {
-                  Text(notice)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                if let decision = localChat.screenRouteDecision {
-                  Text(decision.status + (decision.sendsImage ? "" : " · Image not sent"))
-                    .font(.caption).foregroundStyle(.secondary)
-                }
-                if isSearchEnabled || (searchSettings.canSearchAutomatically && files.selection == nil) {
-                  HStack(spacing: 6) {
-                    Text(searchSettings.hasAPIKey
-                      ? (isSearchEnabled ? "Web Search · Queries sent to Brave may include attached context."
-                        : "Auto search · Current topics may use Brave, including relevant attached context.")
-                      : "Add a Brave Search API key to search the web.")
-                    if !searchSettings.hasAPIKey {
-                      Button("Open Cloud & Search Settings", action: openConnectionSettings).buttonStyle(.bordered)
-                    }
-                  }
-                  .font(.caption)
-                  .foregroundStyle(.secondary)
-                }
-
-                if !selectionAccess.isGranted && localChat.isTemporaryChat {
-                  VStack(alignment: .leading, spacing: 6) {
-                    Label("Action needed: allow Accessibility", systemImage: "exclamationmark.triangle.fill")
-                      .font(.headline).foregroundStyle(.orange)
-                    Text("Allow \(SelectionAccessibilityAccess.appName) (Enigma) in System Settings → Privacy & Security → Accessibility to use double-Option and attach selected text.")
-                      .font(.caption).foregroundStyle(.secondary)
-                    Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
-                      .buttonStyle(.borderedProminent).controlSize(.small)
-                  }
-                  .frame(maxWidth: .infinity, alignment: .leading)
-                  .padding(14).natureSurface(radius: 12)
-                }
-                if localChat.isTemporaryChat {
-                  Text("Temporary chat · Not saved to history").font(.caption2).foregroundStyle(.secondary)
-                }
-                ForEach(localChat.attachedContexts) { context in
-                  SelectionContextCard(context: context, isBusy: localChat.isBusy || selectionContext.isWorking) {
-                    localChat.removeContext(id: context.id)
-                  }
-                }
-                if let notice = selectionContext.notice, localChat.isTemporaryChat {
-                  Text(notice).font(.caption).foregroundStyle(.secondary)
-                }
-                if let attachment = screen.attachment, localChat.pendingUserMessage == nil {
-                  ScreenAttachmentView(attachment: attachment, isEnabled: screen.isEnabled,
-                                       isBusy: localChat.isBusy || screen.isBusy,
-                                       remove: screen.removeAttachment, retake: captureScreen)
-                }
-                if screen.attachment?.routingDecision == .needsCloudPermission || screen.attachment?.routingDecision == .blocked(ScreenRoutingPolicy.screenshotUploadDisabledMessage) {
-                  VStack(alignment: .leading, spacing: 6) {
-                    Label("Screenshot uploads are off", systemImage: "hand.raised").font(.caption.weight(.semibold))
-                    Text("Cloud image analysis needs your approval. Text can still be read locally.")
-                      .font(.caption).foregroundStyle(.secondary)
-                    HStack {
-                      Button("Review screenshot permission…") { isScreenPermissionPresented = true }
-                      Button("Open Screen Settings", action: openConnectionSettings)
-                    }
-                    .buttonStyle(.bordered).controlSize(.small)
-                  }
-                }
-                if let error = screen.error {
-                  VStack(alignment: .leading, spacing: 8) {
-                    Label(error, systemImage: "exclamationmark.triangle.fill")
-                      .font(.caption).foregroundStyle(.orange)
-                      .fixedSize(horizontal: false, vertical: true)
-                    if screen.needsScreenRecordingSettings {
-                      Button("Open Screen Recording Settings…") { MacPermissionControls.openScreenSettings() }
-                        .buttonStyle(.borderedProminent).controlSize(.small)
-                    }
-                  }
-                  .padding(12).frame(maxWidth: .infinity, alignment: .leading).natureSurface(radius: 12)
-                }
-                if files.selection != nil || files.error != nil || files.protectedWrite != nil {
-                  FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
-                    useCodex: { isFileCloudConsentPresented = true })
-                }
-                FileChangeSummaryView(files: files, isBusy: localChat.isBusy)
+                if !isSelectionComposer { composerAccessories }
                 composer(compact: geometry.size.width < 900)
+                  .background {
+                    if isSelectionComposer {
+                      GeometryReader { bounds in
+                        Color.clear.preference(key: SelectionComposerHeight.self, value: bounds.size.height + 20)
+                      }
+                    }
+                  }
               }
-              .padding(.horizontal, 24)
-              .padding(.bottom, 32)
+              .padding(.horizontal, isSelectionPresentation ? 12 : 24)
+              .padding(.bottom, isSelectionPresentation ? 12 : 32)
               .padding(.top, 8)
             }
           }
         }
       }
 
-      if isModePalettePresented {
+      if isModePalettePresented && !isSelectionComposer {
         modePalette
       }
     }
     .tint(NatureGlass.accent)
     .preferredColorScheme(.dark)
-    .frame(minWidth: 640, minHeight: 420)
+    .frame(minWidth: 640, minHeight: isSelectionPresentation ? 0 : 420)
     .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
     .overlay {
       RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -430,6 +449,14 @@ struct AppShellView: View {
         }
       }
     }
+    .onPreferenceChange(SelectionComposerHeight.self) { height in
+      guard isSelectionComposer, height > 0 else { return }
+      NotificationCenter.default.post(name: .selectionComposerHeightChanged, object: height)
+    }
+    .onReceive(NotificationCenter.default.publisher(for: .selectionPanelExpanded)) { _ in
+      isSelectionComposer = false
+      isSelectionDetailsPresented = false
+    }
     .onReceive(NotificationCenter.default.publisher(for: .sidebarToggleRequested)) { _ in
       guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
       isSidebarVisible.toggle()
@@ -440,17 +467,23 @@ struct AppShellView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .selectionContextRequested)) { notification in
       guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
+      isSelectionComposer = true
+      isSelectionPresentation = true
+      isSelectionDetailsPresented = false
       screen.clearDraft()
       isSearchEnabled = false
       isSearchPresented = false
       isModePalettePresented = false
       isHelpPresented = false
       applyStartPreferences()
+      isSidebarVisible = false
       localChat.startTemporaryChat(context: notification.object as? ConversationContext)
       isComposerFocused = true
     }
     .onReceive(NotificationCenter.default.publisher(for: .newChatRequested)) { _ in
       guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
+      isSelectionComposer = false
+      isSelectionPresentation = false
       screen.clearDraft()
       isSearchEnabled = false
       isSearchPresented = false
@@ -487,12 +520,27 @@ struct AppShellView: View {
     }
     .onReceive(NotificationCenter.default.publisher(for: .recentChatCycleRequested)) { _ in
       guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
+      isSelectionComposer = false
+      isSelectionPresentation = false
       localChat.cycleRecentChat()
     }
   }
 
-  var body: some View {
+  private var selectionObservedShell: some View {
     observedShell
+    .onChange(of: localChat.state) { _, state in
+      if isSelectionComposer, case .failed = state { isSelectionDetailsPresented = true }
+    }
+    .onChange(of: screen.error) { _, error in
+      if isSelectionComposer, error != nil { isSelectionDetailsPresented = true }
+    }
+    .onChange(of: files.error) { _, error in
+      if isSelectionComposer, error != nil { isSelectionDetailsPresented = true }
+    }
+  }
+
+  var body: some View {
+    selectionObservedShell
     .sheet(isPresented: $modelAdvisor.isOnboardingPresented, onDismiss: { modelAdvisor.dismissOnboarding() }) {
       LocalModelOnboardingView(advisor: modelAdvisor, chat: localChat)
     }
@@ -521,6 +569,11 @@ struct AppShellView: View {
       isComposerFocused = !busy
     }
     .onChange(of: localChat.selectedSessionID) { _, _ in
+      if isSelectionPresentation && !localChat.isTemporaryChat {
+        isSelectionComposer = false
+        isSelectionPresentation = false
+        NotificationCenter.default.post(name: .selectionPanelResetRequested, object: nil)
+      }
       if localChat.activeRequest == nil { screen.removeAttachment() }
     }
     .onChange(of: screenSettings.allowCloudScreenshots) { _, allowed in
@@ -693,6 +746,20 @@ struct AppShellView: View {
   private func composer(compact: Bool) -> some View {
     let isResponding = localChat.activeRequest != nil
     return HStack(spacing: compact ? 8 : 16) {
+      if isSelectionComposer {
+        Button { isSelectionDetailsPresented.toggle() } label: {
+          Image(systemName: selectionContext.notice != nil || !selectionAccess.isGranted
+            ? "exclamationmark.bubble" : "text.quote")
+            .foregroundStyle(NatureGlass.accent)
+            .frame(width: 28, height: 36)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Selection context and status")
+        .help(localChat.attachedContexts.first?.title ?? "Selection context and status")
+        .popover(isPresented: $isSelectionDetailsPresented, arrowEdge: .top) {
+          ScrollView { composerAccessories.padding(16) }.frame(width: 420, height: 300)
+        }
+      }
       FileModeToolButton(files: files, isBusy: localChat.isBusy) { activateFileMode(from: .menu) }
         .welcomeTourTarget(.files)
       Rectangle().fill(NatureGlass.secondary.opacity(0.35)).frame(width: 1, height: 40)
@@ -705,6 +772,7 @@ struct AppShellView: View {
         isEnabled: !(localChat.isBusy || screen.isBusy || files.isWorking || files.isPicking)
           && !welcomeSetup.isPresented && welcomeSetup.tour == nil,
         fontSize: compact ? 14 : 15,
+        usesPopover: isSelectionComposer,
         submit: submitDraft
       ).welcomeTourTarget(.composer)
 
@@ -718,7 +786,11 @@ struct AppShellView: View {
         .padding(.horizontal, compact ? 8 : 12).frame(height: compact ? 32 : 38)
         .background(.black.opacity(0.16), in: RoundedRectangle(cornerRadius: 12))
         .overlay { RoundedRectangle(cornerRadius: 12).strokeBorder(.white.opacity(0.1)) }
-      }.buttonStyle(NatureButtonStyle()).fixedSize().accessibilityLabel("Mode and model").welcomeTourTarget(.model)
+      }.buttonStyle(NatureButtonStyle()).fixedSize()
+      .popover(isPresented: Binding(get: { isSelectionComposer && isModePalettePresented }, set: { isModePalettePresented = $0 })) {
+        modePalette.frame(width: 400, height: 380)
+      }
+      .accessibilityLabel("Mode and model").welcomeTourTarget(.model)
 
       Button {
         if isResponding { localChat.stopStreaming() } else { submitDraft() }
@@ -1182,6 +1254,13 @@ struct AppShellView: View {
     isSidebarVisible = startPreferences.showsSidebar
   }
 
+  private func expandSelectionConversation() {
+    guard isSelectionComposer else { return }
+    NotificationCenter.default.post(name: .selectionPanelExpandRequested, object: nil)
+    isSelectionComposer = false
+    isSelectionDetailsPresented = false
+  }
+
   private func submitDraft() {
     guard !welcomeSetup.isPresented, welcomeSetup.tour == nil else { return }
     guard !localChat.isBusy, !screen.isBusy, !files.isWorking, !files.isPicking else { return }
@@ -1193,7 +1272,10 @@ struct AppShellView: View {
       }
       let prompt = draft
       localChat.submitFiles(prompt, mode: selectedMode, cloudProvider: cloudSettings.preferredProvider,
-        cloudModelID: cloudSettings.preferredModelID) { if draft == prompt { draft = "" } }
+        cloudModelID: cloudSettings.preferredModelID) {
+          expandSelectionConversation()
+          if draft == prompt { draft = "" }
+        }
       return
     }
     // Capture can finish and submit again before SwiftUI delivers onChange.
@@ -1218,6 +1300,7 @@ struct AppShellView: View {
     let originalDraft = draft
     let prompt = commands.submissionPrompt
     let accepted: @MainActor () -> Void = {
+      expandSelectionConversation()
       if draft == originalDraft { draft = "" }
     }
     switch selectedMode {
@@ -1275,6 +1358,7 @@ struct AppShellView: View {
       localChat.submitScreen(prompt, attachment: attachment, decision: decision, selectedMode: selectedMode,
         searchEnabled: searchEnabled,
         cloudUploadAllowed: { screenSettings.allowCloudScreenshots && screenSettings.hasExplainedCloudPermission }) {
+          expandSelectionConversation()
           if draft == originalDraft { draft = "" }
           if screen.attachment?.id == attachment.id { screen.removeAttachment() }
           isComposerFocused = true
@@ -1989,4 +2073,9 @@ struct SelectionContextCard: View {
     }
     .padding(10).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
   }
+}
+
+private struct SelectionComposerHeight: PreferenceKey {
+  static let defaultValue: CGFloat = 0
+  static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) { value = max(value, nextValue()) }
 }
