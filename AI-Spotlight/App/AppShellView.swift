@@ -1699,20 +1699,24 @@ struct SettingsView: View {
   @State private var anthropicAPIKey = ""
   @State private var geminiAPIKey = ""
   @State private var formError: String?
+  @StateObject private var discovery: LocalModelDiscovery
 
-  init(settings: CloudSettingsModel = .shared, initialDestination: SettingsDestination = .general) {
+  init(settings: CloudSettingsModel = .shared, initialDestination: SettingsDestination = .general,
+    discovery: LocalModelDiscovery? = nil) {
     self.settings = settings
     _destination = State(initialValue: initialDestination)
+    _discovery = StateObject(wrappedValue: discovery ?? LocalModelDiscovery())
   }
 
   @State private var destination: SettingsDestination
   enum SettingsDestination: String, CaseIterable, Identifiable {
     case general = "General"
     case local = "Local Models"
+    case discover = "Discover"
     case cloud = "Cloud & Search"
     case selection = "Selection Context"
     var id: Self { self }
-    var symbol: String { switch self { case .general: "gearshape"; case .local: "laptopcomputer"; case .cloud: "cloud"; case .selection: "text.cursor" } }
+    var symbol: String { switch self { case .general: "gearshape"; case .local: "laptopcomputer"; case .discover: "sparkle.magnifyingglass"; case .cloud: "cloud"; case .selection: "text.cursor" } }
   }
 
   var body: some View {
@@ -1743,7 +1747,7 @@ struct SettingsView: View {
       .natureSurface(navigation: true).padding(12)
       VStack(alignment: .leading, spacing: 8) {
         Text(destination.rawValue).font(.system(size: 24, weight: .semibold)).padding(.horizontal, 20).padding(.top, 24)
-        Text(destination == .general ? "Make each new chat feel like yours." : destination == .local ? "Intelligence, right on your Mac." : destination == .selection ? "Choose how your text revisions are applied." : "Connect your models and the web.")
+        Text(destination == .general ? "Make each new chat feel like yours." : destination == .local ? "Intelligence, right on your Mac." : destination == .discover ? "Find your next vision or audio model." : destination == .selection ? "Choose how your text revisions are applied." : "Connect your models and the web.")
           .foregroundStyle(NatureGlass.secondary).padding(.horizontal, 20)
         Group {
           switch destination {
@@ -1780,6 +1784,8 @@ struct SettingsView: View {
             }.formStyle(.grouped)
           case .local:
             Form { LocalModelManagerSection() }.formStyle(.grouped)
+          case .discover:
+            LocalModelDiscoveryView(discovery: discovery)
           case .cloud:
             cloudForm
           case .selection:

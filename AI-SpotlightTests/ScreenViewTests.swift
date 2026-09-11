@@ -131,7 +131,8 @@ final class ScreenViewTests: XCTestCase {
       catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport()),
       codexAvailable: { false })
     for destination in SettingsView.SettingsDestination.allCases {
-      let view = NSHostingView(rootView: SettingsView(settings: settings, initialDestination: destination))
+      let view = NSHostingView(rootView: SettingsView(settings: settings, initialDestination: destination,
+        discovery: LocalModelDiscovery(loader: { _ in HuggingFaceModelPage(models: []) })))
       let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 820, height: 680), styleMask: [.borderless], backing: .buffered, defer: false)
       window.contentView = view
       defer { window.contentView = nil }

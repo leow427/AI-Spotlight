@@ -6,6 +6,10 @@ Middleweight and Heavyweight in both setup and Settings → Local Models. The
 still enforced); the 32 GB group supplies the starting list above 32 GB. Other
 quantizations remain available under **Models for other memory sizes**.
 
+Settings → **Discover** also offers a [searchable Hugging Face browser](Model-Discovery.md)
+for public vision and audio models, with Gemma 4 26B-A4B (MoE) Q4_K_M featured
+independently of the Mac’s recommendation tier.
+
 ## Catalogue version 5 — reviewed September 10, 2026
 
 These are the requested planning estimates, not measured memory guarantees.
