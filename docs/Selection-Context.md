@@ -189,12 +189,13 @@ must be checked with the stable development-signed app, not the unsigned test ho
 
 ## Compact composer and upward expansion
 
-Selection Context now starts with just the composer. The quote button opens the
-attached selection, removal control, temporary-chat status, and existing routing
-and permission notices in a popover. A warning icon indicates missing capture
+Selection Context starts with the composer and a small selected-text card above
+it, including the source app and removal control. If nothing is attached, the bar
+says “No text selected.” The quote button opens temporary-chat status and existing
+routing and permission notices in a popover. A warning icon indicates missing capture
 access or a capture notice. Mode/model selection and slash suggestions also use
 popovers so they remain usable outside the short bar. Multi-line drafts resize the
-bar to the measured composer height.
+bar to the measured height of the preview and composer.
 
 The first accepted prompt grows the same panel upward from the bar with a brief
 spring overshoot. The composer stays at the bottom; the conversation and context

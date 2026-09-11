@@ -552,6 +552,10 @@ final class SelectionContextTests: XCTestCase {
       add(attachment)
     }
     try render("composer")
+    let previewData = try Data(contentsOf: URL(fileURLWithPath: "/tmp/Enigma-selection-composer.png"))
+    let previewImage = try XCTUnwrap(NSBitmapImageRep(data: previewData)?.cgImage)
+    let previewText = try await ScreenOCRService().recognize(previewImage).text.lowercased()
+    XCTAssertTrue(previewText.contains("please send the report today"), "The selected text must be visible before sending: \(previewText)")
     // Empty input must not expand or create a request.
     editor.keyDown(with: try XCTUnwrap(NSEvent.keyEvent(with: .keyDown, location: .zero,
       modifierFlags: [], timestamp: 0, windowNumber: window.windowNumber, context: nil,

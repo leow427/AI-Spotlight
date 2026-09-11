@@ -402,15 +402,30 @@ struct AppShellView: View {
               if isSelectionComposer { Spacer(minLength: 0) }
 
               VStack(alignment: .trailing, spacing: 8) {
-                if !isSelectionComposer { composerAccessories }
-                composer(compact: geometry.size.width < 900)
-                  .background {
-                    if isSelectionComposer {
-                      GeometryReader { bounds in
-                        Color.clear.preference(key: SelectionComposerHeight.self, value: bounds.size.height + 20)
-                      }
+                if isSelectionComposer {
+                  if localChat.attachedContexts.isEmpty {
+                    Label("No text selected", systemImage: "text.quote")
+                      .font(.caption).foregroundStyle(.secondary)
+                      .frame(maxWidth: .infinity, alignment: .leading)
+                      .padding(.horizontal, 10)
+                  }
+                  ForEach(localChat.attachedContexts) { context in
+                    SelectionContextCard(context: context, isBusy: localChat.isBusy || selectionContext.isWorking) {
+                      localChat.removeContext(id: context.id)
                     }
                   }
+                } else {
+                  composerAccessories
+                }
+                composer(compact: geometry.size.width < 900)
+              }
+              .fixedSize(horizontal: false, vertical: isSelectionComposer)
+              .background {
+                if isSelectionComposer {
+                  GeometryReader { bounds in
+                    Color.clear.preference(key: SelectionComposerHeight.self, value: bounds.size.height + 20)
+                  }
+                }
               }
               .padding(.horizontal, isSelectionPresentation ? 12 : 24)
               .padding(.bottom, isSelectionPresentation ? 12 : 32)
