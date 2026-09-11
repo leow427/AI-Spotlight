@@ -41,9 +41,9 @@ struct LocalModelAssessment: Identifiable, Sendable {
   let timeToFirstToken: Double
   let isMeasured: Bool
   var id: String { model.id }
-  /// This preserves all compatibility and disk checks. It only lets the
-  /// reviewed Gemma 4 12B package be intentionally installed or loaded when
-  /// the conservative memory estimate says it will not fit.
+  /// Users can install compatible packages above the recommended memory budget.
+  /// Disk space and runtime compatibility still determine whether installation
+  /// is possible; unsupported models remain available as file downloads.
   var permitsMemoryOverride: Bool { fit == .memory && model.permitsMemoryOverride }
   var canInstall: Bool { fit.canRun || permitsMemoryOverride }
   var isResponsive: Bool { fit.canRun && tokensPerSecond >= 8 && timeToFirstToken <= 5 }
@@ -150,7 +150,7 @@ enum LocalModelSelector {
                            timeToFirstToken: ttft, isMeasured: exact != nil)
     }
     if model.resolvedProfile == .miniCPMO45 {
-      return result(.unsupported, "MiniCPM-o 4.5 requires its dedicated runtime; installation is not available in this version of Enigma.")
+      return result(.unsupported, "MiniCPM-o 4.5 requires its dedicated runtime; its files can be downloaded for use in another app.")
     }
     guard model.supportsVision, (try? model.validate()) != nil, LocalModelCompatibility.supports(model) else {
       return result(.unsupported, "Requires an unsupported architecture, chat format, context, or llama.cpp build.")
@@ -164,15 +164,15 @@ enum LocalModelSelector {
        model.largestTensorBytes > bufferLimit {
       return result(.unsupported, "This model requires larger Metal buffers than this Mac supports.")
     }
-    let runtimeMemory = max(model.estimatedRuntimeMemory, exact?.metrics.peakMemoryBytes ?? 0)
-    guard hardware.physicalMemory >= model.minimumMemory,
-          runtimeMemory <= hardware.inferenceMemoryBudget else {
-      return result(.memory, "Does not leave enough memory for macOS and other apps.")
-    }
     // Installation copies the verified download before committing the library.
     let requiredDisk = model.downloadByteCount * 2 + 2 * LocalHardwareProfile.gib
     guard installed || hardware.availableDiskBytes >= requiredDisk else {
       return result(.disk, "Needs room for the download, installation copy, and 2 GB of free space.")
+    }
+    let runtimeMemory = max(model.estimatedRuntimeMemory, exact?.metrics.peakMemoryBytes ?? 0)
+    guard hardware.physicalMemory >= model.minimumMemory,
+          runtimeMemory <= hardware.inferenceMemoryBudget else {
+      return result(.memory, "Does not leave enough memory for macOS and other apps.")
     }
     if speed < 8 || ttft > 5 { return result(.slow, "Fits in memory, but replies may take longer.") }
     let comfortable = runtimeMemory <= hardware.inferenceMemoryBudget * 4 / 5

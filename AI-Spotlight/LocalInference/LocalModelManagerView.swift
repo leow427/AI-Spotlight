@@ -161,6 +161,7 @@ struct LocalModelManagerSection: View {
   @ObservedObject var chat: LocalChatViewModel = .shared
   @State private var isImporterPresented = false
   @State private var pendingDeletion: LocalModel?
+  @State private var downloadListing: HuggingFaceModelListing?
 
   var body: some View {
     Section("Local Models") {
@@ -233,6 +234,7 @@ struct LocalModelManagerSection: View {
       allowedContentTypes: [UTType(filenameExtension: "gguf") ?? .data], allowsMultipleSelection: false) { result in
       if case .success(let urls) = result, let url = urls.first { chat.installModel(from: url) }
     }
+    .sheet(item: $downloadListing) { model in HuggingFaceDownloadSheet(model: model) }
     .alert(item: $pendingDeletion) { model in
       Alert(
         title: Text("Delete \(model.displayName)?"),
@@ -260,9 +262,18 @@ struct LocalModelManagerSection: View {
           }
           deleteButton(installed)
         } else {
-          Button(assessment.permitsMemoryOverride ? "Install Anyway" : "Install") { chat.downloadModel(assessment.model) }
-            .disabled(chat.isBusy || !assessment.canInstall)
+          if assessment.canInstall {
+            Button("Install") { chat.downloadModel(assessment.model) }.disabled(chat.isBusy)
+          } else {
+            Button("Download files") {
+              downloadListing = HuggingFaceModelListing(id: assessment.model.huggingFaceRepositoryID)
+            }
+          }
         }
+      }
+      if assessment.permitsMemoryOverride {
+        Text("Memory warning: this model may run slowly, use swap or fail to load on this Mac. You can still install it.")
+          .font(.caption).foregroundStyle(.orange)
       }
       Text(assessment.model.summary).font(.subheadline).foregroundStyle(.secondary)
       Text(isRecommended ? "Recommended · \(assessment.fit.rawValue)" : assessment.fit.rawValue)
@@ -271,10 +282,6 @@ struct LocalModelManagerSection: View {
       Text("\(assessment.model.maker) · \(assessment.model.downloadByteCount, format: .byteCount(style: .file)) · \(assessment.model.license)")
         .font(.caption).foregroundStyle(.secondary)
       Text(assessment.performanceDescription).font(.caption).foregroundStyle(.secondary)
-      if assessment.permitsMemoryOverride {
-        Text("Install anyway is enabled. This model may put this Mac under memory pressure or fail to load.")
-          .font(.caption).foregroundStyle(.orange)
-      }
       if let range = assessment.model.advertisedMemoryRange {
         Text("~\(range) GB RAM planning estimate · \(assessment.model.quantization)")
           .font(.caption).foregroundStyle(.secondary)

@@ -94,7 +94,7 @@ final class LocalModelSelectionTests: XCTestCase {
     XCTAssertEqual(LocalModelCompatibility.supports(model), model.inferenceProfile != .miniCPMO45)
   }
 
-  func testGemmaTwelveBCanBeInstalledAndLoadedWithAnExplicitMemoryOverride() throws {
+  func testCompatibleModelsCanBeInstalledAndLoadedWithMemoryWarnings() throws {
     let gemma = try XCTUnwrap(LegacyModelFixtures.models.first { $0.id == "gemma-4-12b-it-qat-q4_0-gguf" })
     let insufficientMemory = LocalModelSelector.assess(gemma, hardware: hardware(memory: 24))
     XCTAssertEqual(insufficientMemory.fit, .memory)
@@ -104,8 +104,9 @@ final class LocalModelSelectionTests: XCTestCase {
     let other = try XCTUnwrap(catalog.models.first { $0.id != gemma.id })
     let blocked = LocalModelSelector.assess(other, hardware: hardware(memory: 4))
     XCTAssertEqual(blocked.fit, .memory)
-    XCTAssertFalse(blocked.permitsMemoryOverride)
-    XCTAssertFalse(blocked.canInstall)
+    XCTAssertTrue(blocked.permitsMemoryOverride)
+    XCTAssertTrue(blocked.canInstall)
+    XCTAssertFalse(blocked.fit.canRun, "Memory warnings must still exclude this model from automatic recommendations")
   }
 
   func testTopTenAreDeterministicHardwareRankedAndNeverPaddedWithUnsafeModels() throws {

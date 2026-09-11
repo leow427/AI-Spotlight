@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct LocalModelDiscoveryView: View {
+  enum Source: String, CaseIterable { case selection = "Selected models", hub = "More on Hugging Face" }
   @ObservedObject var discovery: LocalModelDiscovery
   @ObservedObject var advisor: LocalModelAdvisor = .shared
   @ObservedObject var chat: LocalChatViewModel = .shared
@@ -8,15 +9,22 @@ struct LocalModelDiscoveryView: View {
   @State private var query = ModelDiscoveryQuery()
   @State private var requestID = UUID()
   @State private var pageRequest: Task<Void, Never>?
+  @State private var source = Source.selection
+  @State private var downloadModel: HuggingFaceModelListing?
 
   var body: some View {
     ScrollView {
       LazyVStack(alignment: .leading, spacing: 18) {
+        HuggingFaceDownloadProgress()
         featuredModel
         VStack(alignment: .leading, spacing: 12) {
-          Text("Explore Hugging Face").font(.headline)
-          Text("Public models, organized by their Hugging Face task tags.")
+          Text("Discover vision & audio models").font(.headline)
+          Text("A selection for visual conversation and speech, with direct downloads.")
             .font(.caption).foregroundStyle(.secondary)
+          Picker("Browse", selection: $source) {
+            ForEach(Source.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+          }.pickerStyle(.segmented)
+            .onChange(of: source) { _, _ in requestID = UUID() }
           Picker("Capability", selection: $query.scope) {
             ForEach(ModelDiscoveryScope.allCases) { Text($0.rawValue).tag($0) }
           }
@@ -32,31 +40,35 @@ struct LocalModelDiscoveryView: View {
               .accessibilityLabel("Search Hugging Face models")
             Button("Search", action: search)
           }
-          Picker("Task", selection: $query.taskID) {
-            Text("All tasks").tag(String?.none)
-            ForEach(HuggingFaceTask.tasks(for: query.scope)) { task in
-              Text(task.name).tag(Optional(task.id))
+          if source == .hub {
+            Picker("Task", selection: $query.taskID) {
+              Text("All tasks").tag(String?.none)
+              ForEach(HuggingFaceTask.tasks(for: query.scope)) { task in
+                Text(task.name).tag(Optional(task.id))
+              }
             }
+            .onChange(of: query.taskID) { _, _ in requestID = UUID() }
           }
-          .onChange(of: query.taskID) { _, _ in requestID = UUID() }
-          Text("Enigma supports text and images. Explore audio models and their requirements on Hugging Face.")
+          Text("Enigma supports text and images. Audio models can be downloaded for use in another app.")
             .font(.caption).foregroundStyle(.secondary)
         }
         .padding(16).natureSurface(radius: 18)
 
-        results
+        if source == .selection { selectedPackages }
+        else { results }
       }
       .padding(20)
     }
     .task(id: requestID) {
       pageRequest?.cancel()
-      await discovery.search(query)
+      if source == .hub { await discovery.search(query) }
     }
     .task {
       await chat.refreshInstalledModel()
       await advisor.start(installedModels: chat.installedModels, presentOnboarding: false)
     }
     .onDisappear { pageRequest?.cancel() }
+    .sheet(item: $downloadModel) { model in HuggingFaceDownloadSheet(model: model) }
   }
 
   private func search() {
@@ -76,10 +88,7 @@ struct LocalModelDiscoveryView: View {
         Text("\(model.downloadByteCount, format: .byteCount(style: .file)) download · ~\(model.advertisedMemoryRange ?? "21–25") GB RAM estimate")
           .font(.caption).foregroundStyle(.secondary)
         let assessment = advisor.recommendations(installedModels: chat.installedModels).assessments.first { $0.id == model.id }
-        if let assessment {
-          Text(assessment.fit.canRun ? assessment.fit.rawValue : "\(assessment.fit.rawValue) · \(assessment.reason)")
-            .font(.caption).foregroundStyle(assessment.fit.canRun ? Color.secondary : .orange)
-        } else {
+        if assessment == nil {
           Text("Checking this Mac’s available memory and storage…").font(.caption).foregroundStyle(.secondary)
         }
         HStack {
@@ -91,6 +100,12 @@ struct LocalModelDiscoveryView: View {
           }
         }
         .controlSize(.small)
+        if let assessment, !assessment.fit.canRun {
+          Text(assessment.permitsMemoryOverride
+            ? "Memory warning: this model may run slowly, use swap or fail to load on this Mac. You can still install it."
+            : "Compatibility warning: \(assessment.reason) You can still download its files.")
+            .font(.caption).foregroundStyle(.orange)
+        }
       }
       if chat.isBusy || operationFailed {
         LocalModelOperationView(chat: chat, advisor: advisor)
@@ -112,12 +127,38 @@ struct LocalModelDiscoveryView: View {
     let installed = chat.installedModels.first { $0.id == model.id }
     let isCurrent = installed.map { !model.requiresUpdate($0) } ?? false
     let selected = chat.installedModel?.id == model.id
-    Button(isCurrent ? (selected ? "Selected" : "Use Model") : (installed == nil ? "Install Q4_K_M" : "Update Q4_K_M")) {
-      if isCurrent { chat.selectModel(id: model.id) }
-      else { chat.downloadModel(model) }
+    if let assessment, !assessment.canInstall {
+      Button("Download Q4 files") { downloadModel = HuggingFaceModelListing(id: model.huggingFaceRepositoryID) }
+    } else {
+      Button(isCurrent ? (selected ? "Selected" : "Use Model") : (installed == nil ? "Install Q4_K_M" : "Update Q4_K_M")) {
+        if isCurrent { chat.selectModel(id: model.id) }
+        else { chat.downloadModel(model) }
+      }
+      .buttonStyle(.borderedProminent)
+      .disabled(chat.isBusy || assessment == nil || (isCurrent && selected))
     }
-    .buttonStyle(.borderedProminent)
-    .disabled(chat.isBusy || assessment?.canInstall != true || (isCurrent && selected))
+  }
+
+  @ViewBuilder
+  private var selectedPackages: some View {
+    let packages = advisor.recommendations(installedModels: chat.installedModels).assessments.filter {
+      guard $0.id != LocalModelDiscovery.featuredModelID,
+            query.scope != .audio || $0.model.modelSupportsAudio == true else { return false }
+      let text = "\($0.model.displayName) \($0.model.maker) \($0.model.quantization)"
+      return query.search.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        || text.localizedCaseInsensitiveContains(query.search.trimmingCharacters(in: .whitespacesAndNewlines))
+    }
+    if advisor.hardware == nil {
+      ProgressView("Preparing model choices…")
+    } else if packages.isEmpty {
+      ContentUnavailableView("No matching packages", systemImage: "magnifyingglass",
+        description: Text("Try another search or explore more models on Hugging Face."))
+    }
+    ForEach(packages) { assessment in
+      DiscoverPackageRow(assessment: assessment, chat: chat) {
+        downloadModel = HuggingFaceModelListing(id: assessment.model.huggingFaceRepositoryID)
+      }
+    }
   }
 
   @ViewBuilder
@@ -150,7 +191,8 @@ struct LocalModelDiscoveryView: View {
     }
     ForEach(discovery.models) { model in
       HuggingFaceModelRow(model: model,
-        hasLocalPackage: advisor.manifest.models.contains { $0.huggingFaceRepositoryID == model.id })
+        hasLocalPackage: advisor.manifest.models.contains { $0.huggingFaceRepositoryID == model.id },
+        download: { downloadModel = model })
     }
     if discovery.hasMore {
       Button(discovery.isLoading ? "Loading models…" : "Load more models") {
@@ -169,6 +211,7 @@ struct LocalModelDiscoveryView: View {
 struct HuggingFaceModelRow: View {
   let model: HuggingFaceModelListing
   var hasLocalPackage = false
+  let download: () -> Void
 
   var body: some View {
     VStack(alignment: .leading, spacing: 8) {
@@ -191,7 +234,8 @@ struct HuggingFaceModelRow: View {
       }
       .font(.caption2).foregroundStyle(.secondary)
       HStack {
-        Link("Open on Hugging Face", destination: model.url)
+        Button("Download files", action: download).buttonStyle(.borderedProminent)
+        Link("Model card", destination: model.url)
         Spacer(minLength: 0)
         if hasLocalPackage {
           Button("See local packages") {
@@ -200,6 +244,8 @@ struct HuggingFaceModelRow: View {
         }
       }
       .font(.caption)
+      Text("Compatibility warning: this model may require another runtime. Enigma does not support audio input yet.")
+        .font(.caption2).foregroundStyle(.orange)
     }
     .padding(14).frame(maxWidth: .infinity, alignment: .leading).natureSurface(radius: 16)
   }

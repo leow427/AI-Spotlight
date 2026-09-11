@@ -39,14 +39,11 @@ struct LocalModelDescriptor: Codable, Sendable, Equatable, Identifiable {
     inferenceProfile ?? LocalMultimodalProfile.legacyQwen(parameters: parameterBillions)
   }
 
-  /// Gemma 4 12B is deliberately available as an opt-in on lower-memory Macs.
-  /// Keep this tied to the reviewed, pinned package so a catalog entry cannot
-  /// accidentally broaden the override to a different artifact.
+  /// Memory estimates guide recommendations, but users may intentionally install
+  /// any compatible package after seeing its warning. Artifact and runtime
+  /// validation remain required; this does not admit an unsupported architecture.
   var permitsMemoryOverride: Bool {
-    id == "gemma-4-12b-it-qat-q4_0-gguf"
-      && revision == "29d097773436b69ff9feafd636ab4cf873786537"
-      && checksumSHA256 == "93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b"
-      && projector?.checksumSHA256 == "cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7"
+    supportsVision && LocalModelCompatibility.supports(self) && (try? validate()) != nil
   }
 
   var downloadByteCount: Int64 {

@@ -143,7 +143,10 @@ final class LocalModelDiscoveryTests: XCTestCase {
     XCTAssertTrue(LocalModelCompatibility.supports(model))
     XCTAssertTrue(model.supportsVision)
     XCTAssertEqual(model.modelSupportsAudio, false)
-    XCTAssertFalse(LocalModelSelector.assess(model, hardware: hardware(memory: 16)).canInstall)
+    let limited = LocalModelSelector.assess(model, hardware: hardware(memory: 16))
+    XCTAssertTrue(limited.canInstall)
+    XCTAssertTrue(limited.permitsMemoryOverride)
+    XCTAssertFalse(limited.fit.canRun)
     XCTAssertTrue(LocalModelSelector.assess(model, hardware: hardware(memory: 128)).canInstall)
   }
 
@@ -151,7 +154,7 @@ final class LocalModelDiscoveryTests: XCTestCase {
     let root = FileManager.default.temporaryDirectory.appending(path: "DiscoveryTests-\(UUID())")
     try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
     defer { try? FileManager.default.removeItem(at: root) }
-    let hardware = hardware(memory: 128)
+    let hardware = hardware(memory: 16)
     let advisor = LocalModelAdvisor(directory: root, modelsDirectory: root, trust: nil, detect: { _ in hardware })
     await advisor.start(installedModels: [], presentOnboarding: false)
     let chat = LocalChatViewModel(engine: DiscoveryTestEngine(), modelAdvisor: advisor,

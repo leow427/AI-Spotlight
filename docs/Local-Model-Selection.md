@@ -2,13 +2,14 @@
 
 Enigma offers five choices for each memory class, organized as Lightweight,
 Middleweight and Heavyweight in both setup and Settings → Local Models. The
-16–18 GB group also supplies the starting list below 16 GB (with memory admission
-still enforced); the 32 GB group supplies the starting list above 32 GB. Other
+16–18 GB group also supplies the starting list below 16 GB (with memory warnings);
+the 32 GB group supplies the starting list above 32 GB. Other
 quantizations remain available under **Models for other memory sizes**.
 
 Settings → **Discover** also offers a [searchable Hugging Face browser](Model-Discovery.md)
-for public vision and audio models, with Gemma 4 26B-A4B (MoE) Q4_K_M featured
-independently of the Mac’s recommendation tier.
+for public vision and audio models, with direct downloads and Gemma 4 26B-A4B
+(MoE) Q4_K_M featured independently of the Mac’s recommendation tier. Its default
+selection includes all 13 packages without switching memory tiers.
 
 ## Catalogue version 5 — reviewed September 10, 2026
 
@@ -43,16 +44,18 @@ in the library and are not deleted or silently replaced.
 **MiniCPM-o 4.5 is listed but cannot be installed in this release.** Its publisher
 provides a dedicated runtime and separate vision/audio components. Enigma's pinned
 upstream llama.cpp b10797 integration has not been validated for that package.
-The catalogue keeps its exact metadata and explains the missing runtime instead
-of silently substituting MiniCPM-V or exposing a nonfunctional Install button.
+The catalogue keeps its exact metadata and explains the missing runtime. Both
+Local Models and Discover offer **Download files**, which opens an in-app file
+chooser and downloads the chosen files for use in an appropriate external runtime.
 
 **Audio is a model capability, not an Enigma feature yet.** The current app sends
 text and images. Gemma and MiniCPM-o entries explicitly distinguish model audio
 capability from the app's available inputs and outputs. Installation packages do
 not promise speech support or include the MiniCPM audio/TTS pipeline.
 
-The requested RAM ranges are shown as planning estimates. Actual admission retains
-the existing conservative policy: at most 60% of physical RAM, physical RAM minus
+The requested RAM ranges are shown as planning estimates. Recommendations retain
+the existing conservative memory budget: at most 60% of physical RAM, physical
+RAM minus
 at least 4 GiB or 25% reserved for macOS, and 80% of Metal's recommended working
 set. Capacity includes 1.2 × weights plus projector, full-context F16 KV cache,
 and 2 GiB runtime/compute reserve. All MoE and Gemma PLE weights count in full.
@@ -60,12 +63,14 @@ Qwen3.5 reserves KV for its eight full-attention layers (4 KV heads × 256 head
 dimension); its recurrent state is covered by the runtime reserve. SmolVLM2 uses
 a conservative 24 × 32 × 64 full-context cache bound. Context remains 8,192 tokens.
 
-Consequently some requested heavyweight entries can be unavailable on their named
-memory class, including Gemma 26B on 32 GB, when Enigma's actual budget is lower.
-The UI always shows the tier entry and reason. A planning range cannot bypass
-memory, disk, Metal-buffer, checksum or architecture checks. The old pinned Gemma
-12B QAT override still applies to that legacy installation only; it does not
-silently extend to the new Q5_K_M package.
+Some heavyweight entries exceed the recommended budget on their named memory
+class, including Gemma 26B on 32 GB. Users can still install compatible packages:
+a warning below the install controls explains possible slowdown, swapping or load
+failure. This applies to all compatible catalog packages, including the featured
+Gemma 26B Q4. Disk space, Metal-buffer support, checksums and architecture checks
+remain required. A memory warning cannot hide an actual disk-space failure.
+Packages above the memory budget do not load automatically for a post-installation
+benchmark; users can choose Check Performance explicitly.
 
 Recommended is selected from the current RAM tier's responsive candidates; it
 requires at least an estimated/measured 8 tokens/s and first token within five

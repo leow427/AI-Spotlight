@@ -263,7 +263,11 @@ final class LocalChatViewModel: ObservableObject {
         guard let self else { return }
         await self.refreshInstalledModel()
         try Task.checkCancellation()
-        await self.benchmarkInstalledModel(prediction: prediction)
+        if prediction?.permitsMemoryOverride == true {
+          self.benchmarkNotice = "Installed. Memory use may be high; choose Check Performance when you are ready to test it."
+        } else {
+          await self.benchmarkInstalledModel(prediction: prediction)
+        }
         self.state = .idle
         self.installationTask = nil
       } catch is CancellationError {
