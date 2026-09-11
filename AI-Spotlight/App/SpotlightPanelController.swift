@@ -130,6 +130,9 @@ final class SpotlightPanelController: NSObject, NSWindowDelegate {
     if let welcomeSetup {
       welcomeObservation = welcomeSetup.$isPresented.combineLatest(welcomeSetup.$tour)
         .map { $0 || $1 != nil }.removeDuplicates()
+        // @Published emits before storing the new value. Resizing synchronously
+        // can lay out the hosting view with stale welcome/disabled state.
+        .receive(on: DispatchQueue.main)
         .sink { [weak self] active in self?.setWelcomeSizing(active) }
     }
     panel.onHide = { [weak self] in

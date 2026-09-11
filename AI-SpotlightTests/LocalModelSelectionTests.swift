@@ -858,6 +858,62 @@ extension LocalModelSelectionTests {
   }
 
   @MainActor
+  func testChatBecomesEditableImmediatelyAfterEveryWelcomeExit() async throws {
+    let root = try temporaryDirectory()
+    let defaults = try welcomeDefaults()
+    let profile = hardware(memory: 32)
+    let advisor = LocalModelAdvisor(directory: root, modelsDirectory: root, defaults: defaults, trust: nil, detect: { _ in profile })
+    let chat = LocalChatViewModel(engine: SelectionTestEngine(), sessionStore: ChatSessionStore(applicationSupportDirectory: root))
+    let credentials = ScreenTestCredentialStore()
+    let cloud = CloudSettingsModel(credentialStore: credentials,
+      catalog: CloudModelCatalog(credentialStore: credentials, transport: ScreenTestTransport(), cacheDirectory: root),
+      preferences: CloudPreferencesStore(defaults: defaults), codexAvailable: { false })
+    let setup = WelcomeSetup(defaults: defaults)
+    let preferences = StartPreferences(defaults: defaults)
+    preferences.mode = .cloud
+    let appearance = GlassAppearanceSettings(defaults: defaults)
+    let view = NSHostingView(rootView: AppShellView(glassAppearance: appearance, cloudSettings: cloud,
+      localChat: chat, modelAdvisor: advisor,
+      searchSettings: WebSearchSettings(credentials: WelcomeEmptySearchCredentials(), defaults: defaults),
+      startPreferences: preferences, welcomeSetup: setup)
+      .transaction { $0.disablesAnimations = true })
+    let controller = SpotlightPanelController(glassAppearance: appearance, sizeStore: PanelSizeStore(defaults: defaults),
+      contentView: view, welcomeSetup: setup)
+    controller.show()
+    defer { controller.hide() }
+    func settle() async throws {
+      try await Task.sleep(for: .milliseconds(150))
+      view.layoutSubtreeIfNeeded()
+    }
+    func editor(in parent: NSView) -> SlashCommandTextView? {
+      if let editor = parent as? SlashCommandTextView { return editor }
+      return parent.subviews.lazy.compactMap { editor(in: $0) }.first
+    }
+    try await settle()
+    for exit in 0..<3 {
+      setup.replay()
+      try await settle()
+      XCTAssertFalse(try XCTUnwrap(editor(in: view)).isEditable)
+      setup.finish(takeTour: exit != 0)
+      if exit == 1 { setup.endTour() }
+      if exit == 2 {
+        for _ in WelcomeTourStep.allCases { setup.nextTourStep() }
+      }
+      try await settle()
+      let composer = try XCTUnwrap(editor(in: view))
+      XCTAssertTrue(composer.isEditable, "Welcome exit \(exit) must enable the composer")
+      XCTAssertTrue(composer.window?.firstResponder === composer, "Welcome exit \(exit) must focus the composer")
+      XCTAssertEqual(preferences.mode, .auto)
+      // NSView.hitTest takes a point in the receiver's superview coordinates.
+      let point = composer.convert(NSPoint(x: composer.bounds.midX, y: composer.bounds.midY), to: view.superview)
+      let hit = try XCTUnwrap(view.hitTest(point))
+      XCTAssertTrue(hit === composer || hit.isDescendant(of: composer), "Welcome exit \(exit) must allow clicks through to chat; hit \(hit), point \(point)")
+      composer.insertText("Ready to chat", replacementRange: NSRange(location: 0, length: composer.string.utf16.count))
+      XCTAssertEqual(composer.string, "Ready to chat")
+    }
+  }
+
+  @MainActor
   func testWelcomeScreensRenderAtMinimumAndDefaultPanelSizes() async throws {
     let root = try temporaryDirectory()
     let defaults = try welcomeDefaults()
@@ -875,7 +931,7 @@ extension LocalModelSelectionTests {
     for step in WelcomeSetup.Step.allCases {
       setup.step = step
       for size in [NSSize(width: 640, height: 420), NSSize(width: 1000, height: 780)] {
-        try render(WelcomeSetupView(setup: setup, advisor: advisor, chat: chat, cloud: cloud, search: search, chooseMode: { _ in }), size: size, name: "welcome-\(step)-\(Int(size.width))", roundedWindow: true)
+        try render(WelcomeSetupView(setup: setup, advisor: advisor, chat: chat, cloud: cloud, search: search), size: size, name: "welcome-\(step)-\(Int(size.width))", roundedWindow: true)
       }
     }
     try render(SettingsView(settings: cloud), size: NSSize(width: 820, height: 680), name: "settings-permissions")

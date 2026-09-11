@@ -179,7 +179,7 @@ final class AppCommandTests: XCTestCase {
   }
 
   @MainActor
-  func testWelcomeTemporarilyEnlargesPanelThroughTourWithoutSavingItsSize() throws {
+  func testWelcomeTemporarilyEnlargesPanelThroughTourWithoutSavingItsSize() async throws {
     let suite = "WelcomePanel-\(UUID())"
     let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
     defer { defaults.removePersistentDomain(forName: suite) }
@@ -192,19 +192,29 @@ final class AppCommandTests: XCTestCase {
       sizeStore: store, contentView: view, welcomeSetup: setup)
     let window = try XCTUnwrap(view.window)
     defer { controller.hide() }
+    func settleSizing() async {
+      await withCheckedContinuation { continuation in
+        DispatchQueue.main.async { continuation.resume() }
+      }
+    }
     setup.start(hasInstalledModels: false)
+    await settleSizing()
     let visible = try XCTUnwrap(window.screen ?? NSScreen.main).visibleFrame
     let enlarged = PanelSizeStore.centeredFrame(size: NSSize(width: 1280, height: 860), in: visible).size
     XCTAssertEqual(window.frame.size, enlarged)
     controller.windowDidEndLiveResize(Notification(name: NSWindow.didEndLiveResizeNotification, object: window))
     XCTAssertEqual(store.load(), normal)
     setup.finish(takeTour: true)
+    await settleSizing()
     XCTAssertEqual(window.frame.size, enlarged)
     setup.endTour()
+    await settleSizing()
     XCTAssertEqual(window.frame.size, normal)
     setup.replay()
+    await settleSizing()
     XCTAssertEqual(window.frame.size, enlarged)
     setup.finish(takeTour: false)
+    await settleSizing()
     XCTAssertEqual(window.frame.size, normal)
     XCTAssertEqual(store.load(), normal)
   }

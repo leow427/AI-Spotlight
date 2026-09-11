@@ -454,14 +454,13 @@ struct AppShellView: View {
     .disabled(welcomeSetup.isPresented || welcomeSetup.tour != nil)
     .accessibilityHidden(welcomeSetup.isPresented)
     .overlayPreferenceValue(WelcomeTourAnchors.self) { anchors in
-      WelcomeTourOverlay(setup: welcomeSetup, anchors: anchors)
+      if welcomeSetup.tour != nil {
+        WelcomeTourOverlay(setup: welcomeSetup, anchors: anchors)
+      }
     }
     .overlay {
       if welcomeSetup.isPresented {
-        WelcomeSetupView(setup: welcomeSetup, advisor: modelAdvisor, chat: localChat, cloud: cloudSettings, search: searchSettings) { mode in
-          selectedMode = mode
-          startPreferences.mode = mode
-        }
+        WelcomeSetupView(setup: welcomeSetup, advisor: modelAdvisor, chat: localChat, cloud: cloudSettings, search: searchSettings)
       }
     }
     .onPreferenceChange(SelectionComposerHeight.self) { height in
@@ -616,6 +615,10 @@ struct AppShellView: View {
     }
     .onChange(of: welcomeSetup.isPresented) { _, presented in
       isComposerFocused = !presented && welcomeSetup.tour == nil
+      if !presented {
+        selectedMode = .auto
+        startPreferences.mode = .auto
+      }
       if presented {
         isModePalettePresented = false
         isHelpPresented = false

@@ -166,6 +166,25 @@ final class RequestLifecycleTests: XCTestCase {
     await fulfillment(of: [stream.cancelled], timeout: 2)
   }
 
+  func testAutoWithoutCloudStartsOnlyTheLocalProducer() async throws {
+    let stream = ControlledStream<String>()
+    let engine = LifecycleLocalEngine(streams: [stream])
+    let provider = LifecycleCloudProvider()
+    let viewModel = LocalChatViewModel(
+      engine: engine, cloudProviders: registry(chatGPT: provider), sessionStore: makeStore()
+    )
+    await viewModel.refreshInstalledModel()
+    viewModel.submitAuto("Design a resilient payment system and evaluate its failure modes.", cloud: nil)
+    await fulfillment(of: [stream.started], timeout: 2)
+    XCTAssertEqual(viewModel.activeRequest?.route.mode, .local)
+    XCTAssertEqual(viewModel.activeRequest?.route.usesNetwork, false)
+    XCTAssertEqual(viewModel.autoRouteDecision?.reason, .cloudUnavailable)
+    XCTAssertEqual(engine.requests.count, 1)
+    XCTAssertTrue(provider.requests.isEmpty)
+    await receive("Local answer", from: stream, in: viewModel)
+    await viewModel.stopStreaming()?.value
+  }
+
   func testAutoRejectionsPreserveOriginalDraftWithoutStartingAnyProducer() async {
     let engine = LifecycleLocalEngine()
     let provider = LifecycleCloudProvider()

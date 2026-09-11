@@ -51,9 +51,12 @@ performance check after the verified package is installed may still leave a
 usable model. If a benchmark changes the ranking, the chosen model stays visible
 so the user is not asked for a second download.
 
-Choosing **Don’t use local models** bypasses installation and selects Cloud as
-the startup mode. Choosing a local model selects Local. Existing model files,
-chats, and credentials are retained. No permissions are granted by setup; the
+Choosing **Don’t use local models** bypasses installation. Finishing setup always
+selects Auto as the startup mode, whether or not a local model or Cloud account
+is configured.
+Without Cloud, Auto uses only the installed local model; if neither is ready,
+setup still finishes in Auto and asks the user to configure a model before sending.
+Existing model files, chats, and credentials are retained. No permissions are granted by setup; the
 existing Screen, selection, files, and location consent flows remain in place.
 The final page explains when no model route has been configured yet.
 
@@ -110,3 +113,10 @@ restoration after skipping or ending the tour, replay, and saved-size preservati
 Native chat fixtures use isolated startup preferences so saved
 user settings cannot change their routing. Live account authentication and
 multi-gigabyte downloads remain manual checks.
+
+Welcome exit regression tests exercise skipping, ending, and completing the tour
+in a native panel, checking that the chat editor immediately regains keyboard
+focus and accepts clicks and typing. Panel resizing is deferred until published
+welcome state has been stored, and the tour overlay is removed when inactive.
+An offline request test verifies that Auto with no Cloud configuration starts
+only the local producer, including for a complex prompt.

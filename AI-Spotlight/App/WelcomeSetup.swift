@@ -139,7 +139,6 @@ struct WelcomeSetupView: View {
   @ObservedObject var chat: LocalChatViewModel
   @ObservedObject var cloud: CloudSettingsModel
   @ObservedObject var search: WebSearchSettings
-  let chooseMode: (ChatMode) -> Void
   @State private var selectedID: String?
   @State private var skipLocal = false
   @State private var showConnections = false
@@ -367,7 +366,6 @@ struct WelcomeSetupView: View {
           .keyboardShortcut(.defaultAction)
       } else {
         Button("Next") {
-          if setup.step == .models { chooseMode(skipLocal ? .cloud : .local) }
           setup.step = WelcomeSetup.Step(rawValue: setup.step.rawValue + 1) ?? .walkthrough
         }
         .buttonStyle(.borderedProminent).keyboardShortcut(.defaultAction)
