@@ -878,6 +878,8 @@ extension LocalModelSelectionTests {
         try render(WelcomeSetupView(setup: setup, advisor: advisor, chat: chat, cloud: cloud, search: search, chooseMode: { _ in }), size: size, name: "welcome-\(step)-\(Int(size.width))", roundedWindow: true)
       }
     }
+    try render(SettingsView(settings: cloud), size: NSSize(width: 820, height: 680), name: "settings-permissions")
+    try render(SettingsView(settings: cloud, initialDestination: .selection), size: NSSize(width: 820, height: 680), name: "selection-permissions")
     setup.step = .welcome
     let shell = AppShellView(glassAppearance: GlassAppearanceSettings(defaults: defaults), cloudSettings: cloud,
       localChat: chat, modelAdvisor: advisor, searchSettings: search,

@@ -143,6 +143,8 @@ struct WelcomeSetupView: View {
   @State private var selectedID: String?
   @State private var skipLocal = false
   @State private var showConnections = false
+  @State private var braveAPIKey = ""
+  @State private var connectionError: String?
 
   private var choices: [LocalModelAssessment] {
     WelcomeSetup.choices(advisor.recommendations(installedModels: chat.installedModels), preserving: selectedID)
@@ -295,21 +297,34 @@ struct WelcomeSetupView: View {
   private var connections: some View {
     VStack(alignment: .leading, spacing: 18) {
       Text("A little more connected").font(.system(size: 28, weight: .semibold))
-      Text("Both are optional. Open the links to get started, then finish connecting in Settings.").foregroundStyle(.secondary)
-      connectionCard(title: "ChatGPT & Codex", symbol: "cloud", status: cloud.chatGPTAccount != nil ? "Signed in with ChatGPT" : "Not connected") {
-        Text("Use your ChatGPT plan’s Codex allowance for cloud answers. Install Codex, then sign in with ChatGPT in Enigma’s settings.")
-        HStack {
-          Link("ChatGPT", destination: URL(string: "https://chatgpt.com/")!)
-          Link("Set up Codex", destination: URL(string: "https://learn.chatgpt.com/docs/codex/cli")!)
-        }.buttonStyle(.bordered)
+      Text("Connect here, or skip and come back whenever you’re ready.").foregroundStyle(.secondary)
+      connectionCard(title: "ChatGPT subscription", symbol: "cloud", status: cloud.chatGPTAccount != nil ? "Connected" : "Not connected") {
+        ChatGPTConnectionControls(settings: cloud)
       }
       connectionCard(title: "Web search", symbol: "globe", status: search.hasAPIKey ? "Brave key saved · not tested here" : "Not connected") {
-        Text("Get a Brave Search API key with LLM Context access and save it in Settings → Cloud & Search. Brave usage is billed separately.")
-        Link("Get Brave Search", destination: URL(string: "https://brave.com/search/api/")!).buttonStyle(.bordered)
+        Text("Get a Brave Search API key with LLM Context access, then paste it here. Brave usage is billed separately.")
+        HStack {
+          Link("Get Brave API key", destination: URL(string: "https://brave.com/search/api/")!)
+            .buttonStyle(.bordered)
+          SecureField("Brave API key", text: $braveAPIKey).textFieldStyle(.roundedBorder)
+            .accessibilityLabel("Brave Search API key")
+          Button("Save key") {
+            do {
+              try search.saveAPIKey(braveAPIKey)
+              braveAPIKey = ""
+              connectionError = nil
+            } catch { connectionError = error.localizedDescription }
+          }
+          .buttonStyle(.borderedProminent)
+          .disabled(braveAPIKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        }
+        if let connectionError { Text(connectionError).foregroundStyle(.red) }
       }
-      Button("Open Connection Settings") { showConnections = true }.buttonStyle(.borderedProminent)
-      Text("Opening a link doesn’t connect your account. You can continue now and finish this later.")
-        .font(.caption).foregroundStyle(.secondary)
+      connectionCard(title: "Mac permissions", symbol: "hand.raised", status: "Enable only the features you want to use") {
+        MacPermissionControls()
+      }
+      Button("More Connection Settings") { showConnections = true }.buttonStyle(.bordered)
+
     }
   }
 
@@ -462,4 +477,64 @@ struct WelcomeTourOverlay: View {
 
 extension Notification.Name {
   static let welcomeSetupRequested = Notification.Name("welcomeSetupRequested")
+}
+
+/// Keep setup and Settings on the same real Codex sign-in flow.
+struct ChatGPTConnectionControls: View {
+  @ObservedObject var settings: CloudSettingsModel
+  var body: some View {
+    VStack(alignment: .leading, spacing: 10) {
+      if let account = settings.chatGPTAccount {
+        Label(account.email ?? "Signed in with ChatGPT", systemImage: "checkmark.circle.fill")
+          .foregroundStyle(.green)
+        HStack {
+          Button("Use ChatGPT") {
+            settings.preferredProvider = .chatGPT
+            Task { await settings.discoverModels() }
+          }
+          Button("Sign Out", role: .destructive) {
+            Task { await settings.signOutOfChatGPT() }
+          }
+        }
+      } else if settings.isSigningIn {
+        HStack {
+          ProgressView().controlSize(.small)
+          Text("Finish signing in in your browser…")
+          Button("Cancel") { settings.cancelSignIn() }
+        }
+      } else {
+        Button("Sign in with ChatGPT") {
+          settings.signInWithChatGPT { url in
+            await MainActor.run { NSWorkspace.shared.open(url) }
+          }
+        }
+        .buttonStyle(.borderedProminent)
+        .disabled(!settings.isCodexAvailable)
+      }
+
+      Text("Uses your ChatGPT plan's Codex allowance, not API billing. Plan limits and model availability apply. This is a Codex-powered chat, not the ChatGPT website.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      if !settings.isCodexAvailable {
+        Text("The Codex CLI is required on this Mac. Install or update it, then check again.")
+          .font(.caption)
+        Link("Codex installation instructions", destination: URL(string: "https://learn.chatgpt.com/docs/cli")!)
+      }
+
+      Button("Check Sign-in Status") {
+        Task { await settings.refreshChatGPTAccount() }
+      }
+      .disabled(settings.isSigningIn)
+
+      Text("Codex securely stores your sign-in on this Mac.")
+        .font(.caption)
+        .foregroundStyle(.secondary)
+
+      if let accountError = settings.accountError {
+        Text(accountError).font(.caption).foregroundStyle(.red)
+      }
+    }
+    .task { await settings.refreshChatGPTAccount() }
+  }
 }

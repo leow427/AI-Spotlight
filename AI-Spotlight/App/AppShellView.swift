@@ -236,7 +236,6 @@ private struct NatureButtonStyle: ButtonStyle {
 struct AppShellView: View {
   @ObservedObject private var welcomeSetup: WelcomeSetup
   @ObservedObject private var selectionAccess = SelectionAccessibilityAccess.shared
-  @AppStorage(SelectionShortcutMonitor.enabledKey) private var selectionShortcutEnabled = true
   @ObservedObject private var selectionContext = SelectionContextService.shared
   @State private var expandedActivities: Set<UUID> = []
   @ObservedObject var glassAppearance: GlassAppearanceSettings
@@ -328,23 +327,24 @@ struct AppShellView: View {
                         : "Auto search · Current topics may use Brave, including relevant attached context.")
                       : "Add a Brave Search API key to search the web.")
                     if !searchSettings.hasAPIKey {
-                      Button("Settings", action: openSettings).buttonStyle(.plain)
+                      Button("Open Cloud & Search Settings", action: openConnectionSettings).buttonStyle(.bordered)
                     }
                   }
                   .font(.caption)
                   .foregroundStyle(.secondary)
                 }
 
-                if !selectionAccess.isGranted && (selectionShortcutEnabled || localChat.isTemporaryChat) {
+                if !selectionAccess.isGranted && localChat.isTemporaryChat {
                   VStack(alignment: .leading, spacing: 6) {
-                    Label("Enable Selection Context", systemImage: "hand.raised").font(.caption.weight(.semibold))
+                    Label("Action needed: allow Accessibility", systemImage: "exclamationmark.triangle.fill")
+                      .font(.headline).foregroundStyle(.orange)
                     Text("Allow \(SelectionAccessibilityAccess.appName) (Enigma) in System Settings → Privacy & Security → Accessibility to use double-Option and attach selected text.")
                       .font(.caption).foregroundStyle(.secondary)
                     Button("Open Accessibility Settings…") { selectionAccess.requestAccess() }
-                      .buttonStyle(.bordered).controlSize(.small)
+                      .buttonStyle(.borderedProminent).controlSize(.small)
                   }
                   .frame(maxWidth: .infinity, alignment: .leading)
-                  .padding(10).background(.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 12))
+                  .padding(14).natureSurface(radius: 12)
                 }
                 if localChat.isTemporaryChat {
                   Text("Temporary chat · Not saved to history").font(.caption2).foregroundStyle(.secondary)
@@ -362,9 +362,29 @@ struct AppShellView: View {
                                        isBusy: localChat.isBusy || screen.isBusy,
                                        remove: screen.removeAttachment, retake: captureScreen)
                 }
+                if screen.attachment?.routingDecision == .needsCloudPermission || screen.attachment?.routingDecision == .blocked(ScreenRoutingPolicy.screenshotUploadDisabledMessage) {
+                  VStack(alignment: .leading, spacing: 6) {
+                    Label("Screenshot uploads are off", systemImage: "hand.raised").font(.caption.weight(.semibold))
+                    Text("Cloud image analysis needs your approval. Text can still be read locally.")
+                      .font(.caption).foregroundStyle(.secondary)
+                    HStack {
+                      Button("Review screenshot permission…") { isScreenPermissionPresented = true }
+                      Button("Open Screen Settings", action: openConnectionSettings)
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                  }
+                }
                 if let error = screen.error {
-                  Text(error).font(.caption).foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
+                  VStack(alignment: .leading, spacing: 8) {
+                    Label(error, systemImage: "exclamationmark.triangle.fill")
+                      .font(.caption).foregroundStyle(.orange)
+                      .fixedSize(horizontal: false, vertical: true)
+                    if screen.needsScreenRecordingSettings {
+                      Button("Open Screen Recording Settings…") { MacPermissionControls.openScreenSettings() }
+                        .buttonStyle(.borderedProminent).controlSize(.small)
+                    }
+                  }
+                  .padding(12).frame(maxWidth: .infinity, alignment: .leading).natureSurface(radius: 12)
                 }
                 if files.selection != nil || files.error != nil || files.protectedWrite != nil {
                   FileModeAttachmentView(files: files, access: fileAccess, isCloud: selectedMode == .cloud, isBusy: localChat.isBusy,
@@ -1273,6 +1293,12 @@ struct AppShellView: View {
     )
   }
 
+  private func openConnectionSettings() {
+    isModePalettePresented = false
+    isComposerFocused = false
+    NotificationCenter.default.post(name: .settingsRequested, object: SettingsView.SettingsDestination.cloud)
+  }
+
   private func openSettings() {
     isModePalettePresented = false
     isComposerFocused = false
@@ -1621,6 +1647,9 @@ struct SettingsView: View {
           switch destination {
           case .general:
             Form {
+              Section("Permissions · enable your Mac features") {
+                MacPermissionControls()
+              }
               Section("Welcome") {
                 Button("Replay Welcome Setup") {
                   NotificationCenter.default.post(name: .welcomeSetupRequested, object: nil)
@@ -1653,6 +1682,9 @@ struct SettingsView: View {
             cloudForm
           case .selection:
             Form {
+              Section("Required for selection capture and replacement") {
+                MacPermissionControls(showScreen: false)
+              }
               Section("Text editing") {
                 Toggle("Automatically replace selected text", isOn: $selectionEditing.automaticallyReplace)
                 Text("When enabled, completed editing responses are pasted directly into the source app, without a preview card or Replace text click. Normal questions are answered as usual.")
@@ -1671,61 +1703,15 @@ struct SettingsView: View {
     }
     .frame(width: 820, height: 680)
     .naturePresentation()
+    .onReceive(NotificationCenter.default.publisher(for: .settingsDestinationRequested)) { notification in
+      if let requested = notification.object as? SettingsDestination { destination = requested }
+    }
   }
 
   private var cloudForm: some View {
     Form {
       Section("ChatGPT Subscription") {
-        if let account = settings.chatGPTAccount {
-          Label(account.email ?? "Signed in with ChatGPT", systemImage: "checkmark.circle.fill")
-            .foregroundStyle(.green)
-          HStack {
-            Button("Use ChatGPT") {
-              settings.preferredProvider = .chatGPT
-              Task { await settings.discoverModels() }
-            }
-            Button("Sign Out", role: .destructive) {
-              Task { await settings.signOutOfChatGPT() }
-            }
-          }
-        } else if settings.isSigningIn {
-          HStack {
-            ProgressView().controlSize(.small)
-            Text("Finish signing in in your browser…")
-            Button("Cancel") { settings.cancelSignIn() }
-          }
-        } else {
-          Button("Sign in with ChatGPT") {
-            settings.signInWithChatGPT { url in
-              await MainActor.run { NSWorkspace.shared.open(url) }
-            }
-          }
-          .buttonStyle(.borderedProminent)
-          .disabled(!settings.isCodexAvailable)
-        }
-
-        Text("Uses your ChatGPT plan's Codex allowance, not API billing. Plan limits and model availability apply. This is a Codex-powered chat, not the ChatGPT website.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        if !settings.isCodexAvailable {
-          Text("The Codex CLI is required on this Mac. Install or update it, then check again.")
-            .font(.caption)
-          Link("Codex installation instructions", destination: URL(string: "https://learn.chatgpt.com/docs/cli")!)
-        }
-
-        Button("Check Sign-in Status") {
-          Task { await settings.refreshChatGPTAccount() }
-        }
-        .disabled(settings.isSigningIn)
-
-        Text("Sign-in is stored by Codex in macOS Keychain, separately from the Codex app. No Apple development team or backend is needed.")
-          .font(.caption)
-          .foregroundStyle(.secondary)
-
-        if let accountError = settings.accountError {
-          Text(accountError).font(.caption).foregroundStyle(.red)
-        }
+        ChatGPTConnectionControls(settings: settings)
       }
 
       ScreenSettingsSection(settings: .shared)

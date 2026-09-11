@@ -51,12 +51,16 @@ final class SettingsWindowController: NSWindowController {
     fatalError("init(coder:) has not been implemented")
   }
 
-  func showSettings() {
+  func showSettings(destination: SettingsView.SettingsDestination? = nil) {
     // The chat's standalone NSHostingView has no SwiftUI settings-scene action.
     NSApp.unhide(nil)
     NSApp.activate(ignoringOtherApps: true)
     window?.deminiaturize(nil)
     showWindow(nil)
     window?.makeKeyAndOrderFront(nil)
+    if let destination {
+      window?.contentView?.layoutSubtreeIfNeeded()
+      NotificationCenter.default.post(name: .settingsDestinationRequested, object: destination)
+    }
   }
 }

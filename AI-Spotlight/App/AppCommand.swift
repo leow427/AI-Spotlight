@@ -15,6 +15,7 @@ extension Notification.Name {
   static let sidebarToggleRequested = Notification.Name("aiSpotlight.sidebarToggleRequested")
   static let fileModeRequested = Notification.Name("aiSpotlight.fileModeRequested")
   static let settingsRequested = Notification.Name("aiSpotlight.settingsRequested")
+  static let settingsDestinationRequested = Notification.Name("enigma.settingsDestinationRequested")
   static let newChatRequested = Notification.Name("aiSpotlight.newChatRequested")
   static let modePaletteRequested = Notification.Name("aiSpotlight.modePaletteRequested")
   static let panelHidden = Notification.Name("aiSpotlight.panelHidden")

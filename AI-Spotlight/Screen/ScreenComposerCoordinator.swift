@@ -11,6 +11,7 @@ final class ScreenComposerCoordinator: ObservableObject {
   @Published private(set) var isReading = false
   var isBusy: Bool { isCapturing || isReading }
   @Published var error: String?
+  @Published private(set) var needsScreenRecordingSettings = false
   private let captureService: any ScreenCapturing
   private let ocrService: any ScreenOCRReading
   private var revision = UUID()
@@ -32,6 +33,7 @@ final class ScreenComposerCoordinator: ObservableObject {
     revision = operation
     isCapturing = true
     error = nil
+    needsScreenRecordingSettings = false
     defer { isCapturing = false; isReading = false }
     do {
       guard let image = try await captureRegion(desktop: desktop) else { return nil }
@@ -60,6 +62,12 @@ final class ScreenComposerCoordinator: ObservableObject {
     } catch is CancellationError {
       return nil
     } catch {
+      if let captureError = error as? ScreenCaptureError {
+        switch captureError {
+        case .permissionDenied, .restartRequired: needsScreenRecordingSettings = true
+        default: break
+        }
+      }
       self.error = error.localizedDescription
       return nil
     }
@@ -85,6 +93,7 @@ final class ScreenComposerCoordinator: ObservableObject {
     attachment = nil
     isEnabled = false
     error = nil
+    needsScreenRecordingSettings = false
   }
 
   func clearDraft() {

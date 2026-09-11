@@ -33,7 +33,7 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
       name: .welcomeSetupRequested, object: nil)
     NotificationCenter.default.addObserver(
       self,
-      selector: #selector(openSettings),
+      selector: #selector(openRequestedSettings(_:)),
       name: .settingsRequested,
       object: nil
     )
@@ -100,11 +100,15 @@ final class ApplicationDelegate: NSObject, NSApplicationDelegate {
     panelController?.show()
   }
 
-  @objc func openSettings() {
+  @objc private func openRequestedSettings(_ notification: Notification) {
+    openSettings(destination: notification.object as? SettingsView.SettingsDestination)
+  }
+
+  func openSettings(destination: SettingsView.SettingsDestination? = nil) {
     guard panelController?.isCapturingScreen != true else { return }
     if settingsWindowController == nil {
       settingsWindowController = SettingsWindowController()
     }
-    settingsWindowController?.showSettings()
+    settingsWindowController?.showSettings(destination: destination)
   }
 }

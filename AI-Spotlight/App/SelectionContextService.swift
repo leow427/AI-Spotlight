@@ -58,34 +58,45 @@ final class SelectionContextService: ObservableObject {
     isWorking = true
     defer { isWorking = false }
     discardTarget()
+    defer {
+      if target == nil && notice == nil {
+        notice = "No selected text could be read. Highlight text in the source app and try again. If it still fails, copy the text and paste it into this chat."
+      }
+    }
     let interaction = SelectionInteractionGuard()
     defer { interaction.stop() }
     guard NSApp.keyWindow?.isKeyWindow != true, let app = NSWorkspace.shared.frontmostApplication,
           app.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return nil }
     guard AXIsProcessTrusted() else {
-      notice = "Enable Accessibility in Help to attach selected text. This temporary chat is still ready."
+      notice = "Enable Accessibility using the button in this chat to attach selected text. This temporary chat is still ready."
       return nil
     }
     let application = AXUIElementCreateApplication(app.processIdentifier)
     AXUIElementSetMessagingTimeout(application, 0.15)
+    // Electron apps may not expose their focused editor until assistive access is enabled.
+    // Unsupported attributes are harmless; this never grants macOS permission.
+    AXUIElementSetAttributeValue(application, "AXManualAccessibility" as CFString, kCFBooleanTrue)
     let mayCapture = {
       !Task.isCancelled && !interaction.interrupted && !IsSecureEventInputEnabled()
         && NSWorkspace.shared.frontmostApplication?.processIdentifier == app.processIdentifier
     }
-    guard let element = await SelectionCaptureRetry.first(mayContinue: mayCapture,
-      read: { self.element(application, kAXFocusedUIElementAttribute) }), isSafe(element) else { return nil }
-    let document = webDocument(element)
+    guard let element = await SelectionCaptureRetry.first(attempts: 10, mayContinue: mayCapture,
+      read: {
+        guard let focused = self.element(application, kAXFocusedUIElementAttribute), self.isSafe(focused) else { return nil as AXUIElement? }
+        return focused
+      }) else { return nil }
     let selection = await SelectionCaptureRetry.first(mayContinue: {
       mayCapture() && self.sameFocus(app: app, element: element) && self.isSafe(element)
     }, read: { () -> (CFRange?, String)? in
       let range = self.selectedRange(element)
-      let text = self.selectedText(element) ?? range.flatMap { self.textForRange(element, range: $0) }
+      let text = SelectionCapturePolicy.preferredText(self.selectedText(element),
+        rangeText: { range.flatMap { self.textForRange(element, range: $0) } })
       guard let text, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
       return (range, text)
     })
     let range = selection?.0 ?? selectedRange(element)
     var text = selection?.1
-    if text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true || (document != nil && (range?.length ?? 0) == 0) {
+    if text == nil || text?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty == true {
       guard SelectionCapturePolicy.allowsCopy(range: range, bundleID: app.bundleIdentifier) else { return nil }
       text = await copySelection(app: app, element: element)
     }
@@ -211,18 +222,6 @@ final class SelectionContextService: ObservableObject {
     return CFEqual(focused, element)
   }
 
-  private func webDocument(_ element: AXUIElement) -> AXUIElement? {
-    var current: AXUIElement? = element
-    var document: AXUIElement?
-    for _ in 0..<32 {
-      guard let node = current else { break }
-      if attribute(node, kAXRoleAttribute) as? String == "AXWebArea" { document = node }
-      current = self.element(node, kAXParentAttribute)
-    }
-    // Keep the outer document identity, not an editor's about:blank iframe.
-    return document
-  }
-
   private func isSafe(_ element: AXUIElement) -> Bool {
     guard !IsSecureEventInputEnabled() else { return false }
     var current: AXUIElement? = element
@@ -260,9 +259,10 @@ final class SelectionContextService: ObservableObject {
     var range = range
     guard range.length > 0, let parameter = AXValueCreate(.cfRange, &range) else { return nil }
     var value: CFTypeRef?
-    guard AXUIElementCopyParameterizedAttributeValue(element, kAXStringForRangeParameterizedAttribute as CFString,
-      parameter, &value) == .success else { return nil }
-    return value as? String
+    if AXUIElementCopyParameterizedAttributeValue(element, kAXStringForRangeParameterizedAttribute as CFString,
+      parameter, &value) == .success,
+       let text = value as? String, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return text }
+    return SelectionCapturePolicy.text(in: attribute(element, kAXValueAttribute) as? String, range: range)
   }
 }
 
@@ -294,12 +294,12 @@ enum SelectionPanelPlacement {
 /// Bounded readiness retries occur only inside a deliberate invocation.
 @MainActor
 enum SelectionCaptureRetry {
-  static func first<Value>(mayContinue: () -> Bool, read: () -> Value?,
+  static func first<Value>(attempts: Int = 3, mayContinue: () -> Bool, read: () -> Value?,
                            wait: () async -> Void = { try? await Task.sleep(for: .milliseconds(30)) }) async -> Value? {
-    for attempt in 0..<3 {
+    for attempt in 0..<max(0, attempts) {
       guard !Task.isCancelled, mayContinue() else { return nil }
       if let value = read() { return value }
-      if attempt < 2 { await wait() }
+      if attempt + 1 < attempts { await wait() }
     }
     return nil
   }
@@ -365,6 +365,20 @@ private final class SelectionInteractionGuard {
 /// Browser canvas editors can expose an empty hidden input while DOM text is selected.
 /// Copy is authoritative there. Native copy-line editors require a nonempty AX range.
 enum SelectionCapturePolicy {
+  static func text(in value: String?, range: CFRange) -> String? {
+    guard let value, range.location >= 0, range.length > 0 else { return nil }
+    let text = value as NSString
+    guard range.location <= text.length, range.length <= text.length - range.location else { return nil }
+    return text.substring(with: NSRange(location: range.location, length: range.length))
+  }
+
+  static func preferredText(_ selectedText: String?, rangeText: () -> String?) -> String? {
+    if let selectedText, !selectedText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+      return selectedText
+    }
+    return rangeText()
+  }
+
   static func allowsCopy(range: CFRange?, bundleID: String?) -> Bool {
     let bundleID = bundleID ?? ""
     let browsers: Set<String> = ["com.google.Chrome", "com.google.Chrome.canary", "com.apple.Safari",

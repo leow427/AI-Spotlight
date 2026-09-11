@@ -88,6 +88,8 @@ extension CloudModelCapabilities {
 }
 
 enum ScreenRoutingPolicy {
+  static let screenshotUploadDisabledMessage = "Screenshot upload is disabled. Enable it in Screen settings or select a local text-and-image model. Your draft has been kept."
+
   struct Request: Sendable {
     let prompt: String
     let ocr: ScreenOCRResult
@@ -164,6 +166,6 @@ enum ScreenRoutingPolicy {
     if request.mode == .auto, let local, local.canUseVision { return .vision(local) }
     if selected.canUseVision && !request.hasExplainedCloudPermission { return .needsCloudPermission }
     if !selected.canUseVision { return .blocked("The selected cloud model cannot receive images. Choose a model with image support in the normal model picker. Your draft has been kept.") }
-    return .blocked("Screenshot upload is disabled. Enable it in Screen settings or select a local text-and-image model. Your draft has been kept.")
+    return .blocked(screenshotUploadDisabledMessage)
   }
 }

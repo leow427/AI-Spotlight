@@ -268,6 +268,33 @@ final class SelectionContextTests: XCTestCase {
     XCTAssertTrue(SelectionEditingSettings(defaults: defaults).automaticallyReplace)
   }
 
+  func testSelectionFallsBackFromEmptyAXTextWithoutReplacingValidText() {
+    XCTAssertEqual(SelectionCapturePolicy.preferredText("", rangeText: { "selected range" }), "selected range")
+    XCTAssertEqual(SelectionCapturePolicy.preferredText(" \n", rangeText: { "range" }), "range")
+    XCTAssertEqual(SelectionCapturePolicy.preferredText("Selected text", rangeText: {
+      XCTFail("A valid AX selection must not be replaced by another source"); return nil
+    }), "Selected text")
+    XCTAssertNil(SelectionCapturePolicy.preferredText(nil, rangeText: { nil }))
+  }
+
+  func testValueFallbackUsesOnlyTheSelectedUTF16Range() {
+    XCTAssertEqual(SelectionCapturePolicy.text(in: "A😀 selected tail", range: CFRange(location: 4, length: 8)), "selected")
+    XCTAssertNil(SelectionCapturePolicy.text(in: "private text", range: CFRange(location: 0, length: 0)))
+    XCTAssertNil(SelectionCapturePolicy.text(in: "short", range: CFRange(location: 1, length: Int.max)))
+    XCTAssertNil(SelectionCapturePolicy.text(in: "short", range: CFRange(location: -1, length: 2)))
+    XCTAssertNil(SelectionCapturePolicy.text(in: nil, range: CFRange(location: 0, length: 3)))
+  }
+
+  func testLazyAccessibilityReadinessHasABoundedLongerRetryWindow() async {
+    var reads = 0
+    let result = await SelectionCaptureRetry.first(attempts: 10, mayContinue: { true }, read: {
+      reads += 1
+      return reads == 6 ? "focused editor" : nil
+    }, wait: {})
+    XCTAssertEqual(result, "focused editor")
+    XCTAssertEqual(reads, 6)
+  }
+
   func testCaptureRetriesReadinessButStopsOnSourceChange() async {
     var reads = 0
     var waits = 0

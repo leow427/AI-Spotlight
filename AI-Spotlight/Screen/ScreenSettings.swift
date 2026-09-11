@@ -1,3 +1,4 @@
+import AppKit
 import Combine
 import Foundation
 import SwiftUI
@@ -43,5 +44,53 @@ struct ScreenSettingsSection: View {
       Text("The normal model picker selects the model for text and images. Install a recommended package in Local Models for private visual analysis.")
         .font(.caption).foregroundStyle(.secondary)
     }
+  }
+}
+
+/// Consent is checked again when returning from System Settings; opening it grants nothing.
+struct MacPermissionControls: View {
+  @ObservedObject private var selection = SelectionAccessibilityAccess.shared
+  @State private var screenGranted = CGPreflightScreenCaptureAccess()
+  var showScreen = true
+
+  static func openScreenSettings() {
+    NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+  }
+
+  var body: some View {
+    VStack(alignment: .leading, spacing: 16) {
+      permission(title: "Accessibility", enabled: selection.isGranted,
+        explanation: "Required to attach selected text with double-Option and replace text in other apps.",
+        button: "Open Accessibility Settings…", action: selection.requestAccess)
+      if showScreen {
+        Divider()
+        permission(title: "Screen Recording", enabled: screenGranted,
+          explanation: "Required for /screen and /snapshot. Captures happen only when you request them.",
+          button: "Open Screen Recording Settings…", action: Self.openScreenSettings)
+      }
+      Text("Enable \(SelectionAccessibilityAccess.appName) in System Settings. If an older copy is already listed, remove it and add the app you’re running, then quit and reopen Enigma.")
+        .font(.caption).foregroundStyle(.secondary)
+    }
+    .onAppear { refresh() }
+    .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in refresh() }
+    .onReceive(NotificationCenter.default.publisher(for: .panelPresented)) { _ in refresh() }
+    .onReceive(NSWorkspace.shared.notificationCenter.publisher(for: NSWorkspace.didActivateApplicationNotification)) { _ in refresh() }
+  }
+
+  private func refresh() {
+    selection.refresh()
+    screenGranted = CGPreflightScreenCaptureAccess()
+  }
+
+  private func permission(title: String, enabled: Bool, explanation: String, button: String,
+                          action: @escaping () -> Void) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+      Label("\(title) · \(enabled ? "Enabled" : "Action needed")",
+        systemImage: enabled ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+        .font(.headline).foregroundStyle(enabled ? Color.green : Color.orange)
+      Text(explanation).font(.subheadline)
+      Button(button, action: action).buttonStyle(.borderedProminent)
+    }
+    .frame(maxWidth: .infinity, alignment: .leading)
   }
 }

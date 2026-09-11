@@ -47,11 +47,11 @@ ordinary conversation messages; there are no rewrite/explain/verify workflows.
 
 ## Capture and replacement
 
-Capture first reads AXSelectedText, then AXStringForRange. A bounded copy fallback
+Capture first reads nonempty AXSelectedText, then AXStringForRange or the selected slice of AXValue. A bounded copy fallback
 handles editors with incomplete selection text APIs. A known empty native AX range never
 copies (some editors otherwise copy the current line). Browser canvas editors such
 as Google Docs can expose an empty hidden input while document text is selected,
-so supported browsers use copy as the authority instead. Known copy-line editors
+so supported browsers can fall back to copy when AX provides no selected text. Known copy-line editors
 also require a range. Selected text is limited to 256 KB; model-specific input
 budgets can be smaller and reject the request while preserving the draft.
 
@@ -162,3 +162,27 @@ options response into a valid single revision. Neither check pasted into a sourc
 application. Run this opt-in check with `TEST_RUNNER_ENIGMA_SELECTION_MODEL_SMOKE=1`
 and `scripts/verify-xcode.sh test '-only-testing:EnigmaTests/SelectionContextTests/testInstalledGemmaAutoProducesRevisionCard'`
 when that model is selected locally.
+
+
+## Permission and capture recovery
+
+Settings → General now starts with Accessibility and Screen Recording status and
+prominent buttons opening the exact macOS privacy panes. Selection Context also
+shows its required Accessibility access above editing preferences. Setup includes
+these controls, and chat shows an Accessibility action when access is missing.
+If an old development/demo copy is listed, replace it with the current Enigma app
+in System Settings and reopen Enigma; consent belongs to the signed app identity.
+
+Capture now enables the focused app's optional `AXManualAccessibility` interface
+before bounded readiness retries (up to ten reads). This follows the
+[Electron accessibility guidance](https://www.electronjs.org/docs/latest/tutorial/accessibility).
+Empty AX selected-text results fall through to range-based text; unsupported
+parameterized range reads fall back to the selected UTF-16 slice of AXValue.
+Valid selected text is retained even when a browser omits a selection range.
+Secure-field checks, focus-change cancellation, copy-line safeguards, and
+clipboard ownership protections remain in place. A failed capture now explains
+how to retry or manually paste, instead of silently opening an empty chat.
+
+Automated coverage exercises empty-text fallback, UTF-16 boundaries, readiness
+retries, and existing secure selection / clipboard behavior. Interactive capture
+must be checked with the stable development-signed app, not the unsigned test host.

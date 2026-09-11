@@ -67,6 +67,24 @@ final class ScreenCaptureTests: XCTestCase {
     XCTAssertEqual(probe.endCount, 0)
     XCTAssertEqual(screen.draft, "keep this question")
     XCTAssertNotNil(screen.error)
+    XCTAssertTrue(screen.needsScreenRecordingSettings)
+    screen.clearDraft()
+    XCTAssertFalse(screen.needsScreenRecordingSettings)
+  }
+
+  func testOnlyPermissionFailuresOfferScreenRecordingSettings() async {
+    for failure in [ScreenCaptureError.permissionDenied, .restartRequired, .invalidImage] {
+      var environment = ScreenCaptureService.Environment()
+      environment.preflight = { true }
+      environment.waitForPanel = {}
+      environment.desktop = { throw failure }
+      let screen = ScreenComposerCoordinator(captureService: ScreenCaptureService(environment: environment))
+      screen.draft = "/screen keep this question"
+      _ = await screen.capture(submittedCommand: true)
+      XCTAssertEqual(screen.needsScreenRecordingSettings, failure == .permissionDenied || failure == .restartRequired)
+      XCTAssertEqual(screen.draft, "/screen keep this question")
+      XCTAssertNil(screen.attachment)
+    }
   }
 
   func testCancellationPreservesDraftAndPreviousAttachment() async throws {

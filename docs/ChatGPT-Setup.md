@@ -25,3 +25,25 @@ Automated tests mock the JSON-RPC boundary and cover account-type checks, OAuth 
 Manual check: sign in, send a short Cloud message, stop a second response, restart the app and verify the account is restored, then sign out and verify Cloud sending is disabled. Confirm Local mode still works offline. Browser authentication requires the user's participation.
 
 Official references: [Codex authentication](https://learn.chatgpt.com/docs/auth), [App Server protocol](https://learn.chatgpt.com/docs/app-server), and [credential/configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+
+## Connect during welcome setup
+
+The Connections step now uses the same ChatGPT sign-in controls as Settings:
+Sign in with ChatGPT starts Codex authentication, shows progress and Cancel,
+reports errors, and displays the connected account. If Codex is missing, the
+installation link and Check Sign-in Status remain available. Setup does not
+start sign-in without a click.
+
+Brave Search has a Get Brave API key link beside a secure key field and Save key
+button. Saving uses the existing Keychain store and clears the field on success;
+the status distinguishes a saved key from a tested connection. Both connections
+are optional. Settings and setup also expose Mac permission controls.
+
+![Connections during setup](images/setup-connections.png)
+
+![Permissions at the top of Settings](images/settings-permissions.png)
+
+Chat permission failures offer direct System Settings buttons. Cloud screenshot
+consent can be reviewed in chat, and connection/settings buttons open Cloud &
+Search directly. Existing draft and screenshot content is retained on denial.
